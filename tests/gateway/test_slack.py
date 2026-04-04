@@ -1035,6 +1035,49 @@ class TestSlashCommands:
 
 
 # ---------------------------------------------------------------------------
+# TestSlackNotifyMention
+# ---------------------------------------------------------------------------
+
+
+class TestSlackNotifyMention:
+    """Optional <@U> prefix so Slack treats bot replies as highlight notifications."""
+
+    @pytest.mark.asyncio
+    async def test_dm_reply_prefixes_user_mention(self, adapter, monkeypatch):
+        monkeypatch.setenv("SLACK_NOTIFY_WITH_USER_MENTION", "true")
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "1"})
+        await adapter.send(
+            "D01DM",
+            "hello",
+            metadata={"source_user_id": "U_OP", "source_chat_type": "dm"},
+        )
+        kw = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert kw["text"].startswith("<@U_OP>")
+
+    @pytest.mark.asyncio
+    async def test_notify_disabled_no_prefix(self, adapter, monkeypatch):
+        monkeypatch.setenv("SLACK_NOTIFY_WITH_USER_MENTION", "false")
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "1"})
+        await adapter.send(
+            "D01DM",
+            "hello",
+            metadata={"source_user_id": "U_OP", "source_chat_type": "dm"},
+        )
+        kw = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert kw["text"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_home_channel_prefix_from_allowlist(self, adapter, monkeypatch):
+        monkeypatch.setenv("SLACK_NOTIFY_WITH_USER_MENTION", "true")
+        monkeypatch.setenv("SLACK_HOME_CHANNEL", "D0HOME")
+        monkeypatch.setenv("SLACK_ALLOWED_USERS", "U_FIRST,U_SECOND")
+        adapter._app.client.chat_postMessage = AsyncMock(return_value={"ts": "1"})
+        await adapter.send("D0HOME", "cron output", metadata=None)
+        kw = adapter._app.client.chat_postMessage.call_args.kwargs
+        assert kw["text"].startswith("<@U_FIRST>")
+
+
+# ---------------------------------------------------------------------------
 # TestMessageSplitting
 # ---------------------------------------------------------------------------
 

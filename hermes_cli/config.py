@@ -524,7 +524,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 11,
+    "_config_version": 12,
 }
 
 # =============================================================================
@@ -540,6 +540,7 @@ ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
         "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"],
     10: ["TAVILY_API_KEY"],
     11: ["TERMINAL_MODAL_MODE"],
+    12: ["SLACK_NOTIFY_WITH_USER_MENTION", "SLACK_NOTIFY_USER_ID"],
 }
 
 # Required environment variables with metadata for migration prompts.
@@ -946,6 +947,22 @@ OPTIONAL_ENV_VARS = {
         "prompt": "Slack app configuration token (xoxe...)",
         "url": "https://api.slack.com/apps",
         "password": True,
+        "category": "messaging",
+    },
+    "SLACK_NOTIFY_WITH_USER_MENTION": {
+        "description": "When true (default), prepend <@user> to Slack DM replies and to posts to "
+                       "SLACK_HOME_CHANNEL so mobile/desktop treat them as @mention notifications.",
+        "prompt": "Slack notify with user mention (true/false)",
+        "url": None,
+        "password": False,
+        "category": "messaging",
+    },
+    "SLACK_NOTIFY_USER_ID": {
+        "description": "Optional Slack Member ID to @mention on SLACK_HOME_CHANNEL deliveries when "
+                       "no conversation metadata exists (e.g. cron). If unset, first SLACK_ALLOWED_USERS id is used.",
+        "prompt": "Slack notify user id (U…)",
+        "url": None,
+        "password": False,
         "category": "messaging",
     },
     "MATTERMOST_URL": {

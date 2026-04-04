@@ -387,6 +387,29 @@ Make sure the bot has been **invited to the channel** (`/invite @Hermes Agent`).
 
 ---
 
+## Push notifications for bot replies
+
+Slack often **does not push-notify** for plain bot messages in DMs, even when your prefs say “all messages.” Hermes can prepend a **user mention** (`<@U…>`) to outbound text so Slack classifies the message as an **@mention** (which respects your mention notification settings).
+
+**Default behavior (recommended):** enabled. Applies to:
+
+- Replies in **DMs** / group DMs (`chat_type` = `dm`) — mentions the member who messaged the bot (first chunk only).
+- Messages sent to **`SLACK_HOME_CHANNEL`** (e.g. cron output to your bot DM) — mentions **`SLACK_NOTIFY_USER_ID`** if set, otherwise the **first** id in **`SLACK_ALLOWED_USERS`**.
+
+Disable if you dislike the visible `@you` prefix:
+
+```bash
+SLACK_NOTIFY_WITH_USER_MENTION=false
+```
+
+Override who gets mentioned for home-channel-only traffic:
+
+```bash
+SLACK_NOTIFY_USER_ID=U01ABCDEF12
+```
+
+---
+
 ## Multi-Workspace Support
 
 Hermes can connect to **multiple Slack workspaces** simultaneously using a single gateway instance. Each workspace is authenticated independently with its own bot user ID.

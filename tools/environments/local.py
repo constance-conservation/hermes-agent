@@ -96,6 +96,8 @@ def _build_provider_env_blocklist() -> frozenset:
         "SLACK_HOME_CHANNEL",
         "SLACK_HOME_CHANNEL_NAME",
         "SLACK_ALLOWED_USERS",
+        "SLACK_NOTIFY_WITH_USER_MENTION",
+        "SLACK_NOTIFY_USER_ID",
         "WHATSAPP_ENABLED",
         "WHATSAPP_MODE",
         "WHATSAPP_ALLOWED_USERS",

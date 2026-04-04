@@ -171,6 +171,8 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `SLACK_ALLOWED_USERS` | Comma-separated Slack user IDs |
 | `SLACK_HOME_CHANNEL` | Default Slack channel for cron delivery |
 | `SLACK_HOME_CHANNEL_NAME` | Display name for the Slack home channel |
+| `SLACK_NOTIFY_WITH_USER_MENTION` | Prepend `<@U…>` on DM/home posts for Slack push notifications (`true`/`false`, default `true`) |
+| `SLACK_NOTIFY_USER_ID` | Member ID to mention on `SLACK_HOME_CHANNEL` when metadata has no user (optional; else first `SLACK_ALLOWED_USERS`) |
 | `WHATSAPP_ENABLED` | Enable the WhatsApp bridge (`true`/`false`) |
 | `WHATSAPP_MODE` | `bot` (separate number) or `self-chat` (message yourself) |
 | `WHATSAPP_ALLOWED_USERS` | Comma-separated phone numbers (with country code, no `+`), or `*` to allow all senders |

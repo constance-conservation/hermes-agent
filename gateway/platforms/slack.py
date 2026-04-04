@@ -383,6 +383,43 @@ class SlackAdapter(BasePlatformAdapter):
             return self._team_clients[team_id]
         return self._app.client  # fallback to primary
 
+    def _slack_notify_mention_prefix(
+        self,
+        chat_id: str,
+        metadata: Optional[Dict[str, Any]],
+        *,
+        chunk_index: int,
+    ) -> str:
+        """Prefix outgoing text with <@U…> so Slack treats the post as a highlight (push).
+
+        Plain bot posts in IMs often do not respect \"all messages\" notification prefs;
+        a user mention triggers the same path as @mentions.
+        """
+        if chunk_index != 0:
+            return ""
+        flag = os.getenv("SLACK_NOTIFY_WITH_USER_MENTION", "true").lower()
+        if flag in ("0", "false", "no", "off"):
+            return ""
+        meta = metadata or {}
+        uid = (meta.get("source_user_id") or "").strip()
+        chat_type = (meta.get("source_chat_type") or "").strip().lower()
+        mention = ""
+        if uid and chat_type == "dm":
+            mention = f"<@{uid}> "
+        if not mention:
+            home = os.getenv("SLACK_HOME_CHANNEL", "").strip()
+            if home and str(chat_id) == home:
+                notify_uid = os.getenv("SLACK_NOTIFY_USER_ID", "").strip()
+                if not notify_uid:
+                    raw = os.getenv("SLACK_ALLOWED_USERS", "").strip()
+                    if raw and raw != "*":
+                        notify_uid = raw.split(",")[0].strip()
+                if notify_uid:
+                    mention = f"<@{notify_uid}> "
+        if not mention:
+            return ""
+        return mention
+
     async def send(
         self,
         chat_id: str,
@@ -409,9 +446,15 @@ class SlackAdapter(BasePlatformAdapter):
             broadcast = self.config.extra.get("reply_broadcast", False)
 
             for i, chunk in enumerate(chunks):
+                text_out = chunk
+                prefix = self._slack_notify_mention_prefix(chat_id, metadata, chunk_index=i)
+                if prefix:
+                    stripped = text_out.lstrip()
+                    if not stripped.startswith("<@"):
+                        text_out = prefix + text_out
                 kwargs = {
                     "channel": chat_id,
-                    "text": chunk,
+                    "text": text_out,
                 }
                 if thread_ts:
                     kwargs["thread_ts"] = thread_ts

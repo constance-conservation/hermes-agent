@@ -432,6 +432,18 @@ class BasePlatformAdapter(ABC):
         # Chats where auto-TTS on voice input is disabled (set by /voice off)
         self._auto_tts_disabled_chats: set = set()
 
+    @staticmethod
+    def outbound_reply_metadata(event: "MessageEvent") -> Optional[Dict[str, Any]]:
+        """Metadata for outbound sends (thread + recipient hints for adapters)."""
+        d: Dict[str, Any] = {}
+        if event.source.thread_id:
+            d["thread_id"] = event.source.thread_id
+        if event.source.user_id:
+            d["source_user_id"] = event.source.user_id
+        if event.source.chat_type:
+            d["source_chat_type"] = event.source.chat_type
+        return d if d else None
+
     @property
     def has_fatal_error(self) -> bool:
         return self._fatal_error_message is not None
@@ -1097,7 +1109,7 @@ class BasePlatformAdapter(ABC):
         self._active_sessions[session_key] = interrupt_event
         
         # Start continuous typing indicator (refreshes every 2 seconds)
-        _thread_metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+        _thread_metadata = self.outbound_reply_metadata(event)
         typing_task = asyncio.create_task(self._keep_typing(event.source.chat_id, metadata=_thread_metadata))
         
         try:
@@ -1302,7 +1314,7 @@ class BasePlatformAdapter(ABC):
             try:
                 error_type = type(e).__name__
                 error_detail = str(e)[:300] if str(e) else "no details available"
-                _thread_metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+                _thread_metadata = self.outbound_reply_metadata(event)
                 await self.send(
                     chat_id=event.source.chat_id,
                     content=(
