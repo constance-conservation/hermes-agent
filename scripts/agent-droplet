@@ -7,12 +7,17 @@
 # HERMES_DROPLET_INTERACTIVE=1 lets ssh_droplet pass its TTY check when stdin is not a TTY (IDE);
 # the SSH key still needs its passphrase because ssh uses IdentityAgent=none (see ssh_droplet.sh).
 # Default HERMES_HOME is the chief-orchestrator profile (TUI prompt shows profile name).
+#
+# Always clear HERMES_DROPLET_ALLOW_ENV_PASSPHRASE here: if it is set in the parent shell (e.g. from
+# automation), `hermes … droplet` would otherwise unlock the key from ~/.env without typing.
+# Headless CI may still run scripts/ssh_droplet.sh directly with that var set to 1.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
 RUNTIME_USER="${AGENT_DROPLET_RUNTIME_USER:-hermesuser}"
 HH=$(printf '%q' "${AGENT_DROPLET_RUNTIME_HOME:-/home/hermesuser/.hermes/profiles/chief-orchestrator}")
 REPO_Q=$(printf '%q' "${AGENT_DROPLET_REPO:-/home/hermesuser/hermes-agent}")
+unset HERMES_DROPLET_ALLOW_ENV_PASSPHRASE 2>/dev/null || true
 export HERMES_DROPLET_INTERACTIVE=1
 cmd="export HERMES_HOME=${HH}; cd ${REPO_Q} && exec ./venv/bin/python -m hermes_cli.main"
 for a in "$@"; do
