@@ -1040,29 +1040,33 @@ Run periodic pruning and periodic security reviews so the system does not bloat 
 
 ---
 
-## Step 15 — VPS path only: droplet-suffixed operator CLI on the workstation
+## Step 15 — VPS path only: one-line `agent-droplet` alias on the workstation
 
-**When to apply:** You are operating a **remote VPS runtime** (SSH to a dedicated account, policy materialization under that account’s profile directory, long-lived gateway under that account) **and** you want **one-command access from your laptop** without typing SSH flags, remote paths, or `HERMES_HOME` each time.
+**When to apply:** You use a **remote VPS runtime** and want the same operator CLI on the server without typing SSH options, remote paths, or profile env vars each time.
 
-**When to skip:** Single-machine or local-only setups — keep using the CLI normally with no suffix.
+**When to skip:** Local-only setups — use the CLI normally.
 
-### What to install
+**Workstation prerequisites:** The same credential file your SSH helper already uses (e.g. key, passphrase, port, host, sudo password for the runtime user) must exist; see `scripts/ssh_droplet.sh`.
 
-1. On the **workstation**, keep the same SSH credential bundle you already use for the VPS (key, passphrase, port, host, sudo password for stepping down to the runtime user) in a **single env file** the automation can read line-by-line (do not rely on `source` if values contain unquoted spaces).
+**Exact setup (one line):** add this alias. The name ends with `-droplet`; replace `agent` with whatever your installed CLI is called if you prefer (e.g. `hermes-droplet`).
 
-2. From the **agent repository checkout** on the workstation, **source** `scripts/source_droplet_agent_cli.sh` after setting **`AGENT_DROPLET_ENABLE=1`** or **`AGENT_VPS_PATH=1`**.
+```bash
+alias agent-droplet='$PWD/scripts/agent-droplet'
+```
 
-   - Optional: set **`AGENT_CLI_NAME`** to match the name of your installed CLI binary (default assumes the common short name). The script then defines:
-     - **`<name>-droplet`** — forwards **all** trailing arguments to the **same** CLI entrypoint on the VPS (under the runtime user, correct repo `venv`, and `HERMES_HOME` on the server). No extra SSH arguments are required at invocation time.
-     - **`<name>-tui-droplet`**, **`<name>-setup-droplet`**, **`<name>-gateway-droplet`**, **`<name>-doctor-droplet`**, **`<name>-watchdog-check-droplet`** — convenience aliases so the **`-droplet` suffix is at the end of the command name** (equivalent to `<name>-droplet tui`, `<name>-droplet setup`, etc.).
+- This repository’s **`.envrc`** already contains **only** that line after `use flake`. Run **`direnv allow`** once in the clone.
+- **Without** direnv, add the same line to `~/.zshrc` / `~/.bashrc` **from inside the repository** the first time, **or** use one fixed path, e.g. `alias agent-droplet='/Users/you/hermes-agent/scripts/agent-droplet'`.
+- If your shell does not pick up an alias from `.envrc`, put that **same** one line in `~/.zshrc` / `~/.bashrc` with the **absolute** path to `scripts/agent-droplet` (no `$PWD`).
 
-3. Override server paths only if your layout differs: **`AGENT_DROPLET_RUNTIME_USER`**, **`AGENT_DROPLET_RUNTIME_HOME`**, **`AGENT_DROPLET_REPO`**.
+**Usage:** pass the same subcommands and flags you would run locally; nothing else is required.
 
-4. **Disable** this layer when not on the VPS path: unset the enable flags or set **`AGENT_DROPLET_DISABLE=1`** before sourcing (see repository `.envrc` pattern).
+```text
+agent-droplet tui
+agent-droplet setup
+agent-droplet gateway watchdog-check
+```
 
-### Relation to policy materialization
-
-Run **`policies/core/scripts/start_pipeline.py`** (or the repository materialize helper) **before** relying on remote sessions to pick up new policy trees. The droplet-suffixed commands only change **where** the CLI runs; they do not replace pipeline materialization on the server.
+**Policy materialization:** run **`policies/core/scripts/start_pipeline.py`** (or your materialize helper) on the server before expecting updated policy trees; the alias only changes **where** the CLI runs.
 
 ---
 

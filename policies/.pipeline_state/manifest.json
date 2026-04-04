@@ -63,7 +63,7 @@
     "core/scripts/verify_policy_tree.py": "f98abb1d066c91d1853761c9fa43bf38b6a1b55cb778fa267f95249a08e60419",
     "core/security-first-setup.md": "bf95f99fec10fffbabc6a1c90f623c97cce7a837c0a629b82365bdad52bc5d91",
     "core/security-prompts.md": "af3b189181d8a1b4ee21f6244106371c2e2de1d9951c6f2cfe77a7a0824d1faf",
-    "core/unified-deployment-and-security.md": "b574f474cbcb2294dd7db5916f6d40f91f3322aa4c79d8e772bec199dff9d1d1"
+    "core/unified-deployment-and-security.md": "0b825f907def24a5392dcf5590040a117e317e35b17a435aa7f0f89490628bbc"
   },
   "version": 1
 }
