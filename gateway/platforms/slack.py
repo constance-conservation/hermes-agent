@@ -203,9 +203,11 @@ class SlackAdapter(BasePlatformAdapter):
                     bot_name, team_name, team_id,
                 )
 
-            # Register message event handler
-            @self._app.event("message")
-            async def handle_message_event(body, event, say):
+            # Primary: Bolt's app.message path (keyword "" = match all text) wires the
+            # same subtype handling Slack documents for message events (file_share,
+            # thread_broadcast, etc.). Fallback: raw event("message") so uncommon
+            # subtypes still reach Hermes. Duplicate deliveries dedupe on team/channel/ts.
+            async def _route_incoming_slack_message(body, event, say):
                 normalized = _normalize_slack_socket_event(body, event)
                 if not normalized:
                     logger.warning(
@@ -216,6 +218,11 @@ class SlackAdapter(BasePlatformAdapter):
                     )
                     return
                 await self._handle_slack_message(normalized)
+
+            # Statement registration (not @-decorators): a @ line would attach to the
+            # next function definition (e.g. app_mention), breaking Bolt wiring.
+            self._app.message("")(_route_incoming_slack_message)
+            self._app.event("message")(_route_incoming_slack_message)
 
             # Slack often delivers app_mention for @bot in channels. Some workspaces
             # or product configurations surface app_mention without a parallel

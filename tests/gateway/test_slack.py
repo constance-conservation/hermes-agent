@@ -146,12 +146,13 @@ class TestAppMentionHandler:
     """Verify that the app_mention event handler is registered."""
 
     def test_app_mention_registered_on_connect(self):
-        """connect() should register both 'message' and 'app_mention' handlers."""
+        """connect() should register message(), app_mention, and /hermes."""
         config = PlatformConfig(enabled=True, token="xoxb-fake")
         adapter = SlackAdapter(config)
 
         # Track which events get registered
         registered_events = []
+        registered_message_keywords = []
         registered_commands = []
 
         mock_app = MagicMock()
@@ -162,6 +163,12 @@ class TestAppMentionHandler:
                 return fn
             return decorator
 
+        def mock_message(keyword=""):
+            def decorator(fn):
+                registered_message_keywords.append(keyword)
+                return fn
+            return decorator
+
         def mock_command(cmd):
             def decorator(fn):
                 registered_commands.append(cmd)
@@ -169,6 +176,7 @@ class TestAppMentionHandler:
             return decorator
 
         mock_app.event = mock_event
+        mock_app.message = mock_message
         mock_app.command = mock_command
         mock_app.client = AsyncMock()
         mock_app.client.auth_test = AsyncMock(return_value={
@@ -193,6 +201,7 @@ class TestAppMentionHandler:
              patch("asyncio.create_task"):
             asyncio.run(adapter.connect())
 
+        assert "" in registered_message_keywords
         assert "message" in registered_events
         assert "app_mention" in registered_events
         assert "/hermes" in registered_commands
