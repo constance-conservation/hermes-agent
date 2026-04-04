@@ -2062,3 +2062,13 @@ def gateway_command(args):
                 print("  hermes gateway          # Run in foreground")
                 print("  hermes gateway install  # Install as user service")
                 print("  sudo hermes gateway install --system  # Install as boot-time system service")
+
+    elif subcmd == "watchdog-check":
+        from gateway.status import runtime_status_watchdog_healthy
+
+        ok, reason = runtime_status_watchdog_healthy()
+        if ok:
+            print(reason)
+            return
+        print(reason, file=sys.stderr)
+        sys.exit(1)

@@ -62,6 +62,7 @@ _slack_mod.SLACK_AVAILABLE = True
 from gateway.platforms.slack import (  # noqa: E402
     SlackAdapter,
     _normalize_slack_socket_event,
+    _slack_aggregate_visible_text,
 )
 
 
@@ -136,6 +137,54 @@ class TestNormalizeSlackSocketEvent:
         out = _normalize_slack_socket_event(body, None)
         assert out["text"] == "hi"
         assert out["team"] == "T_BODY"
+
+
+class TestSlackAggregateVisibleText:
+    def test_collects_mrkdwn_from_blocks_when_text_empty(self):
+        ev = {
+            "text": "",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "hi <@U0BOT|hermes> there"},
+                }
+            ],
+        }
+        agg = _slack_aggregate_visible_text(ev)
+        assert "<@U0BOT|hermes>" in agg
+
+    def test_plain_text_type_in_blocks(self):
+        ev = {
+            "text": "",
+            "blocks": [
+                {"type": "section", "text": {"type": "plain_text", "text": "plain"}}
+            ],
+        }
+        assert "plain" in _slack_aggregate_visible_text(ev)
+
+    @pytest.mark.asyncio
+    async def test_channel_message_with_labelled_mention_in_blocks(self, adapter):
+        """`<@U|label>` must count as a mention (plain `<@U>` substring misses it)."""
+        adapter._team_bot_user_ids = {"T1": "U0BOT"}
+        adapter._add_reaction = AsyncMock(return_value=True)
+        adapter._remove_reaction = AsyncMock(return_value=True)
+        adapter._resolve_user_name = AsyncMock(return_value="alice")
+        event = {
+            "user": "U1",
+            "channel": "C1",
+            "ts": "1.0",
+            "team": "T1",
+            "channel_type": "channel",
+            "text": "",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "<@U0BOT|hermes> hello"},
+                }
+            ],
+        }
+        await adapter._handle_slack_message(event)
+        adapter.handle_message.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

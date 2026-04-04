@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from slack_bolt.async_app import AsyncApp
@@ -80,6 +80,38 @@ def _normalize_slack_socket_event(body: Any, event: Any) -> Dict[str, Any]:
     if team and not out.get("team"):
         out["team"] = team
     return out
+
+
+def _slack_aggregate_visible_text(event: dict) -> str:
+    """Combine top-level ``text`` with Block Kit plain_text / mrkdwn strings.
+
+    Some clients leave ``text`` empty while @mentions live only under
+    ``blocks``; channel mention-gating would otherwise drop the message.
+    """
+    chunks: List[str] = []
+    t = event.get("text")
+    if isinstance(t, str) and t.strip():
+        chunks.append(t)
+
+    def walk(obj: Any, depth: int = 0) -> None:
+        if depth > 28:
+            return
+        if isinstance(obj, dict):
+            if obj.get("type") in ("plain_text", "mrkdwn"):
+                tx = obj.get("text")
+                if isinstance(tx, str) and tx.strip():
+                    chunks.append(tx)
+            for v in obj.values():
+                walk(v, depth + 1)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item, depth + 1)
+
+    blocks = event.get("blocks")
+    if isinstance(blocks, list):
+        walk(blocks, 0)
+
+    return " ".join(chunks)
 
 
 def check_slack_requirements() -> bool:
@@ -806,7 +838,13 @@ class SlackAdapter(BasePlatformAdapter):
         if subtype in ("message_changed", "message_deleted"):
             return
 
-        text = event.get("text", "")
+        raw_text = event.get("text", "") or ""
+        if not isinstance(raw_text, str):
+            raw_text = str(raw_text)
+        aggregated = _slack_aggregate_visible_text(event)
+        mention_haystack = aggregated if aggregated.strip() else raw_text
+
+        text = raw_text
         user_id = event.get("user", "")
         channel_id = event.get("channel", "")
         ts = event.get("ts", "")
@@ -864,10 +902,21 @@ class SlackAdapter(BasePlatformAdapter):
             and str(thread_ts_val) != str(event_ts)
         )
         if not is_dm and bot_uid and not in_thread_reply:
-            if f"<@{bot_uid}>" not in text:
+            # Slack may send `<@U123>` or `<@U123|displayname>` — substring
+            # `in "<@U123>"` misses the latter.
+            _mention_re = re.compile(
+                rf"<@{re.escape(bot_uid)}(\|[^>]+)?>",
+                re.IGNORECASE,
+            )
+            if not _mention_re.search(mention_haystack):
+                logger.debug(
+                    "[Slack] ignoring channel message (no bot mention in text/blocks) channel=%s",
+                    channel_id,
+                )
                 return
-            # Strip the bot mention from the text
-            text = text.replace(f"<@{bot_uid}>", "").strip()
+            # Strip the bot mention from visible text (blocks or top-level)
+            base = raw_text.strip() or aggregated
+            text = _mention_re.sub("", base).strip()
 
         # Determine message type
         msg_type = MessageType.TEXT

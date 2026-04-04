@@ -226,6 +226,38 @@ def read_runtime_status() -> Optional[dict[str, Any]]:
     return _read_json_file(_get_runtime_status_path())
 
 
+def runtime_status_watchdog_healthy(
+    payload: Optional[dict[str, Any]] = None,
+) -> tuple[bool, str]:
+    """Return ``(ok, reason)`` for external process watchdogs.
+
+    A gateway may keep Slack (or Telegram) online while WhatsApp is
+    reconnecting. Requiring *every* platform row to be ``connected`` causes
+    unnecessary ``hermes gateway run --replace`` restarts that tear down
+    healthy adapters.
+
+    Healthy when ``gateway_state`` is ``running`` and **at least one**
+    platform reports ``state == "connected"``.
+    """
+    if payload is None:
+        payload = read_runtime_status()
+    if not payload:
+        return False, "missing gateway_state.json"
+    if payload.get("gateway_state") != "running":
+        return False, f"gateway_state={payload.get('gateway_state')!r}"
+    platforms = payload.get("platforms") or {}
+    if not platforms:
+        return False, "no platform statuses present"
+    connected = [
+        name
+        for name, pdata in platforms.items()
+        if isinstance(pdata, dict) and pdata.get("state") == "connected"
+    ]
+    if connected:
+        return True, f"ok connected={','.join(sorted(connected))}"
+    return False, "no platform reports state=connected"
+
+
 def remove_pid_file() -> None:
     """Remove the gateway PID file if it exists."""
     try:

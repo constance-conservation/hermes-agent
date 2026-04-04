@@ -155,3 +155,29 @@ class TestScopedLocks:
 
         status.release_scoped_lock("telegram-bot-token", "secret")
         assert not lock_path.exists()
+
+
+class TestRuntimeWatchdogHealthy:
+    def test_ok_when_one_platform_connected_despite_other_fatal(self):
+        payload = {
+            "gateway_state": "running",
+            "platforms": {
+                "slack": {"state": "connected"},
+                "whatsapp": {"state": "fatal", "error_code": "whatsapp_bridge_exited"},
+            },
+        }
+        ok, reason = status.runtime_status_watchdog_healthy(payload)
+        assert ok is True
+        assert "slack" in reason
+
+    def test_fail_when_none_connected(self):
+        payload = {
+            "gateway_state": "running",
+            "platforms": {
+                "slack": {"state": "reconnecting"},
+                "whatsapp": {"state": "fatal"},
+            },
+        }
+        ok, reason = status.runtime_status_watchdog_healthy(payload)
+        assert ok is False
+        assert "no platform" in reason

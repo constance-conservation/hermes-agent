@@ -750,6 +750,22 @@ class GatewayRunner:
                 self.adapters.pop(adapter.platform, None)
                 self.delivery_router.adapters = self.adapters
 
+        # Mark retryable failures as reconnecting in gateway_state.json so
+        # naive watchdogs that require every platform to be "connected" do not
+        # restart the whole gateway while Slack/Telegram are still healthy.
+        if adapter.fatal_error_retryable:
+            try:
+                from gateway.status import write_runtime_status
+
+                write_runtime_status(
+                    platform=adapter.platform.value,
+                    platform_state="reconnecting",
+                    error_code=adapter.fatal_error_code,
+                    error_message=(adapter.fatal_error_message or "")[:500],
+                )
+            except Exception:
+                pass
+
         # Queue retryable failures for background reconnection
         if adapter.fatal_error_retryable:
             platform_config = self.config.platforms.get(adapter.platform)

@@ -3987,6 +3987,11 @@ For more help on a command:
     gateway_status = gateway_subparsers.add_parser("status", help="Show gateway status")
     gateway_status.add_argument("--deep", action="store_true", help="Deep status check")
     gateway_status.add_argument("--system", action="store_true", help="Target the Linux system-level gateway service")
+
+    gateway_subparsers.add_parser(
+        "watchdog-check",
+        help="Exit 0 if gateway_state.json shows running + ≥1 platform connected (for external watchdogs)",
+    )
     
     # gateway install
     gateway_install = gateway_subparsers.add_parser("install", help="Install gateway as service")
