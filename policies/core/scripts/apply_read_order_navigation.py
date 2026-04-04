@@ -27,6 +27,7 @@ READ_ORDER_SEQUENCE: tuple[str, ...] = (
     "core/firewall-exceptions-workflow.md",
     "core/unified-deployment-and-security.md",
     "core/deployment-handoff.md",
+    "core/gateway-watchdog.md",
     "core/README.md",
     "core/agentic-company-deployment-pack.md",
     "core/global-agentic-company-deployment-policy.md",
@@ -75,6 +76,7 @@ READ_ORDER_SEQUENCE: tuple[str, ...] = (
     "core/governance/generated/by_role/README.md",
     "core/governance/generated/by_role/_TEMPLATE/README.md",
     "core/governance/generated/by_role/examples/README.md",
+    "core/governance/generated/playbooks/slack-department-project-task-routing.md",
     "core/scripts/README.md",
     "INDEX.md",
 )

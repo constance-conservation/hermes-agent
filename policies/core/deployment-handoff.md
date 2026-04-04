@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 4 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Governance read order** — step 4 of 56 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
 > **Before this file:** read [core/unified-deployment-and-security.md](unified-deployment-and-security.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -46,6 +46,8 @@ Use this order:
 7. the remaining attached agent markdown files referenced by `BOOTSTRAP.md` and `AGENTS.md` (paths under `policies/core/runtime/agent/` in this repository)
 
 Do not skip `BOOTSTRAP.md`. It is required because it instigates and explains use of the full agent markdown pack.
+
+For **Hermes Agent** deployments that rely on the **messaging gateway** in production (always-on process, external users on Slack/Telegram/etc.), read [`gateway-watchdog.md`](gateway-watchdog.md) **after** this handoff — it states policy for gateway uptime, `watchdog-check`, and automated recovery (`doctor --fix`), with the user-facing runbook linked from that file.
 
 ---
 
@@ -357,5 +359,5 @@ Use this order:
 17. `AGENT_HOME/workspace/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime editable policy tree)
 
 <!-- policy-read-order-nav:bottom -->
-> **Next step:** continue to [core/README.md](README.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
+> **Next step:** continue to [core/gateway-watchdog.md](gateway-watchdog.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
 <!-- policy-read-order-nav:bottom-end -->

@@ -1,3 +1,9 @@
+<!-- policy-read-order-nav:top -->
+> **Governance read order** — step 54 of 56 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../../README.md)).
+> **Before this file:** read [core/governance/generated/by_role/examples/README.md](../by_role/examples/README.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
+> **This file:** safe to apply only after the prerequisite above (if any) is complete.
+<!-- policy-read-order-nav:top-end -->
+
 # Slack Department/Project/Task Routing Playbook
 
 Purpose: enforce a predictable collaboration shape in Slack:
@@ -56,3 +62,7 @@ Status: non-canonical generated playbook for operational use.
 - Project root message posted in that channel.
 - Thread reply posted with task metadata.
 - Follow-up task update appended in same thread.
+
+<!-- policy-read-order-nav:bottom -->
+> **Next step:** continue to [core/scripts/README.md](../../../scripts/README.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
+<!-- policy-read-order-nav:bottom-end -->

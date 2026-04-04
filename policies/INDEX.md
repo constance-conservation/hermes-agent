@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 54 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
+> **Governance read order** — step 56 of 56 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
 > **Before this file:** read [core/scripts/README.md](core/scripts/README.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -14,11 +14,13 @@ Paths are relative to the repository root.
 - `policies/core/chief-orchestrator-directive.md`
 - `policies/core/deployment-handoff.md`
 - `policies/core/firewall-exceptions-workflow.md`
+- `policies/core/gateway-watchdog.md`
 - `policies/core/global-agentic-company-deployment-policy.md`
 - `policies/core/governance/artifacts-and-archival-memory.md`
 - `policies/core/governance/generated/by_role/_TEMPLATE/README.md`
 - `policies/core/governance/generated/by_role/examples/README.md`
 - `policies/core/governance/generated/by_role/README.md`
+- `policies/core/governance/generated/playbooks/slack-department-project-task-routing.md`
 - `policies/core/governance/generated/README.md`
 - `policies/core/governance/role-prompts/agent-lifecycle-org-hygiene-controller.md`
 - `policies/core/governance/role-prompts/board-of-directors-review.md`

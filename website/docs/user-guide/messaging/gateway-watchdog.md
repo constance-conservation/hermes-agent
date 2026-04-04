@@ -65,6 +65,7 @@ Use both if you need automatic recovery without manual SSH.
 
 ## See also
 
+- **Policy layer (repository):** `policies/core/gateway-watchdog.md` — governance requirements for production messaging gateway uptime and recovery (read with the rest of `policies/`).
 - [Messaging Gateway overview](/docs/user-guide/messaging) — architecture and setup
 - [`hermes doctor`](/docs/reference/cli-commands#hermes-doctor) — diagnostics and `--fix`
 - [Gateway internals](/docs/developer-guide/gateway-internals) — code layout

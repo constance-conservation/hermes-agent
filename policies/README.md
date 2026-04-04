@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 8 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
+> **Governance read order** — step 9 of 56 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
 > **Before this file:** read [core/global-agentic-company-deployment-policy.md](core/global-agentic-company-deployment-policy.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -20,7 +20,7 @@ Read **top to bottom** within `core/`: siblings at the same depth are ordered by
 
 | Section | Path | Role |
 |---------|------|------|
-| **Runbooks & authority** | [`core/`](core/README.md) (root files: `security-first-setup.md`, `unified-deployment-and-security.md`, `deployment-handoff.md`, deployment packs, `pipeline-runbook.md`, activation prompts) | Trust boundaries, constitutional packs, pipeline entry, activation — **read first** within `core/`. |
+| **Runbooks & authority** | [`core/`](core/README.md) (root files: `security-first-setup.md`, `unified-deployment-and-security.md`, `deployment-handoff.md`, [`gateway-watchdog.md`](core/gateway-watchdog.md), deployment packs, `pipeline-runbook.md`, activation prompts) | Trust boundaries, constitutional packs, pipeline entry, messaging uptime policy, activation — **read first** within `core/`. |
 | **Runtime** | [`core/runtime/agent/`](core/runtime/agent/BOOTSTRAP.md) | Workspace agent pack (session behavior). |
 | **Governance** | [`core/governance/`](core/governance/artifacts-and-archival-memory.md) | Standards, role-prompts, generated markdown, artifacts/archival rules for `operations/`. |
 | **Tooling** | [`core/scripts/`](core/scripts/README.md) | Verify, index, pipeline — not policy prose. |
@@ -38,6 +38,7 @@ For runtime deployments, `operations/` should live under `AGENT_HOME/workspace/o
 | A1 | [`core/security-first-setup.md`](core/security-first-setup.md) | Workstation/VPS trust — **first** |
 | A2 | [`core/unified-deployment-and-security.md`](core/unified-deployment-and-security.md) | Unified deployment + security |
 | A3 | [`core/deployment-handoff.md`](core/deployment-handoff.md) | Builder/runtime handoff |
+| A3b | [`core/gateway-watchdog.md`](core/gateway-watchdog.md) | Messaging gateway uptime & recovery (watchdog / doctor) for production |
 | A4 | [`core/README.md`](core/README.md) | What lives in `core/` |
 | A5 | [`core/agentic-company-deployment-pack.md`](core/agentic-company-deployment-pack.md) | Constitutional pack |
 | A6 | [`core/global-agentic-company-deployment-policy.md`](core/global-agentic-company-deployment-policy.md) | Global deployment policy |

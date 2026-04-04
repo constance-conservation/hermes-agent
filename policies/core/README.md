@@ -1,6 +1,6 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 5 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
-> **Before this file:** read [core/deployment-handoff.md](deployment-handoff.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
+> **Governance read order** — step 6 of 56 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Before this file:** read [core/gateway-watchdog.md](gateway-watchdog.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
 
@@ -13,6 +13,7 @@ Everything substantive for the agentic company lives under **`policies/core/`**.
 | **First file to read (ever)** | [`security-first-setup.md`](security-first-setup.md) | Trust boundaries — **start here** |
 | Second runbook | [`unified-deployment-and-security.md`](unified-deployment-and-security.md) | Full deployment + security |
 | Handoff to builder/runtime | [`deployment-handoff.md`](deployment-handoff.md) | What to deploy next (not the pipeline script) |
+| Messaging gateway uptime (watchdog) | [`gateway-watchdog.md`](gateway-watchdog.md) | Policy for `watchdog-check`, `scripts/gateway-watchdog.sh`, doctor recovery — **after** handoff when deploying always-on messaging |
 | Map of this folder | **`README.md` (this file)** | Index + wiring |
 | Constitutional packs | [`agentic-company-deployment-pack.md`](agentic-company-deployment-pack.md) → [`global-agentic-company-deployment-policy.md`](global-agentic-company-deployment-policy.md) | Authority |
 | **Pipeline tooling only** (verify / `INDEX.md`) | [`pipeline-runbook.md`](pipeline-runbook.md) | How to run `python policies/core/scripts/start_pipeline.py` — read **after** runbooks + handoff when you need automation |
