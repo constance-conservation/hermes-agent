@@ -1,11 +1,22 @@
 # Governance context (agentic company policy pack)
 
-This file lives at `HERMES_HOME/.hermes.md`. Hermes loads it **in addition to** any project `.hermes.md` / `AGENTS.md` in the working directory, so policy paths stay visible when `MESSAGING_CWD` or the shell cwd is not the policy tree.
+This file lives at `HERMES_HOME/.hermes.md`. Hermes loads it **first** in project context (before cwd `.hermes.md` / `AGENTS.md`), so paths stay visible when `MESSAGING_CWD` or the shell cwd is not the policy tree.
 
-**Canonical policy bundle (read-mostly):** `HERMES_HOME/policies/` — full repository `policies/` tree materialized by `policies/core/scripts/start_pipeline.py`.
+## Where materialized files live (absolute paths on this host)
 
-**Runtime-editable copy + operations:** `HERMES_HOME/workspace/` — includes `workspace/policies/` (generated + runtime agent markdown) and `workspace/operations/` (org registers, `projects/` roots).
+- **Workspace root (start here for runtime pack):** `{{WORKSPACE_ROOT}}`
+  - **Bootstrap (read first among runtime files):** `{{WORKSPACE_ROOT}}/BOOTSTRAP.md`
+  - **Session / read order:** `{{WORKSPACE_ROOT}}/AGENTS.md`
+  - **Layout index:** `{{WORKSPACE_ROOT}}/WORKSPACE.md`
+  - **Operations registers:** `{{WORKSPACE_ROOT}}/operations/`
+  - **Nested editable policy tree (generated + full pack mirror):** `{{WORKSPACE_ROOT}}/policies/`
 
-**Read order:** start at `HERMES_HOME/policies/README.md`, then `HERMES_HOME/policies/core/security-first-setup.md`, then the governance read-order sequence in that tree.
+- **Canonical policy bundle (read-mostly, full repo `policies/` tree):** `{{POLICY_ROOT}}`
 
-For production messaging uptime, after deployment handoff see `HERMES_HOME/policies/core/gateway-watchdog.md` and `hermes gateway watchdog-check`.
+## How to use this with Hermes
+
+After the pipeline runs, Hermes injects this file plus (when present) the contents of `BOOTSTRAP.md` and `AGENTS.md` under the workspace root into the model context, so the agent knows where policies and runtime files are.
+
+**Governance read order** in the canonical tree: `{{POLICY_ROOT}}/README.md`, then `{{POLICY_ROOT}}/core/security-first-setup.md`, then the sequence in that tree.
+
+For production messaging uptime, see `{{POLICY_ROOT}}/core/gateway-watchdog.md` and run `hermes gateway watchdog-check`.

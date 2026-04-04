@@ -82,11 +82,15 @@ python policies/core/scripts/start_pipeline.py --init-operations
 3. **Writes** `policies/.pipeline_state/manifest.json` (gitignored) to detect future edits.
 4. **Materializes canonical runtime policies** under `AGENT_HOME/policies` when `--policy-root` (or `AGENT_POLICY_ROOT`) is provided.
 5. **Materializes runtime-editable outputs** under `AGENT_HOME/workspace` when `--workspace-root` (or `AGENT_WORKSPACE_ROOT`) is provided:
-   - `operations/` registers and project trees
-   - `policies/core/governance/generated/`
-   - `policies/core/runtime/agent/` pack
+   - **`operations/`** — registers and project trees (`init_operations_stubs.py`)
+   - **`policies/core/governance/generated/`** — generated governance markdown
+   - **`policies/core/runtime/agent/`** — nested copy of the runtime agent pack (same as repo layout)
+   - **Workspace root (flat)** — copies `BOOTSTRAP.md`, `AGENTS.md`, and the rest of the runtime pack `*.md` files to the **top level** of the workspace directory so operators and Hermes see entry points without deep paths; writes **`WORKSPACE.md`** describing these paths
+6. **`--write-governance-md PATH`** (optional) — renders `scripts/templates/hermes_home_governance.md` with `{{WORKSPACE_ROOT}}` and `{{POLICY_ROOT}}` filled in (e.g. set `PATH` to `$HERMES_HOME/.hermes.md` so the agent receives path wiring via `agent/prompt_builder.py`).
 
-**Tests:** `pytest tests/policies/test_policy_pipeline.py`
+For Hermes, use **`scripts/materialize_policies_into_hermes_home.sh`** after setting `HERMES_HOME`; it runs the pipeline with workspace + policy roots and governance stub generation.
+
+**Tests:** `pytest tests/agent/test_prompt_builder.py` (context loading); policy verification runs inside `start_pipeline.py`.
 
 **Full read sequence:** [`../README.md`](../README.md) (layer map & step tables) · scripts: [`scripts/README.md`](scripts/README.md).
 

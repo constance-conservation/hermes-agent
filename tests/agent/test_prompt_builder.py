@@ -684,6 +684,33 @@ class TestBuildContextFilesPrompt:
         result = build_context_files_prompt(cwd=str(proj))
         assert "Gov only." in result
 
+    def test_workspace_bootstrap_and_agents_injected(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        ws = hh / "workspace"
+        hh.mkdir()
+        ws.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (hh / ".hermes.md").write_text("Gov stub.")
+        (ws / "BOOTSTRAP.md").write_text("Bootstrap line.")
+        (ws / "AGENTS.md").write_text("Agents line.")
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        result = build_context_files_prompt(cwd=str(proj))
+        assert "Gov stub." in result
+        assert "Bootstrap line." in result
+        assert "Agents line." in result
+
+    def test_cwd_workspace_skips_duplicate_agents_md(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        ws = hh / "workspace"
+        hh.mkdir()
+        ws.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (ws / "BOOTSTRAP.md").write_text("B")
+        (ws / "AGENTS.md").write_text("Agents once.")
+        result = build_context_files_prompt(cwd=str(ws))
+        assert result.count("Agents once.") == 1
+
     def test_cursorrules_loads_when_only_option(self, tmp_path):
         """Cursorrules still loads when no higher-priority files exist."""
         (tmp_path / ".cursorrules").write_text("Use ESLint.")

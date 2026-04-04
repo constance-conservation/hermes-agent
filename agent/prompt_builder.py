@@ -785,6 +785,34 @@ def load_soul_md() -> Optional[str]:
         return None
 
 
+def _load_hermes_workspace_runtime_pack() -> str:
+    """BOOTSTRAP.md + AGENTS.md from ``HERMES_HOME/workspace/`` (materialized pack).
+
+    Loaded after ``HERMES_HOME/.hermes.md`` so the agent receives bootstrap and
+    session order when the policy pipeline has populated the workspace root.
+    """
+    workspace_root = get_hermes_home() / "workspace"
+    parts: list[str] = []
+    for name in ("BOOTSTRAP.md", "AGENTS.md"):
+        path = workspace_root / name
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            if not content:
+                continue
+            content = _strip_yaml_frontmatter(content)
+            content = _scan_context_content(content, name)
+            label = f"{name} (HERMES_HOME/workspace)"
+            parts.append(f"## {label}\n\n{content}")
+        except Exception as e:
+            logger.debug("Could not read workspace runtime file %s: %s", path, e)
+    if not parts:
+        return ""
+    combined = "\n\n".join(parts)
+    return _truncate_content(combined, "workspace-runtime-pack")
+
+
 def _load_hermes_home_governance_md() -> str:
     """Optional governance context at ``HERMES_HOME/.hermes.md``.
 
@@ -898,8 +926,9 @@ def _load_cursorrules(cwd_path: Path) -> str:
 def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = False) -> str:
     """Discover and load context files for the system prompt.
 
-    ``HERMES_HOME/.hermes.md`` (if present) is loaded first as governance context,
-    in addition to cwd-based project files below.
+    ``HERMES_HOME/.hermes.md`` (if present) is loaded first as governance context.
+    ``HERMES_HOME/workspace/{BOOTSTRAP,AGENTS}.md`` (if present) are loaded next.
+    Then cwd-based project files apply as below.
 
     Priority for *project* context (first found wins — only ONE type loaded):
       1. .hermes.md / HERMES.md  (walk to git root)
@@ -923,10 +952,21 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
     if governance:
         sections.append(governance)
 
+    workspace_pack = _load_hermes_workspace_runtime_pack()
+    if workspace_pack:
+        sections.append(workspace_pack)
+
+    workspace_root = get_hermes_home() / "workspace"
+    in_materialized_workspace = cwd_path == workspace_root.resolve()
+
     # Priority-based project context: first match wins
     project_context = (
         _load_hermes_md(cwd_path)
-        or _load_agents_md(cwd_path)
+        or (
+            ""
+            if in_materialized_workspace and workspace_pack
+            else _load_agents_md(cwd_path)
+        )
         or _load_claude_md(cwd_path)
         or _load_cursorrules(cwd_path)
     )
