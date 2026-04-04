@@ -59,7 +59,10 @@ _ensure_slack_mock()
 import gateway.platforms.slack as _slack_mod
 _slack_mod.SLACK_AVAILABLE = True
 
-from gateway.platforms.slack import SlackAdapter  # noqa: E402
+from gateway.platforms.slack import (  # noqa: E402
+    SlackAdapter,
+    _normalize_slack_socket_event,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +89,37 @@ def _redirect_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gateway.platforms.base.DOCUMENT_CACHE_DIR", tmp_path / "doc_cache"
     )
+
+
+# ---------------------------------------------------------------------------
+# TestNormalizeSlackSocketEvent
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSlackSocketEvent:
+    def test_backfills_team_from_body_team_id(self):
+        body = {"team_id": "T_ABC"}
+        event = {"text": "x", "user": "U1", "channel": "C1", "ts": "1"}
+        out = _normalize_slack_socket_event(body, event)
+        assert out["team"] == "T_ABC"
+
+    def test_preserves_existing_team(self):
+        body = {"team_id": "T_OTHER"}
+        event = {
+            "team": "T_ORIG",
+            "text": "x",
+            "user": "U1",
+            "channel": "C1",
+            "ts": "1",
+        }
+        out = _normalize_slack_socket_event(body, event)
+        assert out["team"] == "T_ORIG"
+
+    def test_authorizations_fallback(self):
+        body = {"authorizations": [{"team_id": "T_AUTH"}]}
+        event = {"text": "x", "user": "U1", "channel": "C1", "ts": "1"}
+        out = _normalize_slack_socket_event(body, event)
+        assert out["team"] == "T_AUTH"
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +520,48 @@ class TestMessageRouting:
         }
         await adapter._handle_slack_message(event)
         adapter.handle_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dm_processed_when_channel_type_missing(self, adapter):
+        """DMs should still work if channel_type is omitted but channel is a DM (D…)."""
+        event = {
+            "text": "hello",
+            "user": "U_USER",
+            "channel": "D0123456789",
+            "ts": "1234567890.000001",
+        }
+        await adapter._handle_slack_message(event)
+        adapter.handle_message.assert_called_once()
+        msg = adapter.handle_message.call_args[0][0]
+        assert msg.source.chat_type == "dm"
+
+    @pytest.mark.asyncio
+    async def test_dm_channel_type_case_insensitive(self, adapter):
+        """channel_type should be matched case-insensitively (Slack may send IM)."""
+        event = {
+            "text": "hello",
+            "user": "U_USER",
+            "channel": "D0123456789",
+            "channel_type": "IM",
+            "ts": "1234567890.000001",
+        }
+        await adapter._handle_slack_message(event)
+        adapter.handle_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_mpim_processed_without_mention(self, adapter):
+        """Multi-party DMs (mpim) must not require a bot mention."""
+        event = {
+            "text": "hello everyone",
+            "user": "U_USER",
+            "channel": "G0123456789",
+            "channel_type": "mpim",
+            "ts": "1234567890.000001",
+        }
+        await adapter._handle_slack_message(event)
+        adapter.handle_message.assert_called_once()
+        msg = adapter.handle_message.call_args[0][0]
+        assert msg.source.chat_type == "dm"
 
     @pytest.mark.asyncio
     async def test_channel_message_requires_mention(self, adapter):

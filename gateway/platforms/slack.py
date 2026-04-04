@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 try:
     from slack_bolt.async_app import AsyncApp
@@ -42,6 +42,33 @@ from gateway.platforms.base import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_slack_socket_event(body: Any, event: Any) -> Dict[str, Any]:
+    """Copy the inner message event and backfill fields Slack omits on Socket Mode.
+
+    Some payloads leave ``team`` off the inner ``event`` while the envelope still
+    carries ``team_id`` / ``authorizations[].team_id``. Without ``team``,
+    multi-workspace installs resolve the wrong ``bot_user_id`` and channel
+    messages are dropped (mention check uses the wrong id); DMs can also pick
+    the wrong WebClient when tokens differ per workspace.
+    """
+    if not isinstance(event, dict):
+        return {}
+    out = dict(event)
+    team = (out.get("team") or out.get("team_id") or "").strip()
+    if not team and isinstance(body, dict):
+        team = (body.get("team_id") or "").strip()
+        if not team:
+            for auth in body.get("authorizations") or []:
+                if isinstance(auth, dict):
+                    tid = (auth.get("team_id") or "").strip()
+                    if tid:
+                        team = tid
+                        break
+    if team and not out.get("team"):
+        out["team"] = team
+    return out
 
 
 def check_slack_requirements() -> bool:
@@ -154,8 +181,10 @@ class SlackAdapter(BasePlatformAdapter):
 
             # Register message event handler
             @self._app.event("message")
-            async def handle_message_event(event, say):
-                await self._handle_slack_message(event)
+            async def handle_message_event(body, event, say):
+                await self._handle_slack_message(
+                    _normalize_slack_socket_event(body, event)
+                )
 
             # Acknowledge app_mention events to prevent Bolt 404 errors.
             # The "message" handler above already processes @mentions in
@@ -730,8 +759,16 @@ class SlackAdapter(BasePlatformAdapter):
             self._channel_team[channel_id] = team_id
 
         # Determine if this is a DM or channel message
-        channel_type = event.get("channel_type", "")
-        is_dm = channel_type == "im"
+        channel_type = (event.get("channel_type") or "").strip().lower()
+        # "im" = 1:1 DM, "mpim" = multi-person DM (channel id is usually G…).
+        # Some Socket Mode payloads omit channel_type; 1:1 DM ids start with "D".
+        # Without treating these as conversation-DMs, we'd require an @mention
+        # that users rarely add in private chats.
+        is_dm = channel_type in ("im", "mpim") or (
+            not channel_type
+            and channel_id
+            and str(channel_id).upper().startswith("D")
+        )
 
         # Build thread_ts for session keying.
         # In channels: fall back to ts so each top-level @mention starts a
