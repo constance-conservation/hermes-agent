@@ -62,9 +62,11 @@ HOST="${SSH_TAILSCALE_IP:-${SSH_IP:?}}"
 # from the login keychain. AddKeysToAgent=no — never add this key to an agent mid-session.
 # Do not set PreferredAuthentications=publickey only: some sshd configs require publickey then
 # keyboard-interactive (PAM); restricting to publickey leaves auth stuck at "partial success".
+# ControlMaster=no / ControlPath=none — never reuse a ControlPersist socket; otherwise a second
+# `ssh` can attach without unlocking the key again (looks like "no passphrase").
 REMOTE_BASE=(
   ssh -o BatchMode=no -o IdentitiesOnly=yes -o IdentityAgent=none
-  -o AddKeysToAgent=no
+  -o AddKeysToAgent=no -o ControlMaster=no -o ControlPath=none
   -o StrictHostKeyChecking=accept-new
   -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4
   -i "$KEY_FILE" -p "${SSH_PORT:?}"

@@ -43,7 +43,7 @@ LU=$(printf '%q' "$LOGIN_TARGET")
 
 REMOTE_BASE=(
   ssh -t -o BatchMode=no -o IdentitiesOnly=yes -o IdentityAgent=none
-  -o AddKeysToAgent=no
+  -o AddKeysToAgent=no -o ControlMaster=no -o ControlPath=none
   -o StrictHostKeyChecking=accept-new
   -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4
   -i "$KEY_FILE" -p "${SSH_PORT:?}"

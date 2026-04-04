@@ -13,7 +13,7 @@ Usage::
     hermes profile create coder          # fresh profile + bundled skills
     hermes profile create coder --clone  # also copy config, .env, SOUL.md
     hermes profile create coder --clone-all  # full copy of source profile
-    coder chat                           # use via wrapper alias
+    coder chat                           # use via wrapper (~/.local/bin → venv python -m hermes_cli.main)
     hermes -p coder chat                 # or via flag
     hermes profile use coder             # set as sticky default
     hermes profile delete coder          # remove profile + alias + service
@@ -184,8 +184,8 @@ def check_alias_collision(name: str) -> Optional[str]:
             if existing_path == str(wrapper_dir / name):
                 try:
                     content = (wrapper_dir / name).read_text()
-                    if "hermes -p" in content:
-                        return None  # it's our wrapper, safe to overwrite
+                    if _is_our_profile_wrapper_content(content) or "exec hermes -p" in content:
+                        return None  # our wrapper (venv or legacy), safe to overwrite
                 except Exception:
                     pass
             return f"'{name}' conflicts with an existing command ({existing_path})"
@@ -201,11 +201,58 @@ def _is_wrapper_dir_in_path() -> bool:
     return wrapper_dir in os.environ.get("PATH", "").split(os.pathsep)
 
 
-def create_wrapper_script(name: str) -> Optional[Path]:
-    """Create a shell wrapper script at ~/.local/bin/<name>.
+def _is_our_profile_wrapper_content(content: str) -> bool:
+    """True if this file looks like a Hermes profile wrapper we manage."""
+    if "hermes_cli.main" in content and " -p " in content:
+        return True
+    # Legacy wrappers (pre-venv): `exec hermes -p …`
+    if "exec hermes -p" in content:
+        return True
+    return False
+
+
+def render_profile_wrapper_script(profile_name: str) -> str:
+    """Shell script body for ~/.local/bin/<command> profile aliases.
+
+    Always runs ``python -m hermes_cli.main`` from the repo virtualenv so the agent
+    does not pick up a global ``hermes`` install. Override paths with
+    ``HERMES_AGENT_REPO`` (default ``$HOME/hermes-agent``) or ``HERMES_VENV_PYTHON``.
+    """
+    validate_profile_name(profile_name)
+    # profile_name is validated [a-z0-9_-]+ — safe for POSIX sh single-quoted use;
+    # we still pass it as a literal argv to -p (no shell interpolation in -p value).
+    return f"""#!/bin/sh
+# Hermes profile wrapper — runs the checkout venv (see AGENTS.md Profiles).
+set -e
+_repo="${{HERMES_AGENT_REPO:-$HOME/hermes-agent}}"
+_py="${{HERMES_VENV_PYTHON:-$_repo/venv/bin/python}}"
+if [ ! -x "$_py" ]; then
+  echo "hermes: profile wrapper '{profile_name}': no Python at $_py" >&2
+  echo "hermes: set HERMES_AGENT_REPO to your hermes-agent directory, or HERMES_VENV_PYTHON to venv/bin/python" >&2
+  exit 127
+fi
+exec "$_py" -m hermes_cli.main -p {profile_name} "$@"
+"""
+
+
+def create_wrapper_script(
+    profile_name: str,
+    *,
+    command_name: Optional[str] = None,
+) -> Optional[Path]:
+    """Create a shell wrapper at ~/.local/bin/<command_name>.
+
+    Parameters
+    ----------
+    profile_name:
+        Profile passed to ``hermes -p`` (the Hermes instance to use).
+    command_name:
+        Filename under ~/.local/bin (default: same as *profile_name*).
 
     Returns the path to the created wrapper, or None if creation failed.
     """
+    validate_profile_name(profile_name)
+    cmd = command_name or profile_name
     wrapper_dir = _get_wrapper_dir()
     try:
         wrapper_dir.mkdir(parents=True, exist_ok=True)
@@ -213,9 +260,9 @@ def create_wrapper_script(name: str) -> Optional[Path]:
         print(f"⚠ Could not create {wrapper_dir}: {e}")
         return None
 
-    wrapper_path = wrapper_dir / name
+    wrapper_path = wrapper_dir / cmd
     try:
-        wrapper_path.write_text(f'#!/bin/sh\nexec hermes -p {name} "$@"\n')
+        wrapper_path.write_text(render_profile_wrapper_script(profile_name))
         wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
         return wrapper_path
     except OSError as e:
@@ -230,7 +277,7 @@ def remove_wrapper_script(name: str) -> bool:
         try:
             # Verify it's our wrapper before removing
             content = wrapper_path.read_text()
-            if "hermes -p" in content:
+            if _is_our_profile_wrapper_content(content):
                 wrapper_path.unlink()
                 return True
         except Exception:

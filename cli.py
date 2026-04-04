@@ -3002,6 +3002,27 @@ class HermesCLI:
         print(f"  Home:    {display}")
         print()
 
+    def _handle_profile_use_command(self, cmd_original: str):
+        """Set sticky profile (~/.hermes/active_profile); restart TUI to apply in this process."""
+        from hermes_cli.profiles import set_active_profile
+
+        raw = (cmd_original or "").strip()
+        parts = raw.split()
+        if len(parts) < 2:
+            print("\n  Usage: /profile-use <profile-name>")
+            print("  Same as: hermes profile use <name>\n")
+            return
+        name = parts[1].strip()
+        try:
+            set_active_profile(name)
+        except (ValueError, FileNotFoundError) as e:
+            print(f"\n  Error: {e}\n")
+            return
+        print(
+            f"\n  Sticky profile set to: {name}\n"
+            "  Exit and restart the TUI (or run `hermes` again) so this session uses that profile.\n"
+        )
+
     def show_config(self):
         """Display current configuration with kawaii ASCII art."""
         # Get terminal config from environment (which was set from cli-config.yaml)
@@ -3849,6 +3870,8 @@ class HermesCLI:
             self.show_help()
         elif canonical == "profile":
             self._handle_profile_command()
+        elif canonical == "profile-use":
+            self._handle_profile_use_command(cmd_original)
         elif canonical == "tools":
             self._handle_tools_command(cmd_original)
         elif canonical == "toolsets":

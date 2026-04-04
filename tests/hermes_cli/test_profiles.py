@@ -32,6 +32,8 @@ from hermes_cli.profiles import (
     import_profile,
     generate_bash_completion,
     generate_zsh_completion,
+    render_profile_wrapper_script,
+    create_wrapper_script,
     _get_profiles_root,
     _get_default_hermes_home,
 )
@@ -813,3 +815,27 @@ class TestProfileCliSwitchAlias:
         )
         assert r.returncode == 0
         assert "Switched" in r.stdout
+
+
+class TestProfileWrapperVenv:
+    """Profile ~/.local/bin wrappers run python -m hermes_cli.main from the repo venv."""
+
+    def test_render_wrapper_mentions_venv_and_main(self):
+        body = render_profile_wrapper_script("coder")
+        assert "-m hermes_cli.main" in body
+        assert "-p coder" in body
+        assert "HERMES_AGENT_REPO" in body
+        assert "HERMES_VENV_PYTHON" in body
+        assert "venv/bin/python" in body
+
+    def test_create_wrapper_script_custom_command_name(self, profile_env, monkeypatch):
+        monkeypatch.setattr(
+            "hermes_cli.profiles._get_wrapper_dir",
+            lambda: profile_env / ".local" / "bin",
+        )
+        p = create_wrapper_script("myprof", command_name="myalias")
+        assert p is not None
+        assert p.name == "myalias"
+        text = p.read_text()
+        assert "-p myprof" in text
+        assert "-m hermes_cli.main" in text
