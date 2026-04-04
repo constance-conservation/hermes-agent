@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, Optional
 
 try:
@@ -45,17 +46,27 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_slack_socket_event(body: Any, event: Any) -> Dict[str, Any]:
-    """Copy the inner message event and backfill fields Slack omits on Socket Mode.
+    """Copy the inner event and backfill fields Slack omits on Socket Mode.
 
-    Some payloads leave ``team`` off the inner ``event`` while the envelope still
-    carries ``team_id`` / ``authorizations[].team_id``. Without ``team``,
-    multi-workspace installs resolve the wrong ``bot_user_id`` and channel
-    messages are dropped (mention check uses the wrong id); DMs can also pick
-    the wrong WebClient when tokens differ per workspace.
+    Bolt injects ``event`` from ``body["event"]`` in normal cases, but kwargs
+    injection can yield ``None`` for some Socket Mode / middleware paths. If so,
+    fall back to ``body["event"]`` so we never process an empty dict (that
+    would drop every message silently).
+
+    Also backfills ``team`` from the envelope when the inner event omits it,
+    so ``_team_bot_user_ids`` resolves correctly for mention checks and API
+    clients in multi-workspace setups.
     """
-    if not isinstance(event, dict):
+    raw: Optional[Dict[str, Any]] = None
+    if isinstance(event, dict) and event:
+        raw = dict(event)
+    elif isinstance(body, dict):
+        inner = body.get("event")
+        if isinstance(inner, dict) and inner:
+            raw = dict(inner)
+    if not raw:
         return {}
-    out = dict(event)
+    out = raw
     team = (out.get("team") or out.get("team_id") or "").strip()
     if not team and isinstance(body, dict):
         team = (body.get("team_id") or "").strip()
@@ -105,6 +116,19 @@ class SlackAdapter(BasePlatformAdapter):
         self._team_clients: Dict[str, AsyncWebClient] = {}   # team_id → WebClient
         self._team_bot_user_ids: Dict[str, str] = {}          # team_id → bot_user_id
         self._channel_team: Dict[str, str] = {}                # channel_id → team_id
+        # When Slack sends both message + app_mention for one @mention, process once.
+        self._slack_duplicate_ts: Dict[str, float] = {}
+
+    def _slack_is_duplicate_delivery(self, dedup_key: str) -> bool:
+        """Return True if this team/channel/ts was handled moments ago."""
+        now = time.monotonic()
+        stale = [k for k, t in self._slack_duplicate_ts.items() if now - t > 15.0]
+        for k in stale:
+            self._slack_duplicate_ts.pop(k, None)
+        if dedup_key in self._slack_duplicate_ts:
+            return True
+        self._slack_duplicate_ts[dedup_key] = now
+        return False
 
     async def connect(self) -> bool:
         """Connect to Slack via Socket Mode."""
@@ -182,16 +206,30 @@ class SlackAdapter(BasePlatformAdapter):
             # Register message event handler
             @self._app.event("message")
             async def handle_message_event(body, event, say):
-                await self._handle_slack_message(
-                    _normalize_slack_socket_event(body, event)
-                )
+                normalized = _normalize_slack_socket_event(body, event)
+                if not normalized:
+                    logger.warning(
+                        "[Slack] Empty message event (body type=%s keys=%s event=%s)",
+                        type(body).__name__,
+                        list(body.keys()) if isinstance(body, dict) else None,
+                        type(event).__name__,
+                    )
+                    return
+                await self._handle_slack_message(normalized)
 
-            # Acknowledge app_mention events to prevent Bolt 404 errors.
-            # The "message" handler above already processes @mentions in
-            # channels, so this is intentionally a no-op to avoid duplicates.
+            # Slack often delivers app_mention for @bot in channels. Some workspaces
+            # or product configurations surface app_mention without a parallel
+            # message event Hermes would otherwise see — handle both and dedupe.
             @self._app.event("app_mention")
-            async def handle_app_mention(event, say):
-                pass
+            async def handle_app_mention(body, event, say):
+                normalized = _normalize_slack_socket_event(body, event)
+                if not normalized:
+                    logger.warning(
+                        "[Slack] Empty app_mention event (body keys=%s)",
+                        list(body.keys()) if isinstance(body, dict) else None,
+                    )
+                    return
+                await self._handle_slack_message(normalized)
 
             # Register slash command handler
             @self._app.command("/hermes")
@@ -753,6 +791,20 @@ class SlackAdapter(BasePlatformAdapter):
         channel_id = event.get("channel", "")
         ts = event.get("ts", "")
         team_id = event.get("team", "")
+
+        if not user_id or not channel_id or not ts:
+            logger.warning(
+                "[Slack] Incomplete message event (user=%r channel=%r ts=%r) — ignoring",
+                bool(user_id),
+                bool(channel_id),
+                bool(ts),
+            )
+            return
+
+        dedup_key = f"{team_id}:{channel_id}:{ts}"
+        if self._slack_is_duplicate_delivery(dedup_key):
+            logger.debug("[Slack] Duplicate delivery suppressed for %s", dedup_key)
+            return
 
         # Track which workspace owns this channel
         if team_id and channel_id:

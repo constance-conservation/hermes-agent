@@ -121,6 +121,22 @@ class TestNormalizeSlackSocketEvent:
         out = _normalize_slack_socket_event(body, event)
         assert out["team"] == "T_AUTH"
 
+    def test_falls_back_to_body_event_when_event_arg_missing(self):
+        """Bolt can pass event=None; body['event'] still has the payload."""
+        body = {
+            "team_id": "T_BODY",
+            "event": {
+                "type": "message",
+                "text": "hi",
+                "user": "U1",
+                "channel": "D1",
+                "ts": "1.0",
+            },
+        }
+        out = _normalize_slack_socket_event(body, None)
+        assert out["text"] == "hi"
+        assert out["team"] == "T_BODY"
+
 
 # ---------------------------------------------------------------------------
 # TestAppMentionHandler
@@ -508,6 +524,30 @@ class TestIncomingDocumentHandling:
 # ---------------------------------------------------------------------------
 
 class TestMessageRouting:
+    @pytest.mark.asyncio
+    async def test_incomplete_event_not_forwarded(self, adapter):
+        """Missing user/channel/ts must not reach the gateway (would break sessions)."""
+        event = {"text": "x", "channel": "C1", "ts": "1"}
+        await adapter._handle_slack_message(event)
+        adapter.handle_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_delivery_suppressed(self, adapter):
+        """Slack can emit message + app_mention for one @mention — handle once."""
+        event = {
+            "text": "<@U_BOT> hi",
+            "user": "U_USER",
+            "channel": "C123",
+            "channel_type": "channel",
+            "team": "T1",
+            "ts": "same.ts.value",
+        }
+        adapter._team_bot_user_ids["T1"] = "U_BOT"
+        with patch.object(adapter, "_resolve_user_name", new_callable=AsyncMock):
+            await adapter._handle_slack_message(event)
+            await adapter._handle_slack_message(dict(event))
+        assert adapter.handle_message.call_count == 1
+
     @pytest.mark.asyncio
     async def test_dm_processed_without_mention(self, adapter):
         """DM messages should be processed without requiring a bot mention."""

@@ -107,7 +107,7 @@ This step is critical — it controls what messages the bot can see.
 | `message.im` | **Yes** | Bot receives direct messages |
 | `message.channels` | **Yes** | Bot receives messages in **public** channels it's added to |
 | `message.groups` | **Recommended** | Bot receives messages in **private** channels it's invited to |
-| `app_mention` | **Yes** | Prevents Bolt SDK errors when bot is @mentioned |
+| `app_mention` | **Yes** | Required when the bot is @mentioned in channels — Slack often delivers `app_mention` (with or without a parallel `message` event). Hermes handles both and deduplicates. |
 
 4. Click **Save Changes** at the bottom of the page
 
