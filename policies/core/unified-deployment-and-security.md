@@ -628,6 +628,20 @@ Apply these operational notes during first-time deployment and subsequent harden
    - Distinguish features that differ by chat type (for example, DM vs forum/thread-capable spaces).
    - Confirm allowlists with normalized identity formats before enabling broad traffic.
 
+#### Hermes + Slack (Socket Mode) — verified production recipe
+
+This is the checklist that restored a working Slack path when the gateway showed **Slack Socket Mode connected** and **Bolt running**, but **no** inbound traffic reached Hermes (no agent activity, no `Unauthorized user` lines, and with diagnostics enabled no `[Slack] bolt envelope` lines).
+
+1. **Event Subscriptions → Subscribe to bot events** (at [api.slack.com](https://api.slack.com/apps), *Features → Event Subscriptions*). Include at minimum: `message.im`, `message.channels`, `message.groups`, `message.mpim`, and `app_mention`. Save the page after edits.
+2. **Bot token scopes** — Ensure `channels:history` and `groups:history` are present (without them, channel messages often never reach the app). Align the rest of the bot scopes with the Hermes-recommended manifest (see repository `hermes_cli/slack_admin.py`, function `hermes_slack_manifest_dict`, or CLI helpers for manifest validate/export).
+3. **App Home → Messages tab** — Turn on the **Messages** tab for the app so members can DM the bot (Slack blocks DMs otherwise even when scopes look correct).
+4. **Reinstall the app to the workspace** after changing scopes or bot events so the installation picks up the new grants.
+5. **`SLACK_ALLOWED_USERS`** — Use the Slack **Member ID** (`U…` from *Profile → … → Copy member ID*), comma-separated if needed. The Hermes gateway validates each listed ID with `users.info` on connect; a bad ID logs an explicit error once delivery is working.
+6. **Socket Mode connection fan-out** — Slack may deliver Events API payloads over **any** of several concurrent WebSocket connections for the same app. Avoid running a second `hermes gateway` (or any other Socket Mode client) for the **same** Slack app and **same** app-level token elsewhere; otherwise some messages may be delivered to a non-production consumer. Prefer one production gateway per app, or separate app-level tokens per environment if Slack is used from multiple hosts.
+7. **Narrowing “no events” vs “events but no reply”** — Set `SLACK_LOG_INBOUND=1` in `~/.hermes/.env` temporarily. Hermes then logs `[Slack] bolt envelope event type=…` for each event Slack hands to Bolt **before** listeners run. If that line never appears after a test DM or channel `@mention`, the fault is still Slack configuration or another consumer — not Hermes message routing. Remove or unset `SLACK_LOG_INBOUND` after debugging.
+
+**Slack home channel (cron / proactive delivery):** In `~/.hermes/.env`, set `SLACK_HOME_CHANNEL` to the Slack channel ID used as the default delivery target (for a 1:1 DM with the bot this is a `D…` id). Obtain it by opening the DM from the bot side (`conversations.open` with the operator’s member id) or by sending `/sethome` from that DM after messaging works. Optional: `SLACK_HOME_CHANNEL_NAME` for display (for example `Slack DM`).
+
 5. **Use structured health checks and automatic recovery**
    - Monitor gateway process state and per-platform connection state continuously.
    - On detected failure, restart the gateway once, then re-check platform connectivity.
