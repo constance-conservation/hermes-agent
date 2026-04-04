@@ -56,6 +56,12 @@ Navigate to **Features → OAuth & Permissions** in the sidebar. Scroll to **Sco
 | `users:read` | Look up user information |
 | `files:write` | Upload files (images, audio, documents) |
 
+**Strongly recommended for channel coverage:**
+
+| Scope | Purpose |
+|-------|---------|
+| `channels:join` | Lets the bot **join public channels on its own** (used by `hermes slack join-public`). Without it you must `/invite @Bot` in every channel. |
+
 :::caution Missing scopes = missing features
 Without `channels:history` and `groups:history`, the bot **will not receive messages in channels** —
 it will only work in DMs. These are the most commonly missed scopes.
@@ -190,15 +196,28 @@ sudo hermes gateway install --system   # Linux only: boot-time system service
 
 ---
 
-## Step 9: Invite the Bot to Channels
+## Step 9: Get the Bot Into Channels
 
-After starting the gateway, you need to **invite the bot** to any channel where you want it to respond:
+**Public channels — automatic (recommended):**
+
+1. Add the **`channels:join`** bot scope (Step 2), then **reinstall** the app to the workspace.
+2. On the machine where Hermes runs (with `SLACK_BOT_TOKEN` loaded from `~/.hermes/.env`):
+
+```bash
+hermes slack join-public
+```
+
+This calls the Slack Web API to **join every public channel** the bot is not already in. Re-run it after new public channels are created.
+
+`hermes slack join-public --dry-run` lists channels it would join (still needs a valid token to list channels).
+
+**Private channels** still require a manual invite — Slack does not allow bots to self-join private channels:
 
 ```
 /invite @Hermes Agent
 ```
 
-The bot will **not** automatically join channels. You must invite it to each channel individually.
+**Without `channels:join`:** invite the bot yourself in each channel (`/invite @YourBotName`).
 
 ---
 
@@ -427,6 +446,8 @@ Hermes supports voice on Slack:
 | Bot doesn't respond to @mentions in channels | 1) Check `message.channels` event is subscribed. 2) Bot must be invited to the channel. 3) Ensure `channels:history` scope is added. 4) Reinstall the app after scope/event changes |
 | Bot ignores messages in private channels | Add both the `message.groups` event subscription and `groups:history` scope, then reinstall the app and `/invite` the bot |
 | "Sending messages to this app has been turned off" in DMs | Enable the **Messages Tab** in App Home settings (see Step 5) |
+| DMs delivered (reactions/seen) but **no AI reply** | Hermes is almost certainly treating you as **unauthorized**. Check `SLACK_ALLOWED_USERS` includes your **Member ID** (`U…`, from Profile → ⋮ → Copy member ID). Quick test (workspace-trusted only): set `SLACK_ALLOW_ALL_USERS=true` in `~/.hermes/.env` and restart the gateway. You can also run `hermes slack whoami` to confirm the bot’s `bot_user_id` for @mentions in channels. |
+| Want the bot in **every public channel** | Add **`channels:join`**, reinstall the app, then run `hermes slack join-public` (see Step 9). Private channels still need `/invite`. |
 | "not_authed" or "invalid_auth" errors | Regenerate your Bot Token and App Token, update `.env` |
 | Bot responds but can't post in a channel | Invite the bot to the channel with `/invite @Hermes Agent` |
 | "missing_scope" error | Add the required scope in OAuth & Permissions, then **reinstall** the app |

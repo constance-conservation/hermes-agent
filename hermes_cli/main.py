@@ -661,6 +661,13 @@ def cmd_gateway(args):
     gateway_command(args)
 
 
+def cmd_slack(args):
+    """Slack maintenance: join public channels, print bot identity."""
+    from hermes_cli.slack_admin import slack_command
+
+    slack_command(args)
+
+
 def cmd_whatsapp(args):
     """Set up WhatsApp: choose mode, configure, install bridge, pair via QR."""
     _require_tty("whatsapp")
@@ -4033,6 +4040,30 @@ For more help on a command:
         description="Configure WhatsApp and pair via QR code"
     )
     whatsapp_parser.set_defaults(func=cmd_whatsapp)
+
+    # =========================================================================
+    # slack command (Web API maintenance — not the live gateway)
+    # =========================================================================
+    slack_parser = subparsers.add_parser(
+        "slack",
+        help="Slack workspace maintenance (join channels, bot identity)",
+        description="Uses SLACK_BOT_TOKEN from your Hermes .env — run on the same machine as the gateway.",
+    )
+    slack_sub = slack_parser.add_subparsers(dest="slack_command", required=True)
+    slack_join = slack_sub.add_parser(
+        "join-public",
+        help="Join all public channels (add channels:join scope, then reinstall the app)",
+    )
+    slack_join.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List channels that would be joined without calling the API",
+    )
+    slack_whoami_p = slack_sub.add_parser(
+        "whoami",
+        help="Print bot user id and @username (auth.test) for debugging mentions and allowlists",
+    )
+    slack_parser.set_defaults(func=cmd_slack)
 
     # =========================================================================
     # login command
