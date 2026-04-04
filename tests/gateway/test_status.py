@@ -181,3 +181,20 @@ class TestRuntimeWatchdogHealthy:
         ok, reason = status.runtime_status_watchdog_healthy(payload)
         assert ok is False
         assert "no platform" in reason
+
+    def test_disk_load_requires_live_pid(self, tmp_path, monkeypatch):
+        """Stale gateway_state.json must not look healthy if the process is gone."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        state_path = tmp_path / "gateway_state.json"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "gateway_state": "running",
+                    "platforms": {"slack": {"state": "connected"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        ok, reason = status.runtime_status_watchdog_healthy()
+        assert ok is False
+        assert "not running" in reason

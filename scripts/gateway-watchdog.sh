@@ -1,9 +1,49 @@
 #!/usr/bin/env bash
-# External health loop for long-running `hermes gateway` (optional).
-# Uses `hermes gateway watchdog-check` so one degraded platform (e.g. WhatsApp
-# reconnecting) does not force a full gateway replace while Slack/Telegram stay up.
 #
-# Install: copy to ~/.hermes/bin/gateway-watchdog.sh, chmod +x, run from systemd/cron.
+# Gateway + messaging watchdog (optional external supervisor)
+# ============================================================
+#
+# Purpose
+# -------
+# Keep the Hermes messaging gateway and at least one platform adapter connected.
+# The check uses `hermes gateway watchdog-check`, which verifies:
+#
+#   1. Gateway process uptime — a valid `gateway.pid` points to a live Hermes
+#      gateway process (detects crashes with stale `gateway_state.json`).
+#   2. Runtime state — `gateway_state.json` has `gateway_state=running`.
+#   3. Messaging channel uptime — at least one row under `platforms` has
+#      `state=connected` (e.g. Slack/Telegram up while WhatsApp reconnects).
+#
+# Intentionally, this does *not* require every platform to be connected, so
+# one flaky bridge does not force restarts that tear down healthy adapters.
+#
+# Recovery loop
+# -------------
+# When unhealthy:
+#   1. Backoff (exponential, capped) + jitter, then `hermes gateway run --replace`.
+#   2. If still unhealthy: `hermes doctor --fix` (logs to gateway-watchdog.log),
+#      then replace again.
+#   3. Rate-limit: after too many attempts in a window, cooldown before retrying.
+#
+# Environment (optional)
+# ----------------------
+#   HERMES_HOME                    — default ~/.hermes
+#   HERMES_AGENT_DIR               — repo root with venv (default ~/hermes-agent)
+#   WATCHDOG_INTERVAL_SECONDS      — healthy poll interval (default 60)
+#   WATCHDOG_MAX_BACKOFF_SECONDS    — max delay between recovery tries (default 600)
+#   WATCHDOG_JITTER_MAX_SECONDS    — random extra delay 0..N (default 20)
+#   WATCHDOG_ATTEMPT_WINDOW_SECONDS — rolling window for attempt cap (default 1800)
+#   WATCHDOG_MAX_ATTEMPTS_IN_WINDOW — max recovery tries per window (default 4)
+#   WATCHDOG_COOLDOWN_SECONDS      — sleep after hitting attempt cap (default 900)
+#   WATCHDOG_RESTART_WAIT_SECONDS  — wait after replace before re-check (default 20)
+#   WATCHDOG_POST_DOCTOR_WAIT_SECONDS — wait after doctor+replace (default 25)
+#
+# Install
+# -------
+# Copy to ~/.hermes/bin/gateway-watchdog.sh, chmod +x, run under systemd,
+# tmux, or cron with the same user/env as the gateway (HERMES_HOME + venv).
+#
+# Docs: website/docs/user-guide/messaging/gateway-watchdog.md
 
 set -euo pipefail
 

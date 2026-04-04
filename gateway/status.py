@@ -236,13 +236,28 @@ def runtime_status_watchdog_healthy(
     unnecessary ``hermes gateway run --replace`` restarts that tear down
     healthy adapters.
 
-    Healthy when ``gateway_state`` is ``running`` and **at least one**
-    platform reports ``state == "connected"``.
+    Healthy when **all** of the following hold:
+
+    1. A live gateway process is registered in ``gateway.pid`` (when reading
+       status from disk — callers that pass an explicit ``payload`` dict, e.g.
+       unit tests, skip this check).
+    2. ``gateway_state`` in ``gateway_state.json`` is ``running``.
+    3. **At least one** configured platform row reports ``state == "connected"``
+       (messaging channel uptime).
+
+    Together this covers **gateway process uptime** plus **at least one
+    messaging adapter connected**.
     """
-    if payload is None:
+    loaded_from_disk = payload is None
+    if loaded_from_disk:
         payload = read_runtime_status()
     if not payload:
         return False, "missing gateway_state.json"
+    if loaded_from_disk and get_running_pid() is None:
+        return (
+            False,
+            "gateway process not running (stale or missing gateway.pid)",
+        )
     if payload.get("gateway_state") != "running":
         return False, f"gateway_state={payload.get('gateway_state')!r}"
     platforms = payload.get("platforms") or {}

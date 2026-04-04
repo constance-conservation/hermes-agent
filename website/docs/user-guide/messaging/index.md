@@ -100,6 +100,10 @@ hermes gateway status       # Check default service status
 hermes gateway status --system         # Linux only: inspect the system service explicitly
 ```
 
+## Production uptime (watchdog)
+
+For always-on deployments, use **`hermes gateway watchdog-check`** together with the optional shell loop **`scripts/gateway-watchdog.sh`** so a dead process or a total loss of platform connections triggers **`hermes gateway run --replace`** and, if needed, **`hermes doctor --fix`**. See [Gateway watchdog](./gateway-watchdog).
+
 ## Chat Commands (Inside Messaging)
 
 | Command | Description |

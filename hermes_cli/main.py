@@ -3990,7 +3990,10 @@ For more help on a command:
 
     gateway_subparsers.add_parser(
         "watchdog-check",
-        help="Exit 0 if gateway_state.json shows running + ≥1 platform connected (for external watchdogs)",
+        help=(
+            "Exit 0 if gateway.pid process is alive, gateway_state=running, "
+            "and ≥1 platform connected (for external watchdogs)"
+        ),
     )
     
     # gateway install

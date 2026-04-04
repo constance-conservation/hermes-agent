@@ -141,6 +141,7 @@ Subcommands:
 | `stop` | Stop the service. |
 | `restart` | Restart the service. |
 | `status` | Show service status. |
+| `watchdog-check` | Exit 0 if `gateway.pid` is a live gateway, `gateway_state=running`, and ≥1 platform is `connected` (for external watchdogs). See [Gateway watchdog](/docs/user-guide/messaging/gateway-watchdog). |
 | `install` | Install as a user service (`systemd` on Linux, `launchd` on macOS). |
 | `uninstall` | Remove the installed service. |
 | `setup` | Interactive messaging-platform setup. |

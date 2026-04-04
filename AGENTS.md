@@ -360,6 +360,10 @@ in config.yaml (or `HERMES_BACKGROUND_NOTIFICATIONS` env var):
 - `error` — only the final message when exit code != 0
 - `off` — no watcher messages at all
 
+### Gateway watchdog (production uptime)
+
+External loops should use **`hermes gateway watchdog-check`** (see `gateway/status.py` → `runtime_status_watchdog_healthy`): it requires a **live `gateway.pid` process**, **`gateway_state=running`**, and **≥1 platform `connected`** in `gateway_state.json`. The repo ships **`scripts/gateway-watchdog.sh`**, which polls that check and on failure runs **`hermes gateway run --replace`**, then **`hermes doctor --fix`** + replace again if still unhealthy. Documented in **`website/docs/user-guide/messaging/gateway-watchdog.md`**.
+
 ---
 
 ## Profiles: Multi-Instance Support

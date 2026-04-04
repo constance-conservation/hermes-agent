@@ -104,8 +104,13 @@ Each memory provider manages its own session lifecycle internally. The `initiali
 
 When a session is reset, resumed, or expires, the gateway flushes built-in memories before discarding context. The flush creates a temporary `AIAgent` that runs a memory-only conversation turn. The memory provider's `on_session_end()` hook fires during this process, giving external providers a chance to persist any buffered data.
 
+## Runtime health & external watchdogs
+
+The gateway writes **`$HERMES_HOME/gateway_state.json`** (`gateway_state`, per-platform `platforms.<name>.state`). **`gateway.pid`** records the running process. External supervisors should use **`hermes gateway watchdog-check`**, which requires a live PID, `gateway_state=running`, and **at least one** `connected` platform (so one flaky adapter does not force full restarts). User-facing documentation: [Gateway watchdog](/docs/user-guide/messaging/gateway-watchdog).
+
 ## Related docs
 
+- [Gateway watchdog](/docs/user-guide/messaging/gateway-watchdog) (user guide)
 - [Session Storage](./session-storage.md)
 - [Cron Internals](./cron-internals.md)
 - [ACP Internals](./acp-internals.md)
