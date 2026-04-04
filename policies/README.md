@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 7 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
+> **Governance read order** — step 8 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](README.md)).
 > **Before this file:** read [core/global-agentic-company-deployment-policy.md](core/global-agentic-company-deployment-policy.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -25,7 +25,7 @@ Read **top to bottom** within `core/`: siblings at the same depth are ordered by
 | **Governance** | [`core/governance/`](core/governance/artifacts-and-archival-memory.md) | Standards, role-prompts, generated markdown, artifacts/archival rules for `operations/`. |
 | **Tooling** | [`core/scripts/`](core/scripts/README.md) | Verify, index, pipeline — not policy prose. |
 
-`operations/` at the **repository root** holds registers and project memory (see [`core/governance/artifacts-and-archival-memory.md`](core/governance/artifacts-and-archival-memory.md)).
+For runtime deployments, `operations/` should live under `AGENT_HOME/workspace/operations/` (see [`core/governance/artifacts-and-archival-memory.md`](core/governance/artifacts-and-archival-memory.md)). A repository-root `operations/` tree is acceptable only for local development or source-controlled bootstrapping.
 
 ---
 

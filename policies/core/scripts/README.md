@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 52 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../README.md)).
+> **Governance read order** — step 53 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../README.md)).
 > **Before this file:** read [core/governance/generated/by_role/examples/README.md](../governance/generated/by_role/examples/README.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -14,7 +14,8 @@ All scripts are orchestrated by **`start_pipeline.py`** (single entry point). Ru
 |---------|---------|
 | `python policies/core/scripts/start_pipeline.py` | Verify layout + **strict activation cues** on `policies/core/governance/standards/*.md`, regenerate `INDEX.md`, update `.pipeline_state/manifest.json`. |
 | `python policies/core/scripts/start_pipeline.py --dry-run` | Verification only; prints manifest diff; **writes no files** (safe CI gate). |
-| `python policies/core/scripts/start_pipeline.py --init-operations` | Same as full run, then create missing `operations/*.md` stubs (non-destructive). |
+| `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` | Full runtime materialization: canonical policy bundle outside workspace + runtime-editable policy/agent files and `operations/` inside workspace. |
+| `python policies/core/scripts/start_pipeline.py --init-operations` | Legacy mode: same as full run, then create missing `operations/*.md` stubs only. |
 | `python policies/core/scripts/start_pipeline.py --no-strict` | Skip activation-cue checks (**not** for production). |
 | `./policies/start_pipeline.sh` | Shell wrapper (same arguments as above). |
 
@@ -26,7 +27,7 @@ All scripts are orchestrated by **`start_pipeline.py`** (single entry point). Ru
 | `generate_index.py` | Regenerate `policies/INDEX.md`. |
 | `apply_read_order_navigation.py` | Insert/update top/bottom read-order blocks on every `policies/**/*.md` (sequence: `READ_ORDER_SEQUENCE` in that file). **Run after** `generate_index.py` — `start_pipeline.py` runs both. |
 | `pipeline_manifest.py` | Imported by `start_pipeline.py` — file hashes under `policies/`. |
-| `init_operations_stubs.py` | Create missing operational register files under `operations/`. |
+| `init_operations_stubs.py` | Create missing operational register files under `operations/` (workspace root from `AGENT_WORKSPACE_ROOT` when set). |
 | `materialize_role_workspace.py` | Create `policies/core/governance/generated/by_role/<slug>/` from template. |
 
 ## Typical flows
@@ -34,13 +35,14 @@ All scripts are orchestrated by **`start_pipeline.py`** (single entry point). Ru
 **Before deploy / after pulling git changes**
 
 ```bash
-python policies/core/scripts/start_pipeline.py --dry-run && python policies/core/scripts/start_pipeline.py
+python policies/core/scripts/start_pipeline.py --dry-run && \
+python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"
 ```
 
 **New clone**
 
 ```bash
-python policies/core/scripts/start_pipeline.py --init-operations
+python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"
 ```
 
 ## Tests

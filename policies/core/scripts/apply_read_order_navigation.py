@@ -24,6 +24,7 @@ from _paths import POLICIES_ROOT, REPO_ROOT
 # Single linear order: `core/` holds runbooks, launch, runtime, governance, and scripts (see policies/README.md).
 READ_ORDER_SEQUENCE: tuple[str, ...] = (
     "core/security-first-setup.md",
+    "core/firewall-exceptions-workflow.md",
     "core/unified-deployment-and-security.md",
     "core/deployment-handoff.md",
     "core/README.md",

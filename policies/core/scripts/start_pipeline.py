@@ -5,11 +5,14 @@ Global entry point for the agentic company policy pipeline.
 From repository root:
   python policies/core/scripts/start_pipeline.py
   python policies/core/scripts/start_pipeline.py --dry-run   # verify only, no writes
-  python policies/core/scripts/start_pipeline.py --init-operations  # also create operations stubs if missing
+  python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"
+  python policies/core/scripts/start_pipeline.py --init-operations  # legacy operations-only bootstrap
 """
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,10 +28,62 @@ from generate_index import run_generate_index
 import apply_read_order_navigation
 
 
-def _run_init_operations_stubs() -> int:
+def _run_init_operations_stubs(operations_root: Path | None) -> int:
     script = _SCRIPT_DIR / "init_operations_stubs.py"
-    r = subprocess.run([sys.executable, str(script)], cwd=REPO_ROOT, check=False)
+    env = os.environ.copy()
+    if operations_root is not None:
+        env["AGENT_WORKSPACE_ROOT"] = str(operations_root)
+    r = subprocess.run([sys.executable, str(script)], cwd=REPO_ROOT, env=env, check=False)
     return r.returncode
+
+
+def _copy_tree(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def _materialize_workspace_assets(workspace_root: Path) -> int:
+    """Write runtime-editable policy assets into AGENT_HOME/workspace."""
+    policies_src = REPO_ROOT / "policies"
+    generated_src = policies_src / "core" / "governance" / "generated"
+    runtime_agent_src = policies_src / "core" / "runtime" / "agent"
+
+    policies_dst = workspace_root / "policies"
+    generated_dst = policies_dst / "core" / "governance" / "generated"
+    runtime_agent_dst = policies_dst / "core" / "runtime" / "agent"
+
+    _copy_tree(generated_src, generated_dst)
+    _copy_tree(runtime_agent_src, runtime_agent_dst)
+    print(f"start_pipeline: materialized runtime-editable policies under {workspace_root}")
+    return 0
+
+
+def _materialize_canonical_policy_root(policy_root: Path) -> int:
+    """Write canonical policy bundle outside workspace."""
+    policies_src = REPO_ROOT / "policies"
+    _copy_tree(policies_src, policy_root)
+    print(f"start_pipeline: materialized canonical policy bundle under {policy_root}")
+    return 0
+
+
+def _resolve_workspace_root(args: argparse.Namespace) -> Path | None:
+    if args.workspace_root is not None:
+        return args.workspace_root.expanduser().resolve()
+    if args.operations_root is not None:
+        return args.operations_root.expanduser().resolve()
+    env_value = os.environ.get("AGENT_WORKSPACE_ROOT")
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+    return None
+
+
+def _resolve_policy_root(args: argparse.Namespace) -> Path | None:
+    if args.policy_root is not None:
+        return args.policy_root.expanduser().resolve()
+    env_value = os.environ.get("AGENT_POLICY_ROOT")
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+    return None
 
 
 def main() -> int:
@@ -46,12 +101,37 @@ def main() -> int:
         help="After success, run init_operations_stubs.py (creates missing operations/*.md only).",
     )
     ap.add_argument(
+        "--operations-root",
+        type=Path,
+        default=None,
+        help="Deprecated alias of --workspace-root.",
+    )
+    ap.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=None,
+        help="Workspace root where runtime-editable outputs are written (example: $AGENT_HOME/workspace).",
+    )
+    ap.add_argument(
+        "--policy-root",
+        type=Path,
+        default=None,
+        help="Canonical runtime policy root outside workspace (example: $AGENT_HOME/policies).",
+    )
+    ap.add_argument(
+        "--skip-workspace-materialization",
+        action="store_true",
+        help="Skip writing runtime-editable workspace outputs even if a workspace root is set.",
+    )
+    ap.add_argument(
         "--no-strict",
         action="store_true",
         help="Skip activation-cue checks on policies/core/governance/standards/*.md (not recommended for deployment).",
     )
     args = ap.parse_args()
     strict = not args.no_strict
+    workspace_root = _resolve_workspace_root(args)
+    policy_root = _resolve_policy_root(args)
 
     current = pipeline_manifest.compute_manifest()
     saved = pipeline_manifest.load_saved_manifest()
@@ -97,8 +177,23 @@ def main() -> int:
         print("start_pipeline: read-order navigation refresh failed", file=sys.stderr)
         return 1
 
-    if args.init_operations:
-        ic = _run_init_operations_stubs()
+    if policy_root is not None:
+        pc = _materialize_canonical_policy_root(policy_root)
+        if pc != 0:
+            print("start_pipeline: canonical policy materialization failed", file=sys.stderr)
+            return 1
+
+    if workspace_root is not None and not args.skip_workspace_materialization:
+        wc = _materialize_workspace_assets(workspace_root)
+        if wc != 0:
+            print("start_pipeline: workspace policy materialization failed", file=sys.stderr)
+            return 1
+        ic = _run_init_operations_stubs(workspace_root)
+        if ic != 0:
+            print("start_pipeline: init_operations_stubs failed", file=sys.stderr)
+            return 1
+    elif args.init_operations:
+        ic = _run_init_operations_stubs(workspace_root)
         if ic != 0:
             print("start_pipeline: init_operations_stubs failed", file=sys.stderr)
             return 1

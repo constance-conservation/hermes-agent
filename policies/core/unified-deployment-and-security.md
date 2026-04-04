@@ -1,6 +1,6 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 2 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
-> **Before this file:** read [core/security-first-setup.md](security-first-setup.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
+> **Governance read order** — step 3 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Before this file:** read [core/firewall-exceptions-workflow.md](firewall-exceptions-workflow.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
 
@@ -60,6 +60,28 @@ Task instructions are local execution directives.
 ---
 
 # 1. Unified Deployment Sequence
+
+## Phase 0 — Clone and bootstrap runtime repository (mandatory first gate)
+
+Before loading policy packs, generating governance files, or spawning any agents:
+
+1. Log in as the runtime non-admin user (not the admin account).
+2. Clone the target agent repository into that user's home directory.
+3. Pause for interactive GitHub authentication/authorization if prompted.
+4. Complete baseline dependency and environment setup required by the repository (for example: Python runtime, package manager bootstrap, virtual environment, and project dependencies).
+5. Run the agent's setup/bootstrap command so the runtime home (for example `.agent`) and workspace structure are created.
+6. Confirm the runtime home and workspace directories exist and are writable by the runtime non-admin user.
+7. Confirm the agent can start successfully (interactive CLI/session startup check).
+8. Re-validate SSH authentication policy with fresh, non-multiplexed sessions:
+   - key-only login attempt must fail
+   - key+password login attempt must succeed
+9. Only then continue to Phase 1.
+
+### Hard rule
+Do not proceed to governance/security rollout until clone, dependency bootstrap, runtime-home creation, and agent startup are confirmed on the runtime user account.
+Do not proceed if SSH auth checks are based on reused control sockets; use fresh non-multiplexed sessions for validation.
+
+---
 
 ## Phase 1 — Load the Canonical Pack
 
@@ -570,6 +592,98 @@ At each startup or restart:
 6. if warnings only, allow startup with remediation queue
 7. record audit results and operator-visible summary
 
+### Admin-plane and network change protocol (required)
+
+Before applying SSH/firewall/network-admin changes on a runtime VPS:
+
+1. Confirm a tested recovery path (provider console or recovery mode).
+2. Confirm privileged execution path (interactive sudo or root path) is available.
+3. Apply additive access changes first (new port/rule), validate (`sshd -t`, live login), then remove legacy rules.
+4. Require two-session verification before closing old admin access.
+5. Run post-change audit and drift check immediately.
+6. Require explicit `AuthenticationMethods` in final SSH policy so key-only fallback cannot silently remain active.
+7. Validate auth outcomes with fresh non-multiplexed SSH sessions (no control-socket reuse).
+
+If these conditions are not met, treat the change as high-risk and defer until break-glass prerequisites are satisfied.
+
+### Runtime and messaging stabilization notes (required)
+
+Apply these operational notes during first-time deployment and subsequent hardening:
+
+1. **Bootstrap gate must be explicit**
+   - Complete repository clone, dependency bootstrap, and runtime-home initialization as the non-admin runtime user before governance rollout.
+   - Verify the runtime can start once interactively before introducing background services.
+
+2. **Authentication checks must be revalidated with fresh sessions**
+   - Validate final SSH policy using fresh, non-multiplexed sessions only.
+   - Confirm key-only access fails where policy requires multi-factor login, and confirm the intended multi-step authentication succeeds.
+
+3. **Run long-lived gateway processes as detached services**
+   - Avoid keeping production gateway lifecycle tied to an operator shell.
+   - Use a detached launcher or service manager so operator disconnects do not terminate messaging runtime.
+   - Keep a single active gateway instance to avoid duplicate delivery behavior.
+
+4. **Treat messaging onboarding as protocol-specific**
+   - Validate channel/chat identifiers in canonical format for each platform before declaring setup complete.
+   - Distinguish features that differ by chat type (for example, DM vs forum/thread-capable spaces).
+   - Confirm allowlists with normalized identity formats before enabling broad traffic.
+
+5. **Use structured health checks and automatic recovery**
+   - Monitor gateway process state and per-platform connection state continuously.
+   - On detected failure, restart the gateway once, then re-check platform connectivity.
+   - If restart does not recover service, run automated diagnostics/fix routines and retry startup.
+   - Record every failure/recovery cycle to a local watchdog log for auditability.
+
+#### Watchdog daemon control pattern (recommended)
+
+Implement a persistent watchdog service with this minimum behavior:
+
+1. Run as a boot-started daemon under the runtime user context.
+2. Check runtime status on a fixed interval (for example, every 30-60 seconds) using machine-readable state.
+3. Mark unhealthy when either:
+   - gateway process state is not `running`, or
+   - any enabled messaging platform state is not `connected`.
+4. Recovery ladder:
+   - first attempt: restart gateway and re-check
+   - second attempt: run automated diagnostics/fix (`doctor --fix` equivalent), then restart and re-check
+   - final state: if still unhealthy, keep daemon alive, log hard failure, and continue periodic retries
+5. Write append-only watchdog logs with UTC timestamps for each detection, action, and outcome.
+6. Avoid spawning duplicate gateway instances; always restart via replace/stop+start semantics.
+
+#### Watchdog hardening profile (recommended defaults)
+
+When deploying the watchdog, include anti-thrash controls so transient upstream issues do not cause restart storms:
+
+- **Base check interval:** 60s
+- **Exponential backoff:** increase recovery delay after repeated failures (for example 60s -> 120s -> 240s), with a capped maximum
+- **Max backoff cap:** 10 minutes
+- **Jitter:** add random delay (for example 0-20s) to avoid synchronized restart waves across hosts
+- **Recovery-attempt window:** track attempts in a rolling window (for example 4 attempts per 30 minutes)
+- **Cooldown lockout:** when the attempt cap is exceeded, pause active recovery attempts for a cooldown period (for example 15 minutes), then resume checks
+- **Reset policy:** on healthy state restoration, clear failure counters/backoff state immediately
+
+#### Watchdog audit requirements
+
+The watchdog log should include at least:
+
+1. health-check failures with reason (gateway state and disconnected platforms)
+2. each restart attempt and post-restart result
+3. each diagnostics/fix invocation and completion
+4. backoff/cooldown decisions with computed wait durations
+5. recovery confirmation events
+
+6. **Run package operations from the correct working directory**
+   - Perform dependency audit/fix commands from the project root where lockfiles exist.
+   - If audit tools fail due to missing lockfiles or context mismatch, correct directory state first, then rerun.
+
+7. **Confirm model endpoint and auth compatibility early**
+   - Ensure configured model identifier, provider mode, endpoint format, and API key type are mutually compatible.
+   - If authentication fails, switch to the provider’s supported endpoint/auth pattern for the selected model family.
+
+8. **Prevent stale runtime mode/config drift**
+   - After any configuration change affecting messaging mode, force a clean restart of all related runtime processes.
+   - Verify live process arguments/runtime status match desired configuration, not just file contents.
+
 ## Continuous security pipelines
 
 ### Preflight pipeline
@@ -585,6 +699,7 @@ Cadence:
 - on plugin/hook/skill change
 - every scheduled review cycle
 - after network or browser-profile changes
+- immediately after SSH/firewall policy changes
 
 ### Content-risk pipeline
 Cadence:
@@ -825,9 +940,12 @@ The lower the level, the less broad company context it should carry unless neces
 If deploying today, use this exact sequence.
 
 ## Step 1
-Load the canonical deployment pack into the root/global deployment agent.
+As the runtime non-admin user, clone the target repository into the user home path, complete dependency/environment bootstrap, run agent setup to initialize runtime-home/workspace paths, and verify the agent starts successfully.
 
 ## Step 2
+Load the canonical deployment pack into the root/global deployment agent.
+
+## Step 3
 Instruct it to generate:
 - `ORG_REGISTRY.md`
 - `ORG_CHART.md`
@@ -840,16 +958,16 @@ Instruct it to generate:
 - `SECURITY_REMEDIATION_QUEUE.md`
 - `INCIDENT_REGISTER.md`
 
-## Step 3
+## Step 4
 Create:
 - Chief Orchestrator
 - Org Mapper / HR Controller
 - Chief Security Governor
 
-## Step 4
+## Step 5
 Give each of those agents its scoped startup bundle.
 
-## Step 5
+## Step 6
 Create:
 - Startup Preflight Security Agent
 - Continuous Drift and Monitoring Agent
@@ -861,24 +979,24 @@ Create:
 - Patch, Dependency, and Supply-Chain Security Agent
 - Incident Response Agent
 
-## Step 6
+## Step 7
 Register all those security roles formally.
 
-## Step 7
+## Step 8
 Run:
 - startup preflight
 - security audit
 - warning/critical classification
 - safe mode decision
 
-## Step 8
+## Step 9
 If the environment passes or is warning-only, create:
 - Product Director
 - Engineering Director
 - Operations Director
 - IT / Security Director
 
-## Step 9
+## Step 10
 Have the leadership and security layers define:
 - naming rules
 - task-state rules
@@ -889,19 +1007,19 @@ Have the leadership and security layers define:
 - warning/critical escalation flow
 - break-glass procedure
 
-## Step 10
+## Step 11
 When a real project appears:
 - create one Project Lead
 - attach project brief, success metrics, constraints, boundaries, and security constraints
 - let the Project Lead determine whether subordinate roles are needed
 
-## Step 11
+## Step 12
 Spawn Workers only when required.
 
-## Step 12
+## Step 13
 Add Supervisors only after real coordination pressure exists.
 
-## Step 13
+## Step 14
 Run periodic pruning and periodic security reviews so the system does not bloat or drift.
 
 ---

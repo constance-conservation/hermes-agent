@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 3 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Governance read order** — step 4 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
 > **Before this file:** read [core/unified-deployment-and-security.md](unified-deployment-and-security.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -40,7 +40,7 @@ Use this order:
 1. `policies/core/security-first-setup.md`
 2. `policies/core/unified-deployment-and-security.md`
 3. `policies/core/deployment-handoff.md` (this file)
-4. `python policies/core/scripts/start_pipeline.py` (or `./policies/start_pipeline.sh`) — verify tree, strict `standards/` cues, refresh `INDEX.md`; see [`pipeline-runbook.md`](pipeline-runbook.md)
+4. `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` (or equivalent env vars) — verify tree, strict `standards/` cues, refresh `INDEX.md`, and materialize runtime outputs; see [`pipeline-runbook.md`](pipeline-runbook.md)
 5. `policies/core/runtime/agent/BOOTSTRAP.md`
 6. `policies/core/runtime/agent/AGENTS.md`
 7. the remaining attached agent markdown files referenced by `BOOTSTRAP.md` and `AGENTS.md` (paths under `policies/core/runtime/agent/` in this repository)
@@ -133,7 +133,9 @@ Tasks:
 7. Use `policies/core/runtime/agent/BOOTSTRAP.md` as the bootstrapping file for the agent markdown pack.
 8. Ensure `BOOTSTRAP.md` instigates and explains deployment/use of the other attached agent markdown files.
 9. Ensure `AGENTS.md` and the other attached agent markdown files contain references to the canonical policies, prompts, runbook, artifact pipeline, and bootstrap flow where relevant.
-10. Create or initialize the operational files required by the runbook if they do not already exist, under `operations/` (see `operations/README.md`):
+10. Stage canonical runtime policy files under `AGENT_HOME/policies/` (outside workspace) so runtime can read them as the authoritative policy layer.
+11. Do not pre-create runtime workspace artifacts manually. Run `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` so the pipeline materializes runtime-editable content and operational files in one controlled step.
+12. Ensure the pipeline output includes operational files under `AGENT_HOME/workspace/operations/`:
    - `operations/ORG_REGISTRY.md`
    - `operations/ORG_CHART.md`
    - `operations/AGENT_LIFECYCLE_REGISTER.md`
@@ -144,12 +146,12 @@ Tasks:
    - `operations/SECURITY_AUDIT_REPORT.md`
    - `operations/SECURITY_REMEDIATION_QUEUE.md`
    - `operations/INCIDENT_REGISTER.md`
-11. Create `operations/projects/` and ensure per-project `memory/archival/` trees exist for every active project slug.
-12. Initialize `policies/core/governance/generated/README.md` and subfolders per `policies/core/governance/artifacts-and-archival-memory.md`; keep the index updated whenever new generated markdown is added.
-13. Create any supporting folders, registries, templates, and operational files required by the runbook, but do not clone or duplicate the canonical policy documents unnecessarily.
-14. Do not activate agents yourself unless explicitly required by runtime design.
-15. Do not weaken any security or governance rule for convenience.
-16. If there is ambiguity, choose the leanest, most auditable implementation consistent with the current canonical pack.
+13. Ensure the pipeline output includes `AGENT_HOME/workspace/operations/projects/` and per-project `memory/archival/` trees for every active project slug.
+14. Ensure the pipeline output includes runtime-editable policy areas under `AGENT_HOME/workspace/policies/` (including `core/governance/generated/README.md` and subfolders) and all runtime agent files under `AGENT_HOME/workspace/policies/core/runtime/agent/`.
+15. Create any supporting folders, registries, templates, and operational files required by the runbook, but do not clone or duplicate canonical policy documents into workspace-editable locations unless the file is intended for routine runtime editing.
+16. Do not activate agents yourself unless explicitly required by runtime design.
+17. Do not weaken any security or governance rule for convenience.
+18. If there is ambiguity, choose the leanest, most auditable implementation consistent with the current canonical pack.
 
 Output a concise deployment summary showing:
 - policy files verified
@@ -176,7 +178,7 @@ Use this exact load order:
 1. `policies/core/security-first-setup.md`
 2. `policies/core/unified-deployment-and-security.md`
 3. `policies/core/deployment-handoff.md` (this document)
-4. `python policies/core/scripts/start_pipeline.py` — see `policies/core/pipeline-runbook.md`
+4. `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` — see `policies/core/pipeline-runbook.md`
 5. `policies/README.md`
 6. `policies/README.md`
 7. `policies/core/governance/artifacts-and-archival-memory.md`
@@ -198,8 +200,8 @@ Use this exact load order:
    - `policies/core/runtime/agent/README.md`
 14. secondary supporting policy files in `policies/core/governance/standards/`
 15. secondary supporting role templates in `policies/core/governance/role-prompts/`
-16. `operations/` registers and `operations/projects/*/memory/archival/` as applicable
-17. `policies/core/governance/generated/` index and governed additions
+16. `AGENT_HOME/workspace/operations/` registers and `AGENT_HOME/workspace/operations/projects/*/memory/archival/` as applicable
+17. `AGENT_HOME/workspace/policies/core/governance/generated/` index and governed additions
 
 Activation rules:
 1. Treat the canonical deployment pack as authoritative.
@@ -214,7 +216,7 @@ Before broader activation, do the following:
 - verify the canonical policy files exist
 - verify the supporting policy and prompt files exist
 - verify `policies/core/runtime/agent/BOOTSTRAP.md` and all attached agent markdown files exist
-- verify the operational files exist or create them if missing (under `operations/`):
+- verify pipeline materialization has produced the operational files under `AGENT_HOME/workspace/operations/`:
   - `operations/ORG_REGISTRY.md`
   - `operations/ORG_CHART.md`
   - `operations/AGENT_LIFECYCLE_REGISTER.md`
@@ -233,6 +235,7 @@ Before broader activation, do the following:
 - run security audit
 - classify findings as INFO / WARNING / CRITICAL
 - enter safe mode or refuse activation if required by policy
+- if runtime workspace outputs are missing, rerun the pipeline with `--workspace-root` and `--policy-root` before proceeding
 
 Only if the environment passes or is warning-only, continue by:
 - activating Product, Engineering, Operations, and IT/Security Directors
@@ -243,7 +246,7 @@ Only if the environment passes or is warning-only, continue by:
 
 Rules:
 - register every agent before activation
-- keep memory local by role level and store only active summaries upward; maintain continuous archival writes under `operations/projects/<slug>/memory/archival/` per `policies/core/governance/artifacts-and-archival-memory.md`
+- keep memory local by role level and store only active summaries upward; maintain continuous archival writes under `AGENT_HOME/workspace/operations/projects/<slug>/memory/archival/` per `policies/core/governance/artifacts-and-archival-memory.md`
 - use the warning/critical severity model exactly as defined
 - if ambiguity exists, choose the leaner and more restrictive interpretation
 - do not treat secondary files as overriding the primary canonical pack
@@ -263,6 +266,74 @@ Required output:
 
 ---
 
+## Operator Pitfalls and Recovery Notes (generic)
+
+Use these guardrails for any agent workflow on a VPS, regardless of provider or CLI implementation.
+
+### 1) Local command wrappers and profiles
+
+- If using command aliases/wrappers (for example profile suffix patterns), test argument handling for:
+  - profile management commands
+  - multi-argument commands
+  - help/diagnostic commands
+- Ensure wrappers do not silently rewrite administrative commands into runtime-profile commands.
+- Prefer persistent launcher scripts over shell-function-only wrappers when consistency across sessions is required.
+
+### 2) Runtime execution environment hygiene
+
+- Run agent CLI commands from an isolated runtime environment (for example virtual environment or equivalent) to avoid host package drift.
+- Enforce a fail-closed startup if the expected runtime environment is missing, rather than silently falling back to system defaults.
+- Keep profile-local config and secrets isolated; do not assume one profile inherits terminal/backend configuration from another.
+
+### 3) Onboarding and startup verb differences
+
+- Do not assume every agent CLI uses the same onboarding command name.
+- Verify the actual supported startup/setup verbs before issuing operational instructions.
+- Document the validated onboarding/startup command in the handoff output for the next operator/agent.
+
+### 4) SSH and privilege assumptions
+
+- Never assume SSH key passphrase equals remote sudo password.
+- Verify privilege path explicitly before remote changes:
+  - interactive sudo available, or
+  - known root/console recovery path available.
+- Treat passwordless sudo as temporary break-glass only; remove after maintenance.
+
+### 5) SSH port and firewall migration safety
+
+- Apply SSH listener and firewall changes in additive order:
+  1. open new path
+  2. validate daemon config and live login
+  3. keep old path until validation completes
+  4. then close old path
+- Never combine "change SSH port" and "close current SSH path" in one unverified step.
+- Require two-session verification before finalizing admin-plane changes.
+
+### 6) Host firewall vs cloud firewall clarity
+
+- Explicitly identify where controls are enforced:
+  - host firewall on the VPS
+  - cloud-provider network firewall
+  - both
+- If cloud firewall is absent, treat host firewall as the single enforcement point and maintain recovery procedures accordingly.
+
+### 7) File-transfer and metadata pitfalls
+
+- When syncing policy trees between workstations and Linux hosts, strip platform-specific metadata files.
+- Validate policy sequence/index tooling after sync to catch hidden-file drift before runtime activation.
+
+### 8) Break-glass recovery expectations
+
+- For lockout scenarios, use provider console/recovery workflows first; local workstation privilege cannot repair remote host controls by itself.
+- Document minimum recovery steps in every deployment handoff:
+  - regain root/console access
+  - restore known-good SSH listener
+  - validate daemon config
+  - reopen minimal admin ingress
+  - verify remote login before further hardening
+
+---
+
 ## Effective Load Order
 
 Use this order:
@@ -270,7 +341,7 @@ Use this order:
 1. `policies/core/security-first-setup.md`
 2. `policies/core/unified-deployment-and-security.md`
 3. `policies/core/deployment-handoff.md`
-4. `python policies/core/scripts/start_pipeline.py` — see `policies/core/pipeline-runbook.md`
+4. `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` — see `policies/core/pipeline-runbook.md`
 5. `policies/README.md`
 6. `policies/README.md`
 7. `policies/core/governance/artifacts-and-archival-memory.md`
@@ -282,8 +353,8 @@ Use this order:
 13. the remaining attached agent markdown files
 14. `policies/core/governance/standards/*.md` supporting policies
 15. `policies/core/governance/role-prompts/*.md` supporting role templates
-16. `operations/` registers and project memory trees
-17. `policies/core/governance/generated/` governed additions (indexed in `policies/core/governance/generated/README.md`)
+16. `AGENT_HOME/workspace/operations/` registers and project memory trees
+17. `AGENT_HOME/workspace/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime editable policy tree)
 
 <!-- policy-read-order-nav:bottom -->
 > **Next step:** continue to [core/README.md](README.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.

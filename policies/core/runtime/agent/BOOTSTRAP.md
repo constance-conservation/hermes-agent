@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 11 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
+> **Governance read order** — step 12 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
 > **Before this file:** read [core/chief-orchestrator-directive.md](../../chief-orchestrator-directive.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -125,6 +125,11 @@ Ensure the following files exist in the workspace-level operating area (under `p
 - `HEARTBEAT.md`
 - `SECURITY.md`
 - `README.md`
+
+Runtime placement rule:
+- stage canonical policy files under `AGENT_HOME/policies/` (outside workspace, read-mostly)
+- keep runtime-editable policy files under `AGENT_HOME/workspace/policies/`
+- keep operational registers and project memory under `AGENT_HOME/workspace/operations/`
 
 ### 3. Customize operator-facing files
 Edit or initialize:

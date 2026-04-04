@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 8 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Governance read order** — step 9 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
 > **Before this file:** read [README.md](../README.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -12,11 +12,54 @@
   refreshes indexes; it does not replace that context.
 -->
 
-**Run from the repository root** after the two runbooks, [`deployment-handoff.md`](deployment-handoff.md), and (when you are ready) the constitutional packs in this folder — this file is **only** for running the verify/index **pipeline**:
+**Run from the repository root** after the two runbooks and [`deployment-handoff.md`](deployment-handoff.md). The pipeline verifies/indexes policies and (when runtime roots are provided) materializes runtime outputs in the correct locations:
+
+Do not pre-create runtime workspace trees or runtime-editable policy output trees manually before this pipeline run; treat pipeline materialization as the source of truth for initial structure.
+
+## VPS hardening gate (lockout-safe, generic)
+
+When this pipeline is used alongside VPS setup/hardening work, apply this gate before any SSH/firewall/authentication change:
+
+- open and keep one verified SSH session active throughout hardening
+- open and keep a provider console session active too when available
+- treat any SSH listener, firewall, root-login, or auth-mode change as lockout-risking
+- pause and require explicit operator confirmation before each lockout-risking step
+- keep at least one verified existing access path active until a new path is proven in a fresh session
+- validate connectivity on old and new SSH paths before removing the old path
+- never assume provider console recovery exists; require verified recovery/admin paths first
+- do not persist privileged credentials on-host as the only recovery copy
+- do not disable fallback channels until the operator confirms they can still access the host
+- treat console/recovery as potentially unavailable; if lockout occurs, assume rebuild may be required
+- require two independently validated admin routes before removing/changing either route
+- require pre-armed rollback automation before SSH daemon restart after auth/listener edits
+- require explicit `AuthenticationMethods` in final SSH policy (no implicit `any`)
+- require fresh non-multiplexed auth validation before proceeding:
+  - key-only login fails
+  - key+password login succeeds
+
+Documented recovery verification example (after SSH listener recovery):
+
+```text
+LISTEN 0      128                        0.0.0.0:40227      0.0.0.0:*    users:(("sshd",pid=9352,fd=3))
+LISTEN 0      128                           [::]:40227         [::]:*    users:(("sshd",pid=9352,fd=4))
+```
+
+Treat this as evidence format only: always capture the current listener output from the target host and attach it to the change record before proceeding.
+
+## Runtime watchdog gate (recommended)
+
+After pipeline materialization and before declaring messaging runtime "production ready":
+
+- install a boot-started watchdog daemon under the runtime user context
+- require watchdog health checks to validate both gateway runtime state and per-platform connected state
+- require a bounded recovery ladder (restart -> diagnostics/fix -> restart)
+- require anti-thrash controls (exponential backoff, jitter, rolling attempt window, cooldown)
+- require append-only watchdog logs with UTC timestamps
+- verify watchdog and gateway survive reboot without operator-attached shells
 
 ```bash
 python policies/core/scripts/start_pipeline.py --dry-run   # validate only (writes nothing)
-python policies/core/scripts/start_pipeline.py             # verify, refresh INDEX.md, update change manifest
+python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"
 ```
 
 Or:
@@ -26,7 +69,7 @@ Or:
 ./policies/start_pipeline.sh
 ```
 
-Optional: create missing `operations/*.md` stubs (non-destructive):
+Legacy optional mode (operations-only bootstrap):
 
 ```bash
 python policies/core/scripts/start_pipeline.py --init-operations
@@ -37,6 +80,11 @@ python policies/core/scripts/start_pipeline.py --init-operations
 1. **Strict verification** — required layout; every `policies/core/governance/standards/*.md` must contain an activation-prompt heading (so policies cannot silently pass as empty stubs).
 2. **Regenerates** `policies/INDEX.md`.
 3. **Writes** `policies/.pipeline_state/manifest.json` (gitignored) to detect future edits.
+4. **Materializes canonical runtime policies** under `AGENT_HOME/policies` when `--policy-root` (or `AGENT_POLICY_ROOT`) is provided.
+5. **Materializes runtime-editable outputs** under `AGENT_HOME/workspace` when `--workspace-root` (or `AGENT_WORKSPACE_ROOT`) is provided:
+   - `operations/` registers and project trees
+   - `policies/core/governance/generated/`
+   - `policies/core/runtime/agent/` pack
 
 **Tests:** `pytest tests/policies/test_policy_pipeline.py`
 

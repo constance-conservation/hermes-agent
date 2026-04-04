@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 48 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
+> **Governance read order** — step 49 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
 > **Before this file:** read [core/governance/artifacts-and-archival-memory.md](../artifacts-and-archival-memory.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -14,7 +14,7 @@ This folder holds **non-canonical** markdown produced under the agentic company 
 
 | Date (UTC) | Path | Title / purpose | Owning role | Anchor (policy or runbook §) |
 |------------|------|-----------------|-------------|------------------------------|
-| | | | | |
+| 2026-04-04 | `playbooks/slack-department-project-task-routing.md` | Slack channel/thread/task routing model for department→project→task operations | Chief Orchestrator | `core/unified-deployment-and-security.md` §1, §7 |
 
 Subfolders: `playbooks/`, `extensions/`, `audits/`, `experiments/` — see [`../artifacts-and-archival-memory.md`](../artifacts-and-archival-memory.md).
 

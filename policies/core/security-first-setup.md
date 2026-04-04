@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 1 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
+> **Governance read order** — step 1 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../README.md)).
 > **Before this file:** none — this is the **first** document in the sequence. Do not treat later policy files as valid context until this one is understood.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -29,7 +29,7 @@ After completing this file, the next file in the order of operations is:
 
 Then:
 
-- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the `operations/` / `policies/core/governance/generated/` artifact trees.
+- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the runtime artifact trees (`AGENT_HOME/workspace/operations/` and runtime-editable `.../workspace/policies/core/governance/generated/`).
 
 ---
 
@@ -89,6 +89,23 @@ The runtime zone exists so a compromise there does **not** automatically become 
 
 ---
 
+## Dedicated machine alternative (non-VPS)
+
+If you choose a dedicated physical machine (or dedicated local host) instead of a VPS, apply the same hardening pattern before any runtime activation:
+
+1. Use a clean OS install dedicated to agent runtime work only.
+2. Keep a maintenance/admin account and a separate non-sudo runtime account.
+3. Build private admin access first (tailnet/VPN), then verify login over private addressing.
+4. Keep at least one active maintenance shell open during all lockout-risking changes.
+5. Apply SSH hardening in checkpoints (key policy, root-login policy, listener policy), one change at a time.
+6. Use deny-by-default host firewall and allow only required management/runtime paths.
+7. Keep workstation isolation rules identical (no personal vault sync, no personal browser/session reuse on runtime host).
+8. Record evidence after each checkpoint (effective SSH settings, listeners, firewall state, and fresh-session access tests).
+
+Treat the host as disposable/rebuildable even when it is not cloud-managed: no step should assume recovery tooling is available.
+
+---
+
 ## macOS account model (strongly recommended)
 
 Use **separate macOS accounts** to separate privilege from daily use:
@@ -129,6 +146,16 @@ This split ensures **runtime and routine control-plane traffic** are not tied to
 ## VPS access and network posture (security-critical)
 
 Assume the VPS has a **public IP**. Treat the network as **hostile** unless you explicitly overlay private access.
+
+### Pre-hardening operator checkpoint (mandatory)
+
+Before any SSH/firewall/authentication hardening:
+
+- open and keep one verified SSH maintenance session active for the full hardening window
+- if your VPS provider console is available, open a console session too and keep it ready
+- do not begin lockout-risking changes unless at least one live admin shell is already open
+- continue hardening only while access remains verifiable from fresh sessions
+- if access uncertainty appears at any point, stop and recover access before further changes
 
 ### Private overlay first
 
@@ -181,10 +208,12 @@ Before deploying any runtime policies or prompts, you should end up with:
 - one **dedicated VPS** (or optional guest VM) **only** for the agent/gateway runtime
 - on the VPS: one **provisioning** identity (root/sudo) for setup/patching only
 - on the VPS: one **runtime user** used only for the running agent and workspace (no sudo)
-- one **runtime workspace** with:
+- one **runtime workspace** under `AGENT_HOME/workspace/` with:
   - `workspace/input`
   - `workspace/output`
   - `workspace/logs`
+- one **runtime policy root** under `AGENT_HOME/policies/` (canonical read-mostly policy bundle outside workspace)
+- one **workspace-editable policy area** under `AGENT_HOME/workspace/policies/` for policy files expected to change during operation (for example generated markdown and approved local working copies)
 - one **dedicated browser profile** on the runtime host if a browser is used—only for the agent
 - **no** mounting workstation directories into the runtime workspace
 - **no** password manager or personal vault on the runtime host
@@ -302,7 +331,7 @@ Do not install by default:
 
 ## Step 5 — Set Up the Runtime Workspace
 
-Log in as the **runtime user** and create the workspace.
+Log in as the **runtime user** and create the workspace under `AGENT_HOME`.
 
 Create:
 
@@ -322,6 +351,8 @@ Rules:
 - downloads should go into the workspace only
 - no broad filesystem roots
 - no mounted workstation paths
+- canonical policy files consumed by runtime should be staged under `AGENT_HOME/policies/` (outside workspace)
+- only runtime-editable policy material should be under `AGENT_HOME/workspace/policies/`
 
 Make a note of the exact canonical path to this workspace.
 
@@ -360,6 +391,52 @@ Default posture:
 - deny-by-default firewall on the VPS
 
 Do not make anything internet-accessible “just for testing.”
+
+### Recommended checkpoint before deeper SSH/firewall hardening
+
+Before disabling root SSH login or tightening firewall defaults, establish and verify private admin access over a tailnet/VPN (for example Tailscale):
+
+1. Install and enroll the VPS in the tailnet.
+2. Install and enroll the operator workstation (macOS) in the same tailnet.
+3. Verify operator login to the VPS using tailnet addressing (Tailscale IP or MagicDNS) while the current public SSH path still works.
+4. Record tailnet host/IP values in operator metadata (for example `SSH_TAILSCALE_IP`, `SSH_TAILSCALE_DNS`).
+5. Pause for operator confirmation that private-path access is stable before any additional lockout-risking action.
+
+Quick-start (Tailscale example):
+
+- VPS (Ubuntu/Debian-class):
+  - `curl -fsSL https://tailscale.com/install.sh | sh`
+  - `systemctl enable --now tailscaled`
+  - `tailscale up --ssh --hostname <runtime-hostname>`
+- Workstation (macOS):
+  - `tailscale up`
+- Validation:
+  - from macOS: `tailscale status`
+  - from macOS: `tailscale ping <runtime-hostname>`
+  - from macOS: `ssh <maintenance-user>@<runtime-hostname>`
+
+Optional: configure runtime host as a controlled exit node
+
+- On VPS runtime host:
+  - enable forwarding first (persisted), for example:
+    - `net.ipv4.ip_forward=1`
+    - `net.ipv6.conf.all.forwarding=1`
+  - `tailscale up --ssh --advertise-exit-node`
+- In the Tailscale admin console:
+  - approve the node’s advertised exit-node capability/routes
+- On operator workstation (after approval):
+  - verify node appears as an available exit node in `tailscale status`
+  - verify with `tailscale exit-node list`
+  - optionally enable it for the current session only when needed
+  - confirm SSH/admin path remains healthy before and after enabling exit-node mode
+- Keep this as an explicit checkpoint: do not continue to deeper hardening until the operator confirms exit-node approval state and connectivity behavior.
+
+Operational note:
+
+- If a prior node with the same hostname exists, Tailscale may assign a suffixed MagicDNS name (for example `runtime-host-1.<tailnet>`). Use `tailscale status --json` on the runtime host and record `Self.DNSName`/`Self.TailscaleIPs` as the canonical admin endpoint.
+- To reclaim the unsuffixed hostname, remove stale/retired devices with the same hostname from the Tailscale admin console, then re-apply the runtime hostname (`tailscale set --hostname <runtime-hostname>` or `tailscale up --hostname <runtime-hostname> ...`) and verify the updated `Self.DNSName`.
+
+Do not retire remaining public admin paths until these validation steps succeed in fresh sessions.
 
 ---
 
@@ -456,7 +533,7 @@ If your workflow uses an **IDE** or similar **agent-assisted coding environment*
 
 ## Step 10 — Prepare the Deployment Entry Files
 
-Before activation, place these entry files where the builder and runtime can access them (paths under this repo):
+Before activation, place these entry files where the builder and runtime can access them. In runtime deployments, stage canonical policy files under `AGENT_HOME/policies/` and keep only runtime-editable policy files under `AGENT_HOME/workspace/policies/`:
 
 - `policies/core/security-first-setup.md`
 - `policies/core/unified-deployment-and-security.md`
@@ -465,6 +542,8 @@ Before activation, place these entry files where the builder and runtime can acc
 - `policies/core/runtime/agent/AGENTS.md`
 
 The order is intentional (see the “Required Order of Operations” section above).
+
+Do not pre-create runtime-editable policy trees or `operations/` in workspace before the pipeline run. Those outputs should be materialized by `start_pipeline.py` during deployment handoff.
 
 ---
 
@@ -523,6 +602,9 @@ Before allowing any runtime agent to activate, manually verify:
 
 - workspace exists with input/output/logs
 - no workstation mounts inside workspace
+- `operations/` exists under `AGENT_HOME/workspace/operations/`
+- canonical runtime policy bundle exists outside workspace under `AGENT_HOME/policies/`
+- only runtime-editable policy files are in `AGENT_HOME/workspace/policies/`
 
 ### Network posture
 
@@ -551,11 +633,283 @@ If any of these fail, fix them before moving on.
 
 ---
 
+## Step 12A — Reproducible hardened runtime blueprint (generic, provider-agnostic)
+
+Use this as an implementation pattern for any agentic runtime on a VPS. This section is intentionally tool-agnostic and should be treated as the default secure baseline unless a stricter internal control applies.
+
+### 1) Private admin plane first, then remove public admin exposure
+
+- Establish a private management overlay (VPN/tailnet) for all operator administration.
+- Verify admin access over private addressing before changing SSH listeners.
+- Bind SSH daemon to private interface addresses only (no wildcard bind).
+- Disable any service/socket activation path that re-binds SSH on all interfaces.
+- Keep public SSH closed once private management is confirmed.
+
+### 2) Strong SSH authentication and identity controls
+
+- Enforce key-based SSH only.
+- Disable root SSH login.
+- Disable password and challenge-response SSH auth.
+- Use distinct identities:
+  - **maintenance identity** (sudo-capable, human-operated)
+  - **runtime identity** (non-sudo, service identity)
+- Avoid convenience bypasses (for example, passwordless sudo) in steady state.
+
+### 3) Provisioning vs runtime separation (mandatory)
+
+- Provision and patch as maintenance identity only.
+- Run all long-lived agent services as a dedicated runtime user.
+- Ensure runtime user is not in sudo-capable groups.
+- If a service is discovered running as root, migrate it immediately to the runtime user and remove conflicting legacy service units.
+
+### 4) Workspace boundary model
+
+Create and enforce a dedicated runtime workspace under the runtime user, with at minimum:
+
+- `workspace/input`
+- `workspace/output`
+- `workspace/logs`
+
+Recommended:
+
+- `workspace/tmp`
+- `workspace/cache`
+
+Rules:
+
+- Runtime command working directory defaults to the workspace root.
+- Runtime file operations are constrained to workspace paths by policy.
+- Agent state/config directories are separated from task workspace directories.
+- Operational registers and project archival memory live under `AGENT_HOME/workspace/operations/`.
+- Runtime policy consumption defaults to `AGENT_HOME/policies/` (outside workspace), while runtime-editable policy content lives under `AGENT_HOME/workspace/policies/`.
+
+### 5) Host firewall posture (default-deny inbound and outbound)
+
+- Set default deny inbound.
+- Set default deny outbound for hardened profiles.
+- Add explicit allow rules only for:
+  - private overlay interface traffic
+  - DNS
+  - HTTPS (and HTTP only if operationally required)
+  - time sync
+  - overlay transport bootstrap and keepalive traffic
+- Document every outbound exception with justification and owner.
+
+### 6) Drift detection and auditability
+
+- Snapshot approved firewall rules after change control.
+- Run periodic drift checks and emit an auditable alert when current rules differ from approved baseline.
+- Keep a small local hardening readme on-host describing intended network policy and exception process.
+
+### 7) Runtime control surfaces
+
+- Keep control APIs/gateways bound to loopback or private interface only.
+- Do not expose control-plane services on public interfaces by default.
+- Use a service manager (systemd/launchd equivalent), not ad-hoc detached shell backgrounding.
+
+### 8) Agent role segmentation profile model (logical least privilege)
+
+Use separate agent profiles/roles for major task classes:
+
+- read-only inspection
+- write (non-destructive edits)
+- deletion/cleanup
+- terminal execution
+- research
+- browser automation
+- messaging dispatch
+- scheduling/cron operations
+- scripted pipeline/code execution
+- memory/recall operations
+- delegation/orchestration
+- router/orchestrator
+
+Profile rules:
+
+- each profile has explicit scope and refusal rules
+- each profile defaults to manual approval for dangerous execution
+- no persistent dangerous allowlists by default
+- each profile runs with the same non-sudo runtime OS identity
+- router role must classify intent first, then assign least-privilege profile
+
+### 9) Operator-in-the-loop execution policy
+
+- For destructive, privileged, or ambiguous actions: require explicit operator approval before execution.
+- If request intent is mixed, split into staged subtasks with separate approvals.
+- If intent is unclear, pause and ask clarifying questions instead of guessing.
+
+### 10) Practical validation checks before moving forward
+
+Confirm all of the following:
+
+- public SSH is closed and private admin path works
+- root SSH login is denied
+- runtime services are running as non-sudo runtime identity
+- firewall defaults are deny/deny with explicit allowlists
+- runtime API/gateway bindings are private-only
+- workspace directories exist and are owned by runtime user
+- profile segmentation exists and router policy is defined
+- dangerous command flow remains manual approval by default
+
+Only proceed to the next file after these checks pass.
+
+---
+
+### 11) Lockout-safe SSH and firewall change-control (mandatory)
+
+When changing SSH listener ports, bind posture, authentication, or host firewall rules on a VPS:
+
+1. Establish at least one verified out-of-band recovery path first (provider console/recovery ISO).
+   - If console/recovery is unavailable or known broken, treat this as a hard blocker and do not proceed.
+2. Snapshot current SSH and firewall state before modification.
+3. Add the new SSH port/rule first (allowlist source if possible), then validate daemon config (`sshd -t`).
+4. Restart SSH and verify a new login succeeds on the new path **before** removing the old one.
+5. Keep old SSH access open until end-to-end verification is complete from a second session.
+6. Remove old port/rules only after successful validation and logging.
+7. Record the exact rollback commands and execute a post-change audit immediately.
+
+Hard rules:
+
+- Never change SSH port and close the old port in one unverified step.
+- Never treat “add a new SSH access port” as “replace existing listener now.” Keep the current working port active until dual-path login is verified from fresh sessions.
+- If the host uses systemd socket activation (`ssh.socket`), do not switch activation mode (`ssh.socket` ↔ `ssh.service`) during the same remote hardening step. Stabilize one mode first, then add the new port and verify both listeners before any mode migration.
+- Never assume provider console/recovery is available. If access control is being changed, operate as if console recovery is unavailable and full rebuild is the only fallback.
+- Never remove or weaken an existing verified access route until another independent route is proven in a fresh session.
+- Never restart SSH after auth/bind/firewall edits without a pre-armed automatic rollback that restores a known-good config and listener.
+- Never assume SSH key passphrase equals remote sudo password.
+- Never assume passwordless sudo exists; treat privileged changes as interactive unless explicitly confirmed.
+- If privileged access is unavailable, stop and use break-glass recovery (console/root path) rather than repeated failed remote attempts.
+- Never set or rotate a maintenance-user sudo password without immediately handing that value to the human operator via an approved secret channel they control.
+- Never disable root SSH login (or any break-glass remote path) until all of the following are proven in a fresh session:
+  - maintenance user key login works on the target port(s),
+  - interactive sudo works with an operator-known password,
+  - out-of-band console/recovery access is confirmed functional.
+- Never store newly generated privileged credentials only on-host (for example root-only files) without operator confirmation and external recovery copy.
+- Never edit local credential metadata to claim privileged/password state that has not been verified end-to-end after reconnect.
+- Never proceed with SSH/auth hardening when operator explicitly requires a pre-change halt checkpoint; stop and request explicit go-ahead before any action that could impact access.
+- If provider console is non-functional, require two independent remote admin paths (for example old SSH path + new SSH path) verified by both operator and agent before any credential or root-login changes.
+
+Failure-pattern reference (must be prevented):
+
+- Generating an unknown sudo password, then removing fallback/root remote access before operator verification, can create full-management lockout even if SSH daemon remains reachable.
+- Changing multiple auth surfaces at once (user credentials, SSH root policy, port behavior) without checkpointed validation creates compounding failure risk.
+
+Real incident note (documented failure and correction):
+
+- What went wrong:
+  - An SSH authentication policy change (`AuthenticationMethods publickey,password`) was applied and `sshd` was restarted as part of the same live step.
+  - Validation was done against active config state, but not with an isolated candidate file and rollback guard.
+  - After restart, remote SSH on the management port (`40227`) was no longer listening (`connection refused`), requiring console recovery.
+  - Several command paths used `sudo ... bash -s`/heredoc patterns that were not deterministic under interactive password prompts, causing intended file writes/checks to be unreliable.
+- Why this is unsafe:
+  - Restarting `sshd` after auth-surface edits without a rollback timer can hard-cut all remote admin paths.
+  - Checking only post-restart behavior is too late if the daemon fails to bind or loads conflicting directives.
+  - Assuming “console recovery exists” creates false confidence; on many operators this means total lockout and forced droplet rebuild.
+- Required safer method (must use this instead):
+  1. Prove two independent admin routes before change (for example tailnet SSH route A and separate public/VPN route B, each tested in fresh sessions).
+  2. Write proposed SSH changes to a candidate file (or staged include), do **not** immediately replace the active known-good file.
+  3. Validate candidate syntax/semantics first with explicit config test (`sshd -t` against the intended config set).
+  4. Apply changes using deterministic non-interactive command forms (no stdin-fragile heredoc/sudo patterns for critical edits).
+  5. Keep one verified remote admin session open and start a second fresh-session login test before committing.
+  6. Arm an automatic rollback job (time-delayed restore + ssh restart) before any restart.
+  7. Restart SSH, verify listener bind (`ss -tlnp`) and successful fresh login on both independent routes.
+  8. Cancel rollback only after both checks pass and operator confirms access.
+  9. Apply one auth change per checkpoint (no bundled root/auth/port/firewall changes in one step).
+
+Timed rollback pattern that worked in practice:
+
+- Arm a rollback before restart (for example restore known-good file and restart `sshd` after 180 seconds).
+- Restart SSH once.
+- Immediately validate:
+  - listener is bound on expected management port (`ss -tlnp`)
+  - route A login works in a fresh session
+  - route B login works in a fresh session
+- If all checks pass, cancel the rollback timer; otherwise let rollback execute and stop.
+
+Safest implementation sequence observed in practice:
+
+1. Confirm two independent admin routes in fresh sessions before any change.
+2. Keep one route active while changing only one control surface at a time.
+3. Pre-arm timed rollback before any `sshd` restart tied to auth/listener edits.
+4. Verify listener bind immediately after restart (`ss -tlnp`) before any further actions.
+5. Verify route A login and route B login again after restart.
+6. Only then cancel rollback and proceed to the next checkpoint.
+7. Do not remove public/admin exposure until private admin path remains stable across fresh-session retests.
+
+SSH auth compatibility note (important):
+
+- On Ubuntu/OpenSSH builds where direct `AuthenticationMethods publickey,password` is rejected, enforce password-required login with:
+  - `AuthenticationMethods publickey,keyboard-interactive`
+  - `KbdInteractiveAuthentication yes`
+  - `UsePAM yes`
+- This still requires both factors on every SSH path (key + password prompt), while remaining compatible with host policy defaults.
+- Validate with both tests after restart:
+  - key-only login must fail
+  - key + password login must succeed
+
+Strict key+password enforcement procedure (recommended standard):
+
+1. Pre-check:
+   - confirm at least one active maintenance shell is open
+   - confirm one additional fresh-session login path is available (or provider console is open and ready)
+2. Capture baseline:
+   - save current `sshd -T` auth-related output
+   - save current listener state (`ss -tlnp`)
+3. Stage config:
+   - write candidate auth policy to the managed include file
+   - validate with `sshd -t` before restart
+4. Arm rollback:
+   - pre-arm timed rollback that restores known-good SSH config and restarts SSH after a short timeout
+5. Restart and validate immediately:
+   - verify listener is bound on expected port
+   - test fresh login with key-only (must fail)
+   - test fresh login with key+password (must succeed)
+6. Commit only after proof:
+   - cancel rollback timer only after both tests pass and operator confirms access
+7. Stop on any uncertainty:
+   - if validation is ambiguous or access degrades, stop and let rollback execute or recover before further edits
+
+Operator verification commands (fresh-session checks):
+
+```bash
+# 1) key-only must fail
+ssh -S none -o BatchMode=yes -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no <maintenance-user>@<host>
+
+# 2) key + password must succeed
+ssh -S none -o PreferredAuthentications=publickey,keyboard-interactive,password -o KbdInteractiveAuthentication=yes <maintenance-user>@<host>
+```
+
+Proven lockout-safe sequence (what worked):
+
+1. Confirm maintenance-user key login and interactive sudo on the current SSH path.
+2. Add the new SSH listener/port while keeping the current working port active.
+3. Verify login on both old and new ports from fresh sessions.
+4. Promote the new port as primary in operator metadata/env only after dual-path verification.
+5. Remove the old port listener only after operator confirms they can log in on the new port.
+6. Re-test login on the new port immediately after old-port removal.
+7. Pause for explicit operator confirmation before any additional lockout-risking step (for example disabling root SSH login or tightening firewall rules).
+
+Observed implementation detail that prevented repeat lockout:
+
+- Remove temporary/recovery SSH include files after recovery (`/etc/ssh/sshd_config.d/*.conf`) if they reintroduce legacy ports or weaker auth settings.
+- Keep one canonical hardening include with explicit target posture (single approved port + explicit `AuthenticationMethods` requiring key+password), then validate with `sshd -t`, `sshd -T`, and fresh non-multiplexed login tests.
+- Never treat reused control-socket sessions as proof of authentication policy; always run fresh-session checks (`-S none`, `ControlMaster=no`) before concluding auth posture is enforced.
+
+---
+
 ## Step 13 — What Happens Next
 
 Once this file is complete, move immediately to:
 
 - `policies/core/unified-deployment-and-security.md`
+
+Pre-handoff hard gate before opening unified deployment:
+
+- Capture and confirm effective SSH auth output (`sshd -T`) includes explicit `authenticationmethods` requiring both factors.
+- Run and document fresh non-multiplexed auth tests:
+  - key-only fails
+  - key+password succeeds
+- Proceed only after those checks pass in the current host state.
 
 After that runbook, use:
 
@@ -601,5 +955,5 @@ The correct order is:
 **secure workstation and accounts → isolate runtime on VPS → split provisioning vs runtime users → create workspace → isolate browser → lock down network posture → provision isolated service accounts (Git, APIs, messaging, tools, IDE/agent coding environment) into `AGENT_HOME/.env` → place entry files → verify environment → deployment handoff → policies pipeline when ready → bootstrap agent pack → activate only after audit**
 
 <!-- policy-read-order-nav:bottom -->
-> **Next step:** continue to [core/unified-deployment-and-security.md](unified-deployment-and-security.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
+> **Next step:** continue to [core/firewall-exceptions-workflow.md](firewall-exceptions-workflow.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
 <!-- policy-read-order-nav:bottom-end -->

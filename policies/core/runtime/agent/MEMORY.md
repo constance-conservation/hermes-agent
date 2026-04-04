@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 16 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
+> **Governance read order** — step 17 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
 > **Before this file:** read [core/runtime/agent/SOUL.md](SOUL.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -25,13 +25,13 @@ When context is reset or compacted:
 1. re-read `AGENTS.md`
 2. re-read this file
 3. re-read `ORCHESTRATOR.md`
-4. re-read recent entries under `operations/projects/<project_slug>/memory/archival/` for active projects (see `policies/core/governance/artifacts-and-archival-memory.md`)
+4. re-read recent entries under `AGENT_HOME/workspace/operations/projects/<project_slug>/memory/archival/` for active projects (see `policies/core/governance/artifacts-and-archival-memory.md`)
 5. continue from documented state
 
 This file is subordinate to the canonical security rules.
 
 ## Archival memory (mandatory)
-Project-level detail, evidence trails, and recall-oriented logs live under each project’s `operations/projects/<project_slug>/memory/` tree—not in this file.
+Project-level detail, evidence trails, and recall-oriented logs live under each project’s `AGENT_HOME/workspace/operations/projects/<project_slug>/memory/` tree—not in this file.
 
 Minimum cadence for writing archival files (in addition to role prompts):
 - after substantive decisions or governance-relevant actions

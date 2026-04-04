@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 12 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
+> **Governance read order** — step 13 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
 > **Before this file:** read [core/runtime/agent/BOOTSTRAP.md](BOOTSTRAP.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -64,7 +64,7 @@ This file exists to:
 ## Memory & Files
 
 - Orchestrator durable **active** state lives in `MEMORY.md` (summaries and pointers only).
-- **Project-specific** durable memory, archival logs, and recall-oriented files live under `operations/projects/<project_slug>/` per `policies/core/governance/artifacts-and-archival-memory.md`. Never mix project trees.
+- **Project-specific** durable memory, archival logs, and recall-oriented files live under `AGENT_HOME/workspace/operations/projects/<project_slug>/` per `policies/core/governance/artifacts-and-archival-memory.md`. Never mix project trees.
 - Every agent with a project affiliation must **append archival memory** (decisions, evidence pointers, handoff notes) on a **continuous cadence**—at minimum end of substantive work units and before context compaction—not only when asked.
 - Do not store secrets in `MEMORY.md` or in archival files.
 - Do not treat local workspace files as permission to violate the canonical security baseline

@@ -1,5 +1,5 @@
 <!-- policy-read-order-nav:top -->
-> **Governance read order** — step 17 of 53 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
+> **Governance read order** — step 18 of 54 in the canonical `policies/` sequence (layer map & tables: [`README.md`](../../../README.md)).
 > **Before this file:** read [core/runtime/agent/MEMORY.md](MEMORY.md) and everything earlier in that sequence. **Do not** interpret this document as authoritative until those prerequisites are satisfied.
 > **This file:** safe to apply only after the prerequisite above (if any) is complete.
 <!-- policy-read-order-nav:top-end -->
@@ -17,10 +17,10 @@ It provides local workspace routing guidance only.
 ## Rules
 1. Never load full repositories into orchestrator context
 2. Route deep work to the correct project lead or scoped subagent
-3. Maintain isolation across projects; project state lives under `operations/projects/<project_slug>/` per `policies/core/governance/artifacts-and-archival-memory.md`
+3. Maintain isolation across projects; project state lives under `AGENT_HOME/workspace/operations/projects/<project_slug>/` per `policies/core/governance/artifacts-and-archival-memory.md`
 4. Do not let local routing convenience override the canonical security model
 5. If security gating has not been completed, do not proceed to broader project activation
-6. Before major decisions, verify recent `operations/projects/<slug>/memory/archival/` entries for involved projects
+6. Before major decisions, verify recent `AGENT_HOME/workspace/operations/projects/<slug>/memory/archival/` entries for involved projects
 
 This file depends on:
 - `policies/core/runtime/agent/BOOTSTRAP.md`

@@ -2,11 +2,19 @@
 """Create operations/*.md stubs if missing (does not overwrite)."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
-OPS = REPO / "operations"
+
+
+def _resolve_workspace_root() -> Path:
+    """Resolve where operations/ should be created."""
+    explicit = os.environ.get("AGENT_WORKSPACE_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return REPO
 
 STUBS = [
     "README.md",
@@ -30,17 +38,24 @@ HEADER = """# {title}
 
 
 def main() -> int:
-    OPS.mkdir(parents=True, exist_ok=True)
-    (OPS / "projects").mkdir(exist_ok=True)
+    workspace_root = _resolve_workspace_root()
+    ops = workspace_root / "operations"
+    ops.mkdir(parents=True, exist_ok=True)
+    print("operations root:", ops)
+    (ops / "projects").mkdir(exist_ok=True)
     created = 0
     for name in STUBS:
-        path = OPS / name
+        path = ops / name
         if path.exists():
             continue
         title = name.replace(".md", "").replace("_", " ")
         path.write_text(HEADER.format(title=title), encoding="utf-8")
         created += 1
-        print("created", path.relative_to(REPO))
+        try:
+            rel = path.relative_to(REPO)
+        except ValueError:
+            rel = path
+        print("created", rel)
     if created == 0:
         print("init_operations_stubs: nothing to create (all present)")
     return 0
