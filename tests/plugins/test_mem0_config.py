@@ -22,3 +22,19 @@ def test_load_config_merges_mem0_api_key_from_env(tmp_path, monkeypatch):
     assert out["user_id"] == "file-user"
     assert out["agent_id"] == "a1"
     assert out["rerank"] is False
+
+
+def test_mem0_search_filters_non_empty():
+    from plugins.memory.mem0 import _mem0_search_filters
+
+    assert _mem0_search_filters("alice") == {"AND": [{"user_id": "alice"}]}
+
+
+def test_normalize_memory_rows():
+    from plugins.memory.mem0 import _normalize_memory_rows
+
+    assert _normalize_memory_rows(None) == []
+    assert _normalize_memory_rows([]) == []
+    assert _normalize_memory_rows([{"memory": "a"}]) == [{"memory": "a"}]
+    assert _normalize_memory_rows({"results": [{"memory": "b"}]}) == [{"memory": "b"}]
+    assert _normalize_memory_rows({"memories": [{"memory": "c"}]}) == [{"memory": "c"}]

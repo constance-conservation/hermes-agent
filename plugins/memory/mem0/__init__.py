@@ -71,6 +71,30 @@ def _load_config() -> dict:
     return defaults
 
 
+def _mem0_search_filters(user_id: str) -> dict:
+    """Build v2 search filters (required by Mem0 API; must be non-empty).
+
+    Scope matches historical plugin behavior: filter by ``user_id`` only
+    (``add`` still sends ``agent_id`` for storage metadata).
+    """
+    uid = (user_id or "").strip() or "hermes-user"
+    return {"AND": [{"user_id": uid}]}
+
+
+def _normalize_memory_rows(response: Any) -> List[dict]:
+    """Normalize MemoryClient search/get_all payloads to a list of row dicts."""
+    if response is None:
+        return []
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict):
+        for key in ("results", "memories"):
+            rows = response.get(key)
+            if isinstance(rows, list):
+                return rows
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas
 # ---------------------------------------------------------------------------
@@ -132,6 +156,7 @@ class Mem0MemoryProvider(MemoryProvider):
         self._user_id = "hermes-user"
         self._agent_id = "hermes"
         self._rerank = True
+        self._keyword_search = False
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread = None
@@ -211,6 +236,7 @@ class Mem0MemoryProvider(MemoryProvider):
         self._user_id = self._config.get("user_id", "hermes-user")
         self._agent_id = self._config.get("agent_id", "hermes")
         self._rerank = self._config.get("rerank", True)
+        self._keyword_search = self._config.get("keyword_search", False)
 
     def system_prompt_block(self) -> str:
         return (
@@ -237,14 +263,16 @@ class Mem0MemoryProvider(MemoryProvider):
         def _run():
             try:
                 client = self._get_client()
-                results = client.search(
-                    query=query,
-                    user_id=self._user_id,
+                raw = client.search(
+                    query,
+                    filters=_mem0_search_filters(self._user_id),
                     rerank=self._rerank,
                     top_k=5,
+                    keyword_search=self._keyword_search,
                 )
-                if results:
-                    lines = [r.get("memory", "") for r in results if r.get("memory")]
+                rows = _normalize_memory_rows(raw)
+                if rows:
+                    lines = [r.get("memory", "") for r in rows if r.get("memory")]
                     with self._prefetch_lock:
                         self._prefetch_result = "\n".join(f"- {l}" for l in lines)
                 self._record_success()
@@ -296,8 +324,9 @@ class Mem0MemoryProvider(MemoryProvider):
 
         if tool_name == "mem0_profile":
             try:
-                memories = client.get_all(user_id=self._user_id)
+                raw = client.get_all(user_id=self._user_id)
                 self._record_success()
+                memories = _normalize_memory_rows(raw)
                 if not memories:
                     return json.dumps({"result": "No memories stored yet."})
                 lines = [m.get("memory", "") for m in memories if m.get("memory")]
@@ -313,14 +342,21 @@ class Mem0MemoryProvider(MemoryProvider):
             rerank = args.get("rerank", False)
             top_k = min(int(args.get("top_k", 10)), 50)
             try:
-                results = client.search(
-                    query=query, user_id=self._user_id,
-                    rerank=rerank, top_k=top_k,
+                raw = client.search(
+                    query,
+                    filters=_mem0_search_filters(self._user_id),
+                    rerank=rerank,
+                    top_k=top_k,
+                    keyword_search=self._keyword_search,
                 )
                 self._record_success()
-                if not results:
+                rows = _normalize_memory_rows(raw)
+                if not rows:
                     return json.dumps({"result": "No relevant memories found."})
-                items = [{"memory": r.get("memory", ""), "score": r.get("score", 0)} for r in results]
+                items = [
+                    {"memory": r.get("memory", ""), "score": r.get("score", 0)}
+                    for r in rows
+                ]
                 return json.dumps({"results": items, "count": len(items)})
             except Exception as e:
                 self._record_failure()
