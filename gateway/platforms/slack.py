@@ -216,7 +216,28 @@ class SlackAdapter(BasePlatformAdapter):
             primary_token = bot_tokens[0]
             # Pass our module logger so Bolt unhandled-request WARNINGs and client
             # logs land in gateway.log alongside gateway.platforms.slack messages.
-            self._app = AsyncApp(token=primary_token, logger=logger)
+            async def _slack_before_authorize_logger(body, next_):
+                # Runs before listeners — confirms Slack delivered something over Socket Mode.
+                if os.getenv("SLACK_LOG_INBOUND", "").lower() in ("1", "true", "yes"):
+                    if isinstance(body, dict):
+                        ev = body.get("event") or {}
+                        et = ev.get("type")
+                        if et:
+                            ch = str(ev.get("channel") or "")
+                            tail = ch[-4:] if len(ch) >= 4 else ch
+                            logger.info(
+                                "[Slack] bolt envelope event type=%s subtype=%s channel=…%s",
+                                et,
+                                ev.get("subtype") or "",
+                                tail,
+                            )
+                return await next_()
+
+            self._app = AsyncApp(
+                token=primary_token,
+                logger=logger,
+                before_authorize=_slack_before_authorize_logger,
+            )
 
             # Register each bot token and map team_id → client
             for token in bot_tokens:
@@ -239,25 +260,34 @@ class SlackAdapter(BasePlatformAdapter):
                     bot_name, team_name, team_id,
                 )
 
+            # Typos in SLACK_ALLOWED_USERS never match incoming user ids (silent deny in groups).
+            allow_raw = os.getenv("SLACK_ALLOWED_USERS", "").strip()
+            if allow_raw and allow_raw != "*":
+                first_client = next(iter(self._team_clients.values()), None)
+                if first_client is not None:
+                    for uid in [x.strip() for x in allow_raw.split(",") if x.strip()]:
+                        try:
+                            r = await first_client.users_info(user=uid)
+                            if not r.get("ok"):
+                                logger.error(
+                                    "[Slack] SLACK_ALLOWED_USERS id %r invalid in this workspace "
+                                    "(users.info error=%s). Use Profile → … → Copy member ID.",
+                                    uid,
+                                    r.get("error"),
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                "[Slack] Could not validate SLACK_ALLOWED_USERS=%r: %s",
+                                uid,
+                                e,
+                            )
+
             # Use event("message") only. app.message("") relies on Bolt's text matcher,
             # which skips when event.text is empty — that can drop valid Socket Mode
             # payloads (blocks-only, some subtypes). event("message") still receives
             # those; dedupe remains on team/channel/ts.
             async def _route_incoming_slack_message(body, event, say):
                 try:
-                    if os.getenv("SLACK_LOG_INBOUND", "").lower() in ("1", "true", "yes"):
-                        raw_ev = event if isinstance(event, dict) else None
-                        if not raw_ev and isinstance(body, dict):
-                            raw_ev = body.get("event")
-                        if isinstance(raw_ev, dict):
-                            ch = raw_ev.get("channel") or ""
-                            tail = ch[-4:] if len(ch) >= 4 else ch
-                            logger.info(
-                                "[Slack] inbound evt type=%s subtype=%s channel=…%s",
-                                raw_ev.get("type"),
-                                raw_ev.get("subtype") or "",
-                                tail,
-                            )
                     normalized = _normalize_slack_socket_event(body, event)
                     if not normalized:
                         logger.warning(
@@ -312,6 +342,13 @@ class SlackAdapter(BasePlatformAdapter):
             logger.info(
                 "[Slack] Socket Mode connected (%d workspace(s))",
                 len(self._team_clients),
+            )
+            logger.info(
+                "[Slack] If messages never arrive: enable Event Subscriptions bot events "
+                "(message.im, message.channels, message.groups, message.mpim, app_mention), "
+                "add channels:history/groups:history, reinstall the app, and ensure only one "
+                "active gateway per app (or set SLACK_LOG_INBOUND=1 to see bolt envelopes). "
+                "Multiple Socket Mode connections receive load-balanced events."
             )
             return True
 
