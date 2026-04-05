@@ -1,6 +1,12 @@
 # Machine-readable token governance for Hermes (copy to workspace/operations/).
 # Path: HERMES_HOME/workspace/operations/hermes_token_governance.runtime.yaml
 #
+# Hermes already loads this file when present and enabled: true — see
+# agent/token_governance_runtime.py (apply_token_governance_runtime from run_agent.py).
+# Do not patch hermes-agent run_agent.py to add another loader. Follow the keys in this
+# template (tier_models A–F, chief_default_tier, blocked_model_substrings, …). Ad-hoc
+# keys such as model_tiers / tool_restrictions_by_role are not read by Hermes.
+#
 # Aligns with policies/core/governance/standards/token-model-tool-and-channel-governance-policy.md
 # (Tiers A–F) and workspace/operations/MODEL_ROUTING_REGISTRY.md. Edit **tier_models** when
 # OpenRouter pricing or availability changes — do not scatter model IDs across config by hand.
