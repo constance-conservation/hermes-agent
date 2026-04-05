@@ -20,6 +20,18 @@
 #   ./scripts/ssh_droplet.sh 'hostname'
 #   ./scripts/ssh_droplet.sh --sudo-user hermesuser 'cd ~/hermes-agent && git pull'
 #
+# Sudo for workstation `hermes … droplet` (HERMES_DROPLET_WORKSTATION_CLI=1 + --sudo-user):
+#   ON  (default): remote runs `sudo -k; sudo -u <runtime> bash -lc …` (password on VPS TTY).
+#   OFF: remote runs `bash -lc …` as SSH_USER (no sudo). Use for headless git pull, etc., when
+#        SSH_USER is already the account that should own the work, or you accept running as admin.
+#   Toggle per invocation:
+#     HERMES_DROPLET_REQUIRE_SUDO=0 ./scripts/ssh_droplet.sh 'cd ~/hermes-agent && git pull'
+#     AGENT_DROPLET_REQUIRE_SUDO=1 hermes tui droplet   # with repo scripts/ on PATH (see .envrc)
+#   Or prefix flags (before --sudo-user / remote command):
+#     ./scripts/ssh_droplet.sh --droplet-no-sudo '…'
+#     ./scripts/ssh_droplet.sh --droplet-require-sudo --sudo-user hermesuser '…'
+#   Optional line in the same env file as SSH_*: HERMES_DROPLET_REQUIRE_SUDO=0 (default for scripts).
+#
 # Remote side of "<cli> … droplet" (workstation): scripts/hermes → scripts/agent-droplet.
 # See policies/core/unified-deployment-and-security.md (Step 15).
 
@@ -52,6 +64,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${line#*=}"
   case "$key" in
     SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|SSH_SUDO_PASSWORD) export "${key}=${val}" ;;
+    HERMES_DROPLET_REQUIRE_SUDO) export HERMES_DROPLET_REQUIRE_SUDO="${val}" ;;
     HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
       case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
       ;;
@@ -128,15 +141,38 @@ if [[ ! -t 0 && "${HERMES_DROPLET_INTERACTIVE:-}" != "1" && "$_ALLOW_ENV_PASS_FR
   exit 1
 fi
 
+# Optional leading flags override HERMES_DROPLET_REQUIRE_SUDO for this process only (after env file).
+while [[ "${1:-}" == "--droplet-no-sudo" || "${1:-}" == "--droplet-require-sudo" ]]; do
+  if [[ "$1" == "--droplet-no-sudo" ]]; then
+    export HERMES_DROPLET_REQUIRE_SUDO=0
+  else
+    export HERMES_DROPLET_REQUIRE_SUDO=1
+  fi
+  shift
+done
+
+_drop_sudo_on() {
+  case "${HERMES_DROPLET_REQUIRE_SUDO:-1}" in
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 if [[ "${1:-}" == "--sudo-user" ]]; then
   shift
   SUDO_U="${1:?--sudo-user requires a username}"
   shift
   INNER=$(printf '%q' "$*")
-  # Workstation `hermes … droplet`: always sudo (even if SSH_USER matches target); sudo -k clears
-  # cached credentials so a password is normally required. No sudo -S / no SSH_SUDO_PASSWORD.
+  # Workstation `hermes … droplet`: sudo on by default (`sudo -k; sudo -u …`). Turn off with
+  # HERMES_DROPLET_REQUIRE_SUDO=0 or --droplet-no-sudo when you need a non-interactive remote step.
   if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
-    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
+    if _drop_sudo_on; then
+      exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
+    fi
+    if [[ "${SSH_USER}" != "${SUDO_U}" ]]; then
+      echo "ssh_droplet.sh: warning: sudo disabled (HERMES_DROPLET_REQUIRE_SUDO=0) but SSH_USER (${SSH_USER}) != runtime (${SUDO_U}); command runs as ${SSH_USER}" >&2
+    fi
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}bash -lc ${INNER}"
   fi
   # Automation / direct ssh_droplet: skip sudo when already the target account.
   if [[ "${SSH_USER}" == "${SUDO_U}" ]]; then

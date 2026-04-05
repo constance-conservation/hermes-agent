@@ -3,8 +3,8 @@
 # policies/core/unified-deployment-and-security.md). Runs the same CLI on the VPS (venv + HERMES_HOME). All args forwarded.
 # Requires ~/.env/.env with SSH_* (host, port, user). SSH key passphrase is typed interactively
 # (env-file SSH_PASSPHRASE / HERMES_DROPLET_ALLOW_ENV_PASSPHRASE is ignored for this entrypoint).
-# Remote command always runs under sudo -u <runtime> (sudo -k first) so your sudo password is required
-# on the VPS TTY when your account is not passwordless-sudo for that user (no SSH_SUDO_PASSWORD pipe).
+# Remote command uses sudo -u <runtime> by default (sudo -k first). Set AGENT_DROPLET_REQUIRE_SUDO=0
+# to run as SSH_USER without sudo (e.g. headless maintenance). See scripts/ssh_droplet.sh header.
 # Optional env: AGENT_DROPLET_RUNTIME_USER, AGENT_DROPLET_RUNTIME_HOME, AGENT_DROPLET_REPO,
 # AGENT_DROPLET_PROFILE (default chief-orchestrator — passed as -p so argv wins over active_profile)
 # HERMES_DROPLET_INTERACTIVE=1 lets ssh_droplet pass its TTY check when stdin is not a TTY (IDE).
@@ -27,4 +27,5 @@ for a in "$@"; do
 done
 export HERMES_DROPLET_INTERACTIVE=1
 export HERMES_DROPLET_WORKSTATION_CLI=1
+export HERMES_DROPLET_REQUIRE_SUDO="${AGENT_DROPLET_REQUIRE_SUDO:-${HERMES_DROPLET_REQUIRE_SUDO:-1}}"
 exec env -u HERMES_DROPLET_ALLOW_ENV_PASSPHRASE bash "$REPO/scripts/ssh_droplet.sh" --sudo-user "$RUNTIME_USER" "$cmd"
