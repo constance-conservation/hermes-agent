@@ -1597,7 +1597,15 @@ def load_config() -> Dict[str, Any]:
         except Exception as e:
             print(f"Warning: Failed to load config: {e}")
     
-    return _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
+    config = _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
+    # Resolve tier: placeholders (tier A–F) from workspace token governance YAML.
+    try:
+        from agent.token_governance_runtime import resolve_tier_strings_in_config
+
+        config = resolve_tier_strings_in_config(config)
+    except Exception:
+        pass
+    return config
 
 
 _SECURITY_COMMENT = """

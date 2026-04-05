@@ -6446,7 +6446,15 @@ class AIAgent:
         # They are initialized in __init__ and must persist across run_conversation
         # calls so that nudge logic accumulates correctly in CLI mode.
         self.iteration_budget = IterationBudget(self.max_iterations)
-        
+
+        # Optional per-turn tier routing (workspace/operations/hermes_token_governance.runtime.yaml)
+        try:
+            from agent.token_governance_runtime import apply_per_turn_tier_model
+
+            apply_per_turn_tier_model(self, user_message)
+        except Exception:
+            logger.debug("apply_per_turn_tier_model failed", exc_info=True)
+
         # Initialize conversation (copy to avoid mutating the caller's list)
         messages = list(conversation_history) if conversation_history else []
 

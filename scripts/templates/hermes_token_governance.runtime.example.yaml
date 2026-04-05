@@ -1,34 +1,53 @@
 # Machine-readable token governance for Hermes (copy to workspace/operations/).
 # Path: HERMES_HOME/workspace/operations/hermes_token_governance.runtime.yaml
 #
-# Created by activation Session 6 alongside markdown registries. When present and
-# enabled, Hermes applies these caps on every AIAgent start (CLI, gateway, delegate).
+# Aligns with policies/core/governance/standards/token-model-tool-and-channel-governance-policy.md
+# (Tiers A–F) and workspace/operations/MODEL_ROUTING_REGISTRY.md. Edit **tier_models** when
+# OpenRouter pricing or availability changes — do not scatter model IDs across config by hand.
 #
-# Important: also set config.yaml model.default (and compression.summary_model +
-# auxiliary.*.model / delegation.model) to the same cheap default — otherwise the
-# main gateway and auxiliary agents keep billing expensive models even when this
-# file downgrades the primary agent.
+# In config.yaml use placeholders: `tier:D` (chief default), `tier:B` (auxiliary / summaries), etc.
+# Hermes resolves them via load_config() and per-turn routing (dynamic_tier_routing).
 #
 # Disable enforcement: HERMES_TOKEN_GOVERNANCE_DISABLE=1
-# Allow premium/blocked models despite blocklist: HERMES_GOVERNANCE_ALLOW_PREMIUM=1
+# Allow blocked models through: HERMES_GOVERNANCE_ALLOW_PREMIUM=1
 
 version: 1
 enabled: true
 
-# If the configured model ID contains any of these substrings, replace with default_model.
+# Concrete OpenRouter slugs per tier (see policy § Model Tiering Framework).
+tier_models:
+  A: "openrouter/auto"
+  B: "google/gemini-2.5-flash-lite"
+  C: "deepseek/deepseek-reasoner"
+  D: "google/gemini-2.5-flash"
+  E: "google/gemini-2.5-pro"
+  F: "anthropic/claude-sonnet-4.5"
+
+# Chief orchestrator baseline when config says `model.default: tier:D` (or omit default_model here).
+chief_default_tier: D
+
+# When a configured model matches blocked_model_substrings, fall back to this tier (usually B).
+blocked_fallback_tier: B
+
+# Optional: single-string default_model (resolved if it is `tier:X`); if omitted, tier_models[chief_default_tier] is used for blocklist replacement when needed.
+# default_model: "tier:D"
+
 blocked_model_substrings:
-  - opus
-  - o1-preview
-  - o3-
+  - claude-opus
+  - claude-sonnet-4
+  - claude-3.5-sonnet
+  - gpt-4
+  - gpt-5
+  - openai/o1
+  - openai/o3
 
-# Must be non-empty for downgrade to apply (OpenRouter-style IDs work).
-default_model: "anthropic/claude-sonnet-4.5"
-
-# Hard cap on tool-calling iterations per user turn (same family as agent.max_turns).
 max_agent_turns: 60
-
-# Cap delegate_task child iterations (in addition to config delegation.max_iterations).
 delegation_max_iterations: 30
 
-# When true, omit .hermes.md / workspace BOOTSTRAP+AGENTS / SOUL from system prompt (saves tokens).
+# Per user message, pick tier B/C/D and set the main agent model from tier_models (default: true).
+dynamic_tier_routing: true
+
+# Default tier when heuristics do not force B or C.
+default_routing_tier: D
+
 skip_context_files: false

@@ -5,12 +5,16 @@ and ``enabled: true``, Hermes applies model downgrade rules, iteration caps, opt
 ``skip_context_files``, and delegation iteration caps on every :class:`~run_agent.AIAgent`
 construction.
 
+Model IDs are **not** hardcoded in Hermes: use ``tier_models`` (tiers A–F) and
+``tier:D``-style placeholders in ``config.yaml``; see ``agent/tier_model_routing.py``.
+
 Disable entirely with ``HERMES_TOKEN_GOVERNANCE_DISABLE=1``. Allow blocked (premium)
 models to pass through with ``HERMES_GOVERNANCE_ALLOW_PREMIUM=1``.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -53,11 +57,76 @@ def load_runtime_config() -> Optional[Dict[str, Any]]:
     return data
 
 
+def resolve_tier_strings_in_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Replace ``tier:X`` string values in *config* using runtime ``tier_models``."""
+    cfg = load_runtime_config()
+    if not cfg:
+        return config
+    from agent.tier_model_routing import (
+        normalize_tier_models,
+        resolve_tier_placeholder,
+        TIER_SENTINEL_RE,
+    )
+
+    tier_models = normalize_tier_models(cfg.get("tier_models"))
+    if not tier_models:
+        return config
+
+    fb = str(cfg.get("chief_default_tier") or "D").strip().upper()
+    if len(fb) != 1 or fb not in "ABCDEF":
+        fb = "D"
+
+    out = copy.deepcopy(config)
+
+    def _walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                if isinstance(v, str) and TIER_SENTINEL_RE.match(v.strip()):
+                    obj[k] = resolve_tier_placeholder(v, tier_models, fallback_tier=fb)
+                else:
+                    _walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item)
+
+    _walk(out)
+    return out
+
+
 def apply_token_governance_runtime(agent: Any) -> None:
     """Apply governance caps to a freshly constructed ``AIAgent`` (mutates in place)."""
     cfg = load_runtime_config()
     if not cfg:
         return
+
+    agent._token_governance_cfg = cfg
+
+    from agent.tier_model_routing import (
+        normalize_tier_models,
+        resolve_tier_placeholder,
+        TIER_SENTINEL_RE,
+    )
+
+    tier_models = normalize_tier_models(cfg.get("tier_models"))
+    chief_tier = str(cfg.get("chief_default_tier") or cfg.get("default_tier") or "D").strip().upper()
+    if len(chief_tier) != 1 or chief_tier not in "ABCDEF":
+        chief_tier = "D"
+
+    # Resolve tier: sentinel on agent.model before blocklist logic
+    if agent.model and TIER_SENTINEL_RE.match(str(agent.model).strip()):
+        agent.model = resolve_tier_placeholder(agent.model, tier_models, fallback_tier=chief_tier)
+
+    # Effective "default" for blocklist replacement: explicit default_model, else tier chief_default_tier
+    explicit_default = (cfg.get("default_model") or "").strip()
+    if explicit_default:
+        default_resolved = resolve_tier_placeholder(explicit_default, tier_models, fallback_tier=chief_tier)
+    else:
+        default_resolved = tier_models.get(chief_tier, "")
+
+    blocked_fb = str(cfg.get("blocked_fallback_tier") or "B").strip().upper()
+    if len(blocked_fb) != 1 or blocked_fb not in "ABCDEF":
+        blocked_fb = "B"
+    blocked_replace = tier_models.get(blocked_fb) or default_resolved
 
     mlow = (agent.model or "").lower()
     allow_premium = os.environ.get(ENV_ALLOW_PREMIUM, "").strip().lower() in ("1", "true", "yes")
@@ -65,20 +134,23 @@ def apply_token_governance_runtime(agent: Any) -> None:
     blocked = cfg.get("blocked_model_substrings") or []
     if isinstance(blocked, str):
         blocked = [blocked]
-    default_model = (cfg.get("default_model") or "").strip()
 
-    if not allow_premium and default_model and blocked:
+    if not allow_premium and blocked:
+        replacement = blocked_replace if tier_models else default_resolved
         for sub in blocked:
             if sub and str(sub).lower() in mlow:
+                new_m = replacement or default_resolved
+                if not new_m:
+                    break
                 logger.warning(
-                    "Token governance: model %r matches blocked substring %r; using default_model %r "
+                    "Token governance: model %r matches blocked substring %r; using %r "
                     "(set %s=1 to keep configured model).",
                     agent.model,
                     sub,
-                    default_model,
+                    new_m,
                     ENV_ALLOW_PREMIUM,
                 )
-                agent.model = default_model
+                agent.model = new_m
                 break
 
     cap = cfg.get("max_agent_turns")
@@ -111,7 +183,35 @@ def apply_token_governance_runtime(agent: Any) -> None:
     else:
         agent._token_governance_delegation_max = None
 
-    # Recompute prompt caching flags if model changed (mirrors run_agent.AIAgent.__init__)
+    try:
+        is_openrouter = agent._is_openrouter_url()
+        is_claude = "claude" in (agent.model or "").lower()
+        is_native_anthropic = agent.api_mode == "anthropic_messages"
+        agent._use_prompt_caching = (is_openrouter and is_claude) or is_native_anthropic
+    except Exception:
+        logger.debug("token governance: could not refresh prompt caching flags", exc_info=True)
+
+
+def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
+    """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
+    from agent.tier_model_routing import (
+        normalize_tier_models,
+        should_apply_per_turn_routing,
+        select_tier_for_message,
+    )
+
+    cfg = getattr(agent, "_token_governance_cfg", None) or load_runtime_config()
+    if not should_apply_per_turn_routing(cfg):
+        return
+    tier_models = normalize_tier_models(cfg.get("tier_models"))
+    if not tier_models:
+        return
+    tier = select_tier_for_message(user_message, cfg)
+    mid = tier_models.get(tier)
+    if not mid or mid == agent.model:
+        return
+    logger.info("Token governance: per-turn tier %s -> model %s", tier, mid)
+    agent.model = mid
     try:
         is_openrouter = agent._is_openrouter_url()
         is_claude = "claude" in (agent.model or "").lower()
