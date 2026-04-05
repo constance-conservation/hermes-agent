@@ -9,6 +9,7 @@ Over the next messages I will send you **one short instruction per chat** (Sessi
 Rules for you:
 - Do **not** ask me to paste large policy documents; use file tools and read on disk (in chunks if files are huge).
 - Keep Hermes default context injection as-is (`skip_context_files` off).
+- When this pack tells you to stand up **another agent as a separate Hermes runtime**, use **`hermes profile create <slug>`** (flat slug under `~/.hermes/profiles/`); encode org level in the name and register slug ↔ role in `workspace/operations/ORG_REGISTRY.md` / `AGENT_LIFECYCLE_REGISTER.md` (see `POLICY_ROOT/core/deployment-handoff.md` — Hermes profiles).
 - After each session, give a brief summary and what the next session number will cover.
 - When I send only a numbered line, treat it as the **entire** task for that chat.
 

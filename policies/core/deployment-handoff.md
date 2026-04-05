@@ -339,6 +339,30 @@ Use a **new messaging/CLI session per step** when you want the lowest conversati
 
 ---
 
+## Hermes profiles: runtime instances and org-shaped naming
+
+When this pack, a role prompt, or the orchestrator directive tells you to **stand up another agent** as a **separate Hermes runtime** (isolated config, secrets, optional separate gateway / bot instance), treat that as **profile creation**, not ad hoc folders inside one `HERMES_HOME`.
+
+**Canonical mechanism (Hermes CLI):**
+
+- Each runtime instance is a **named profile**: `~/.hermes/profiles/<profile-name>/` (its own `config.yaml`, `.env`, sessions, gateway state, etc.).
+- Create: `hermes profile create <profile-name>` (from the project venv). Select: `hermes profile use <profile-name>` or run with `-p <profile-name>`.
+- Install a per-profile gateway when needed: `hermes gateway install` (unit name becomes `hermes-gateway-<profile-name>` when under `profiles/<profile-name>`).
+
+**Flat names, hierarchical meaning:** Profile identifiers must be a single slug (`[a-z0-9][a-z0-9_-]{0,63}` — no `/`). Encode company hierarchy in the **slug**, not nested directories, for example:
+
+- `chief-orchestrator` (root orchestrator)
+- `director-engineering`, `director-product`, `director-operations`
+- `project-acme-lead`, `project-acme-worker-payments`
+
+Document the mapping **profile slug ↔ logical role** in `workspace/operations/ORG_REGISTRY.md`, `ORG_CHART.md`, and `AGENT_LIFECYCLE_REGISTER.md` so audits and operators know which Hermes profile implements which governed role.
+
+**Logical-only roles** (markdown packs, registers, delegate-tool subagents inside one runtime) do not require a new Hermes profile unless you intentionally isolate credentials, gateway, or disk state.
+
+**Activation — terminal exec without approval prompts:** For phased activation on a trusted VPS profile only, set `approvals.mode: off` in that profile’s `config.yaml` (or equivalent) so flagged shell commands are not blocked waiting for operator chat approval. **Revert to `manual` or `smart` after activation**; this disables dangerous-command approval for that profile (see project docs: approvals / security).
+
+---
+
 ## Operator Pitfalls and Recovery Notes (generic)
 
 Use these guardrails for any agent workflow on a VPS, regardless of provider or CLI implementation.

@@ -52,3 +52,8 @@ auxiliary:
   flush_memories:
     provider: openrouter
     model: anthropic/claude-sonnet-4.5
+
+# Activation-only: skip dangerous-terminal approval prompts (gateway + CLI). Same effect as HERMES_YOLO_MODE.
+# Revert to `manual` or `smart` after activation — see website/docs/user-guide/configuration.md (approvals).
+approvals:
+  mode: off
