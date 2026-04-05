@@ -7,6 +7,7 @@
 # Expects ~/.env/.env: SSH_PORT, SSH_TAILSCALE_IP (or SSH_IP)
 # Key: ~/.env/.ssh_key unless SSH_KEY_FILE is set.
 # Optional: SSH_LOGIN_USER (default hermesuser) — remote account to SSH as.
+# Optional: HERMES_DROPLET_REPO, HERMES_DROPLET_VENV_USER — same as ssh_droplet_user.sh (venv on login).
 #
 # Optional headless key unlock (same as ssh_droplet.sh): in ~/.env/.env set
 #   HERMES_DROPLET_ALLOW_ENV_PASSPHRASE=1
@@ -39,12 +40,16 @@ if [[ ! -f "$KEY_FILE" ]]; then
   exit 1
 fi
 
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=droplet_remote_venv.sh
+source "${_SCRIPTS_DIR}/droplet_remote_venv.sh"
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
   key="${line%%=*}"
   val="${line#*=}"
   case "$key" in
-    SSH_PORT|SSH_TAILSCALE_IP|SSH_IP) export "${key}=${val}" ;;
+    SSH_PORT|SSH_TAILSCALE_IP|SSH_IP|HERMES_DROPLET_REPO|HERMES_DROPLET_VENV_USER) export "${key}=${val}" ;;
     SSH_LOGIN_USER) _LOGIN_USER="${val}" ;;
     HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
       case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
@@ -95,7 +100,15 @@ if [[ ! -t 0 && "${HERMES_DROPLET_INTERACTIVE:-}" != "1" && "$_ALLOW_ENV_PASS_FR
 fi
 
 if [[ $# -eq 0 ]]; then
-  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}"
+  _INNER="exec bash -l"
+  if _droplet_venv_user_matches "$REMOTE_USER"; then
+    _INNER=$(_droplet_wrap_cmd_with_venv "$_INNER")
+  fi
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "bash -lc $(printf '%q' "$_INNER")"
 fi
 
-exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "$@"
+_USER_CMD="$*"
+if _droplet_venv_user_matches "$REMOTE_USER"; then
+  _USER_CMD=$(_droplet_wrap_cmd_with_venv "$_USER_CMD")
+fi
+exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "bash -lc $(printf '%q' "$_USER_CMD")"

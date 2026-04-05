@@ -4,6 +4,8 @@
 # Expects a shell-env file (default: ~/.env/.env) with at least:
 #   SSH_PORT, SSH_USER, SSH_TAILSCALE_IP (or SSH_IP)
 # and a private key at ~/.env/.ssh_key unless SSH_KEY_FILE is set.
+# Optional: HERMES_DROPLET_REPO, HERMES_DROPLET_VENV_USER — remote venv prefix for --sudo-user
+# hermesuser (see droplet_remote_venv.sh; policies Step 15).
 # Optional: SSH_SUDO_PASSWORD — used for --sudo-user when SSH_USER != runtime user. Also used for
 # workstation `hermes … droplet` when set (piped sudo -S on the remote); if unset, interactive sudo.
 # After sudo -S, the inner command is wrapped to reattach stdio to /dev/tty so Hermes TUI gets a TTY.
@@ -70,12 +72,16 @@ if [[ ! -f "$KEY_FILE" ]]; then
   exit 1
 fi
 
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=droplet_remote_venv.sh
+source "${_SCRIPTS_DIR}/droplet_remote_venv.sh"
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
   key="${line%%=*}"
   val="${line#*=}"
   case "$key" in
-    SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|SSH_SUDO_PASSWORD) export "${key}=${val}" ;;
+    SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|SSH_SUDO_PASSWORD|HERMES_DROPLET_REPO|HERMES_DROPLET_VENV_USER) export "${key}=${val}" ;;
     HERMES_DROPLET_REQUIRE_SUDO)
       # Parent (agent-droplet, droplet_run.sh env, user export) wins over the file.
       [[ -n "${HERMES_DROPLET_REQUIRE_SUDO+x}" ]] || export HERMES_DROPLET_REQUIRE_SUDO="${val}"
@@ -177,7 +183,7 @@ _drop_sudo_on() {
 # so interactive CLIs (Hermes TUI) see "Input is not a terminal" and exit. Reattach to the
 # SSH pty before running the real command (requires ssh -tt / a controlling tty on the server).
 _drop_inner_quoted() {
-  local _cmd="$*"
+  local _cmd="$1"
   printf '%q' "exec >/dev/tty 2>&1; exec </dev/tty; ${_cmd}"
 }
 
@@ -185,8 +191,12 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
   shift
   SUDO_U="${1:?--sudo-user requires a username}"
   shift
-  INNER=$(printf '%q' "$*")
-  INNER_TTY=$(_drop_inner_quoted "$*")
+  _USER_CMD="$*"
+  if _droplet_venv_user_matches "$SUDO_U"; then
+    _USER_CMD=$(_droplet_wrap_cmd_with_venv "$_USER_CMD")
+  fi
+  INNER=$(printf '%q' "$_USER_CMD")
+  INNER_TTY=$(_drop_inner_quoted "$_USER_CMD")
   # Workstation `hermes … droplet`: sudo on by default (`sudo -k; sudo -u …`). Turn off with
   # HERMES_DROPLET_REQUIRE_SUDO=0 or --droplet-no-sudo when you need a non-interactive remote step.
   if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then

@@ -10,6 +10,9 @@
 #
 # Requires ~/.env/.env: SSH_PORT, SSH_USER, SSH_TAILSCALE_IP (or SSH_IP)
 # Same private key as ssh_droplet.sh. Optional: SSH_LOGIN_USER (default: hermesuser).
+# Optional: HERMES_DROPLET_REPO (default /home/hermesuser/hermes-agent), HERMES_DROPLET_VENV_USER
+# (default hermesuser). Interactive shells and remote commands source that venv when the login
+# user matches HERMES_DROPLET_VENV_USER — see policies Step 15 (droplet venv).
 #
 # Usage:
 #   ./scripts/ssh_droplet_user.sh              # sudo -i login shell as SSH_LOGIN_USER
@@ -34,12 +37,16 @@ if [[ ! -f "$KEY_FILE" ]]; then
   exit 1
 fi
 
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=droplet_remote_venv.sh
+source "${_SCRIPTS_DIR}/droplet_remote_venv.sh"
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
   key="${line%%=*}"
   val="${line#*=}"
   case "$key" in
-    SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP) export "${key}=${val}" ;;
+    SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|HERMES_DROPLET_REPO|HERMES_DROPLET_VENV_USER) export "${key}=${val}" ;;
     SSH_LOGIN_USER) _LOGIN_USER="${val}" ;;
   esac
 done < "$ENV_FILE"
@@ -70,8 +77,16 @@ if [[ ! -t 0 && "${HERMES_DROPLET_INTERACTIVE:-}" != "1" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -i -u ${LU}"
+  _INNER="exec bash -l"
+  if _droplet_venv_user_matches "$LOGIN_TARGET"; then
+    _INNER=$(_droplet_wrap_cmd_with_venv "$_INNER")
+  fi
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -u ${LU} -H bash -lc $(printf '%q' "$_INNER")"
 fi
 
-INNER=$(printf '%q' "$*")
+_USER_CMD="$*"
+if _droplet_venv_user_matches "$LOGIN_TARGET"; then
+  _USER_CMD=$(_droplet_wrap_cmd_with_venv "$_USER_CMD")
+fi
+INNER=$(printf '%q' "$_USER_CMD")
 exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -u ${LU} -H bash -lc ${INNER}"

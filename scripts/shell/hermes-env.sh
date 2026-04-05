@@ -11,7 +11,9 @@
 # when you are not in a direnv-enabled repo directory.
 #
 # `droplet` — SSH to the VPS as admin (`SSH_USER`), then `sudo` to `hermesuser` (interactive remote
-# shell as hermesuser). Needs ~/.env/.env: SSH_USER, SSH_PORT, SSH_TAILSCALE_IP or SSH_IP.
+# shell as hermesuser). The remote session activates ~/hermes-agent/venv when HERMES_DROPLET_REPO
+# exists (see scripts/droplet_remote_venv.sh; policies Step 15). Needs ~/.env/.env: SSH_USER,
+# SSH_PORT, SSH_TAILSCALE_IP or SSH_IP.
 #
 # `droplet_direct` — one-hop `ssh hermesuser@…` (scripts/ssh_droplet_hermesuser_direct.sh). Use only
 # after your pubkey is in hermesuser's ~/.ssh/authorized_keys; otherwise you get Permission denied.

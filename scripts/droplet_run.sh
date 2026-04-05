@@ -7,6 +7,8 @@
 #   interactive sudo. That avoids TTY/password hangs in Cursor when you do not need hermesuser.
 # When you must run as hermesuser (paths under /home/hermesuser, git as that user), use
 #   ./scripts/droplet_run.sh --droplet-require-sudo --sudo-user hermesuser '…'
+#   Remote commands as hermesuser are prefixed with cd + venv activate (see droplet_remote_venv.sh
+#   and policies Step 15 — Remote venv).
 #   Non-interactive sudo requires SSH_SUDO_PASSWORD in the same ~/.env/.env as SSH_* (see
 #   ssh_droplet.sh). Do not edit ~/.env/.env to “turn sudo off globally”; this wrapper already
 #   limits REQUIRE_SUDO=0 to this process — interactive `hermes … droplet` stays sudo-on by default.
