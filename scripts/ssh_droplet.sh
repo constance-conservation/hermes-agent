@@ -153,6 +153,6 @@ fi
 if [[ $# -eq 0 ]]; then
   exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}"
 fi
-_RCOMB=$(printf '%q ' "$@")
-_RCOMB="${_DROPLET_REMOTE_PRE}${_RCOMB% }"
-exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_RCOMB}"
+# One ssh(1) remote argument: run through bash -lc so exports + operators are parsed reliably.
+_RIN=$(printf '%q' "$*")
+exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}bash -lc ${_RIN}"
