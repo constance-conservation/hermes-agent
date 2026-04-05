@@ -6,6 +6,7 @@
 # and a private key at ~/.env/.ssh_key unless SSH_KEY_FILE is set.
 # Optional: SSH_SUDO_PASSWORD — used for --sudo-user when SSH_USER != runtime user. Also used for
 # workstation `hermes … droplet` when set (piped sudo -S on the remote); if unset, interactive sudo.
+# After sudo -S, the inner command is wrapped to reattach stdio to /dev/tty so Hermes TUI gets a TTY.
 #
 # SSH key passphrase — default: entered interactively (or via /dev/tty). ssh-agent and inherited
 # SSH_ASKPASS are stripped unless you opt in below.
@@ -165,11 +166,20 @@ _drop_sudo_on() {
   esac
 }
 
+# sudo -S reads the password from stdin; the target command then inherits a pipe/EOF stdin,
+# so interactive CLIs (Hermes TUI) see "Input is not a terminal" and exit. Reattach to the
+# SSH pty before running the real command (requires ssh -tt / a controlling tty on the server).
+_drop_inner_quoted() {
+  local _cmd="$*"
+  printf '%q' "exec >/dev/tty 2>&1; exec </dev/tty; ${_cmd}"
+}
+
 if [[ "${1:-}" == "--sudo-user" ]]; then
   shift
   SUDO_U="${1:?--sudo-user requires a username}"
   shift
   INNER=$(printf '%q' "$*")
+  INNER_TTY=$(_drop_inner_quoted "$*")
   # Workstation `hermes … droplet`: sudo on by default (`sudo -k; sudo -u …`). Turn off with
   # HERMES_DROPLET_REQUIRE_SUDO=0 or --droplet-no-sudo when you need a non-interactive remote step.
   if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
@@ -179,7 +189,7 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
       fi
       if [[ -n "${SSH_SUDO_PASSWORD:-}" ]]; then
         PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
-        exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
+        exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER_TTY}"
       fi
       exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
     fi
@@ -197,7 +207,7 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
     exit 1
   }
   PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
-  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER_TTY}"
 fi
 
 if [[ $# -eq 0 ]]; then

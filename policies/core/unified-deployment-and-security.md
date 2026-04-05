@@ -1077,6 +1077,33 @@ Run **`direnv allow`** once in the clone. Do **not** reorder those lines: `HERME
 
 **Pip / venv entry point:** If you invoke **`hermes`** as **`venv/bin/hermes`** or **`python -m hermes_cli.main`** from an **editable** install of this checkout, **`hermes … droplet`** still works: **`hermes_cli.main`** detects a trailing **`droplet`**, applies local **`-p` / sticky** to the workstation, then **`exec`s `scripts/agent-droplet`**. You do not need **`scripts/`** ahead of **`venv/bin`** on `PATH` for that hop. **`droplet`** is a reserved CLI token, not a profile name — do not use **`hermes -p droplet`**.
 
+### Step 15 — Workstation playbook (what worked, pitfalls, fixes)
+
+**Venv (local vs VPS)**  
+- **Workstation:** Use the checkout **`venv`** (`./venv/bin/python -m hermes_cli.main …`) or **`scripts/hermes`** (it calls that Python). Avoid a global `hermes` on `PATH` ahead of the repo unless you have pulled in the **`hermes_cli.main`** trailing-**`droplet`** behavior.  
+- **VPS:** **`scripts/agent-droplet`** always runs **`cd /home/hermesuser/hermes-agent && ./venv/bin/python -m hermes_cli.main -p <profile>`** — the server must have that **`venv`** (bootstrap scripts create it).
+
+**PATH / “alias” (no separate `droplet` command)**  
+- **`droplet` is only valid as the last argument:** `hermes`, `hermes doctor`, `hermes tui`, etc., then **`droplet`**. There is no supported `droplet` prefix command on `PATH`.  
+- **Without direnv:** In **`~/.zshrc`**, prepend **`$HOME/hermes-agent/scripts`** then **`$HOME/hermes-agent/venv/bin`** when those paths exist, so **`hermes`** resolves to **`scripts/hermes`** from any directory.  
+- **With direnv:** **`PATH_add scripts`** in **`.envrc`** is enough while **`cd`**’d into the clone; capture **`HERMES_REAL_BIN`** *before* **`PATH_add`** (see snippet above).
+
+**Env files**  
+- **SSH + droplet:** **`~/.env/.env`** (same path **`scripts/ssh_droplet.sh`** reads) holds **`SSH_PORT`**, **`SSH_USER`**, **`SSH_TAILSCALE_IP`** (or **`SSH_IP`**), optional **`SSH_SUDO_PASSWORD`** for non-interactive **`sudo -S`** to **`hermesuser`**, optional **`HERMES_DROPLET_ALLOW_ENV_PASSPHRASE=1`** plus **`SSH_PASSPHRASE`** for headless key unlock. Private key default: **`~/.env/.ssh_key`**.  
+- **Hermes profile:** Sync the same SSH variables into the **active profile’s** **`$HERMES_HOME/.env`** if you use **`TERMINAL_ENV=ssh`** so in-app terminal and droplet agree on host/port/key. Use **`chmod 600`** on these files.
+
+**Sticky profile mistakes**  
+- **`~/.hermes/active_profile` must not contain the word `droplet`.** That string is the **VPS hop suffix**, not a profile directory. If it was set to **`droplet`**, Hermes used to error or confuse profile resolution; current CLI **clears** that sticky and warns. Use a real profile name (e.g. **`chief-orchestrator`**) so the VPS **`agent-droplet`** **`-p`** matches.
+
+**Failures we saw and how they were fixed**  
+| Symptom | Cause | Fix |  
+|--------|--------|-----|  
+| `Error: Profile 'droplet' does not exist` / reserved-name error | Sticky **`active_profile`** or **`hermes -p droplet`** | Clear sticky or use **`hermes profile use <real-profile>`**; use **`hermes … droplet`** only with **`droplet` last**. |  
+| `hermes droplet` OK only inside repo | Global **`hermes`** without **`scripts/`** first on `PATH` | Prepend **`…/hermes-agent/scripts`** (and venv **`bin`**) in **`~/.zshrc`**, or always run from the clone with direnv. |  
+| **`zsh: command not found: droplet`** | Expecting a **`droplet`** command | Use **`hermes … droplet`**; there is no first-token **`droplet`** helper. |  
+| Welcome banner, then **`Warning: Input is not a terminal (fd=0)`**, **`^[[24;1R`**, immediate **`Goodbye`**, SSH disconnect | **`SSH_SUDO_PASSWORD`** + **`sudo -S`**: password is read from a **pipe**, so the **inner** shell’s **stdin** is **not a TTY**; prompt_toolkit exits | **`scripts/ssh_droplet.sh`** wraps the remote command with **`exec >/dev/tty 2>&1; exec </dev/tty; …`** after **`sudo -S`** so the Hermes TUI attaches to the **SSH pseudo-tty**. Requires **`ssh -tt`** (already used). |  
+| Interactive **sudo** prompts instead of password file | **`SSH_SUDO_PASSWORD`** unset | Set it in **`~/.env/.env`** if you accept storing the admin sudo password there; otherwise type sudo on the **remote** TTY. |
+
 **Policy materialization:** run **`policies/core/scripts/start_pipeline.py`** (or your materialize helper) on the server before expecting updated policy trees; the `droplet` suffix only changes **where** the CLI runs.
 
 ---
