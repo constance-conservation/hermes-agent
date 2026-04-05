@@ -4,8 +4,8 @@
 # Expects a shell-env file (default: ~/.env/.env) with at least:
 #   SSH_PORT, SSH_USER, SSH_TAILSCALE_IP (or SSH_IP)
 # and a private key at ~/.env/.ssh_key unless SSH_KEY_FILE is set.
-# Optional: SSH_SUDO_PASSWORD (required for --sudo-user when not using workstation `hermes … droplet`;
-# see HERMES_DROPLET_WORKSTATION_CLI in this file).
+# Optional: SSH_SUDO_PASSWORD — used for --sudo-user when SSH_USER != runtime user. Also used for
+# workstation `hermes … droplet` when set (piped sudo -S on the remote); if unset, interactive sudo.
 #
 # SSH key passphrase — default: entered interactively (or via /dev/tty). ssh-agent and inherited
 # SSH_ASKPASS are stripped unless you opt in below.
@@ -21,7 +21,8 @@
 #   ./scripts/ssh_droplet.sh --sudo-user hermesuser 'cd ~/hermes-agent && git pull'
 #
 # Sudo for workstation `hermes … droplet` (HERMES_DROPLET_WORKSTATION_CLI=1 + --sudo-user):
-#   ON  (default): remote runs `sudo -k; sudo -u <runtime> bash -lc …` (password on VPS TTY).
+#   ON  (default): if SSH_SUDO_PASSWORD is set in the env file, remote runs `sudo -S -u <runtime> …`;
+#   else `sudo -k; sudo -u <runtime> …` (password on VPS TTY).
 #   OFF: remote runs `bash -lc …` as SSH_USER (no sudo). Use for headless git pull, etc., when
 #        SSH_USER is already the account that should own the work, or you accept running as admin.
 #   Toggle per invocation:
@@ -173,6 +174,13 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
   # HERMES_DROPLET_REQUIRE_SUDO=0 or --droplet-no-sudo when you need a non-interactive remote step.
   if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
     if _drop_sudo_on; then
+      if [[ "${SSH_USER}" == "${SUDO_U}" ]]; then
+        exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}bash -lc ${INNER}"
+      fi
+      if [[ -n "${SSH_SUDO_PASSWORD:-}" ]]; then
+        PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
+        exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
+      fi
       exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
     fi
     if [[ "${SSH_USER}" != "${SUDO_U}" ]]; then

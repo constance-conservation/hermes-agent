@@ -8,7 +8,8 @@
 #
 # Requires ~/.env/.env with SSH_* (host, port, user). SSH key passphrase is typed interactively
 # (env-file SSH_PASSPHRASE / HERMES_DROPLET_ALLOW_ENV_PASSPHRASE is ignored for this entrypoint).
-# Remote command uses sudo -u <runtime> by default (sudo -k first). Set AGENT_DROPLET_REQUIRE_SUDO=0
+# Remote sudo: if SSH_SUDO_PASSWORD is set in that same file, ssh_droplet uses sudo -S (no TTY prompt);
+# otherwise sudo -k; sudo -u <runtime> (password on remote TTY). Set AGENT_DROPLET_REQUIRE_SUDO=0
 # to run as SSH_USER without sudo (e.g. headless maintenance). See scripts/ssh_droplet.sh header.
 # Optional env: AGENT_DROPLET_RUNTIME_USER, AGENT_DROPLET_RUNTIME_HOME, AGENT_DROPLET_REPO,
 # AGENT_DROPLET_PROFILE (if unset: read workstation ~/.hermes/active_profile; else chief-orchestrator).
