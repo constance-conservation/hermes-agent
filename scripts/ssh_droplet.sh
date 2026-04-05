@@ -93,6 +93,9 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 REMOTE=("${REMOTE_BASE[@]}")
 
+# Avoid git/less "Press RETURN" when SSH stdin is not a full TTY (IDE / automation).
+_DROPLET_REMOTE_PRE='export GIT_PAGER=cat PAGER=cat LESS=FRX; '
+
 unset SSH_PASSPHRASE 2>/dev/null || true
 _DROPLET_ENV=(env -u SSH_AUTH_SOCK -u SSH_AUTH_SOCK_PRIVATE -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE)
 
@@ -133,18 +136,23 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
   # Workstation `hermes … droplet`: always sudo (even if SSH_USER matches target); sudo -k clears
   # cached credentials so a password is normally required. No sudo -S / no SSH_SUDO_PASSWORD.
   if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
-    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
   fi
   # Automation / direct ssh_droplet: skip sudo when already the target account.
   if [[ "${SSH_USER}" == "${SUDO_U}" ]]; then
-    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "bash -lc ${INNER}"
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}bash -lc ${INNER}"
   fi
   [[ -n "${SSH_SUDO_PASSWORD:-}" ]] || {
     echo "ssh_droplet.sh: SSH_SUDO_PASSWORD not set in ${ENV_FILE}" >&2
     exit 1
   }
   PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
-  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_DROPLET_REMOTE_PRE}printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
 fi
 
-exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "$@"
+if [[ $# -eq 0 ]]; then
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}"
+fi
+_RCOMB=$(printf '%q ' "$@")
+_RCOMB="${_DROPLET_REMOTE_PRE}${_RCOMB% }"
+exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "${_RCOMB}"
