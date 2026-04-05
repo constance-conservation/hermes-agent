@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Replace local ~/.hermes with a tarball of /home/hermesuser/.hermes from the droplet.
+#
+# Uses ssh -T (no pseudo-tty) so the tar stream is not corrupted; ssh_droplet.sh uses -tt
+# and must not be used for binary payloads.
+#
+# Requires the same ~/.env/.env as ssh_droplet.sh: SSH_*, key file, and SSH_SUDO_PASSWORD
+# for remote sudo (hermesadmin reads hermesuser home via sudo tar).
+#
+# Usage:
+#   ./scripts/droplet_pull_hermes_home.sh              # backup ~/.hermes then replace
+#   ./scripts/droplet_pull_hermes_home.sh --dry-run    # only show what would run
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
+KEY_FILE="${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}"
+DRY=0
+[[ "${1:-}" == "--dry-run" ]] && DRY=1
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "droplet_pull_hermes_home.sh: missing ${ENV_FILE}" >&2
+  exit 1
+fi
+if [[ ! -f "$KEY_FILE" ]]; then
+  echo "droplet_pull_hermes_home.sh: missing key ${KEY_FILE}" >&2
+  exit 1
+fi
+
+SSH_SUDO_PASSWORD=""
+_ALLOW_ENV_PASS_FROM_FILE=0
+_RAW_SSH_PASSPHRASE=""
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+  key="${line%%=*}"
+  val="${line#*=}"
+  case "$key" in
+    SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|SSH_SUDO_PASSWORD) export "${key}=${val}" ;;
+    HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
+      case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
+      ;;
+    SSH_PASSPHRASE) _RAW_SSH_PASSPHRASE="${val}" ;;
+  esac
+done < "$ENV_FILE"
+
+HOST="${SSH_TAILSCALE_IP:-${SSH_IP:?}}"
+REMOTE_USER="${SSH_USER:?}"
+
+SSH_BASE=(
+  ssh -T
+  -o BatchMode=no
+  -o IdentitiesOnly=yes
+  -o IdentityAgent=none
+  -o AddKeysToAgent=no
+  -o ControlMaster=no
+  -o ControlPath=none
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=30
+  -i "$KEY_FILE"
+  -p "${SSH_PORT:?}"
+)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  SSH_BASE+=(-o UseKeychain=no)
+fi
+
+_drop_cleanup() {
+  [[ -n "${_PULL_PASSFILE:-}" && -f "$_PULL_PASSFILE" ]] && rm -f "$_PULL_PASSFILE"
+  [[ -n "${_PULL_ASKPASS_SCRIPT:-}" && -f "$_PULL_ASKPASS_SCRIPT" ]] && rm -f "$_PULL_ASKPASS_SCRIPT"
+}
+trap _drop_cleanup EXIT
+
+_SSH_ENV=(env -u SSH_AUTH_SOCK -u SSH_AUTH_SOCK_PRIVATE -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE)
+if [[ "$_ALLOW_ENV_PASS_FROM_FILE" == "1" && -n "${_RAW_SSH_PASSPHRASE}" ]]; then
+  _PULL_PASSFILE=$(mktemp)
+  _PULL_ASKPASS_SCRIPT=$(mktemp)
+  chmod 600 "$_PULL_PASSFILE"
+  printf '%s' "$_RAW_SSH_PASSPHRASE" > "$_PULL_PASSFILE"
+  printf '%s\n' '#!/bin/sh' "exec cat '$_PULL_PASSFILE'" > "$_PULL_ASKPASS_SCRIPT"
+  chmod 700 "$_PULL_ASKPASS_SCRIPT"
+  export SSH_ASKPASS="$_PULL_ASKPASS_SCRIPT"
+  export SSH_ASKPASS_REQUIRE=force
+  export DISPLAY="${DISPLAY:-:0}"
+  _SSH_ENV=(env -u SSH_AUTH_SOCK -u SSH_AUTH_SOCK_PRIVATE)
+fi
+
+[[ -n "${SSH_SUDO_PASSWORD:-}" ]] || {
+  echo "droplet_pull_hermes_home.sh: SSH_SUDO_PASSWORD must be set in ${ENV_FILE} for remote sudo tar." >&2
+  exit 1
+}
+
+ARCHIVE="${TMPDIR:-/tmp}/hermes-home-from-droplet.$$".tar.gz
+PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
+REMOTE_CMD="printf '%s' '${PW_B64}' | base64 -d | sudo -S tar czf - -C /home/hermesuser .hermes"
+
+if [[ "$DRY" == "1" ]]; then
+  echo "Would backup ${HOME}/.hermes then stream remote tar to ${ARCHIVE} and extract to ${HOME}"
+  exit 0
+fi
+
+echo "Streaming /home/hermesuser/.hermes from ${REMOTE_USER}@${HOST} ..."
+if ! "${_SSH_ENV[@]}" "${SSH_BASE[@]}" "${REMOTE_USER}@${HOST}" "bash -lc $(printf '%q' "$REMOTE_CMD")" >"$ARCHIVE"; then
+  echo "droplet_pull_hermes_home.sh: ssh/tar failed" >&2
+  rm -f "$ARCHIVE"
+  exit 1
+fi
+
+if [[ ! -s "$ARCHIVE" ]]; then
+  echo "droplet_pull_hermes_home.sh: empty archive" >&2
+  rm -f "$ARCHIVE"
+  exit 1
+fi
+
+BACKUP="${HOME}/.hermes.backup.$(date +%Y%m%d%H%M%S)"
+if [[ -d "${HOME}/.hermes" ]]; then
+  echo "Moving ${HOME}/.hermes -> ${BACKUP}"
+  mv "${HOME}/.hermes" "$BACKUP"
+fi
+
+echo "Extracting into ${HOME} ..."
+tar xzf "$ARCHIVE" -C "${HOME}"
+rm -f "$ARCHIVE"
+
+chmod -R u+rwX "${HOME}/.hermes" 2>/dev/null || true
+
+# Stale Linux gateway PID confuses local doctor/status.
+rm -f "${HOME}/.hermes/gateway.pid" "${HOME}/.hermes/profiles/"*/gateway.pid 2>/dev/null || true
+
+echo "Done. Previous tree (if any): ${BACKUP}"
+echo "Do not run a second messaging gateway with the same bot tokens locally; use a different profile or stop the VPS gateway first."
