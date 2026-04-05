@@ -4,6 +4,11 @@
 # Created by activation Session 6 alongside markdown registries. When present and
 # enabled, Hermes applies these caps on every AIAgent start (CLI, gateway, delegate).
 #
+# Important: also set config.yaml model.default (and compression.summary_model +
+# auxiliary.*.model / delegation.model) to the same cheap default — otherwise the
+# main gateway and auxiliary agents keep billing expensive models even when this
+# file downgrades the primary agent.
+#
 # Disable enforcement: HERMES_TOKEN_GOVERNANCE_DISABLE=1
 # Allow premium/blocked models despite blocklist: HERMES_GOVERNANCE_ALLOW_PREMIUM=1
 
