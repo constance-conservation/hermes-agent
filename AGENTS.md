@@ -381,7 +381,7 @@ in config.yaml (or `HERMES_BACKGROUND_NOTIFICATIONS` env var):
 
 ### Gateway watchdog (production uptime)
 
-External loops should use **`hermes gateway watchdog-check`** (see `gateway/status.py` → `runtime_status_watchdog_healthy`): it requires a **live `gateway.pid` process**, **`gateway_state=running`**, and **≥1 platform `connected`** in `gateway_state.json`. The repo ships **`scripts/gateway-watchdog.sh`**, which polls that check and on failure runs **`hermes gateway run --replace`**, then **`hermes doctor --fix`** + replace again if still unhealthy. Documented in **`website/docs/user-guide/messaging/gateway-watchdog.md`**.
+External loops should use **`hermes gateway watchdog-check`** (see `gateway/status.py` → `runtime_status_watchdog_healthy`): it requires a **live `gateway.pid` process**, **`gateway_state=running`**, and **≥1 platform `connected`** in `gateway_state.json`. The repo ships **`scripts/gateway-watchdog.sh`**, which defaults **`HERMES_HOME`** to **`profiles/chief-orchestrator`** when that directory exists, invokes Hermes via **`venv/bin/python -m hermes_cli.main -p …`**, and on failure prefers **`systemctl --user restart hermes-gateway-<profile>.service`** when installed (avoiding a second **`gateway run`** that steals platform locks), else **`gateway run --replace`**, then **`hermes doctor --fix`** + restart again if still unhealthy. Documented in **`website/docs/user-guide/messaging/gateway-watchdog.md`**.
 
 ---
 

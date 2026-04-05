@@ -26,7 +26,7 @@ Implementation references in the Hermes Agent codebase:
 
 1. **Health definition** — External automation MUST use **`hermes gateway watchdog-check`** (or equivalent logic), not ad-hoc “all platforms connected” checks. Healthy means: valid **`gateway.pid`** process, **`gateway_state=running`** in `gateway_state.json`, and **≥1** platform with **`state=connected`**. Requiring every platform to be connected is **forbidden** for watchdog purposes (it causes unnecessary restarts when one bridge is flaky).
 
-2. **Recovery** — When health checks fail repeatedly, automation MUST attempt **`hermes gateway run --replace`**, then **`hermes doctor --fix`** followed by another replace if the gateway does not recover. Rate-limit recovery attempts (backoff/cooldown) to avoid tight loops on misconfiguration.
+2. **Recovery** — When health checks fail repeatedly, automation MUST recover the gateway without spawning a **second** concurrent poller for the same tokens. Prefer **`systemctl --user restart hermes-gateway-<profile>.service`** when that unit exists for the active **`HERMES_HOME`** (e.g. **`chief-orchestrator`** after **`hermes gateway install`**). Otherwise use **`hermes gateway run --replace`**, then **`hermes doctor --fix`** followed by another restart/replace if the gateway does not recover. Rate-limit recovery attempts (backoff/cooldown) to avoid tight loops on misconfiguration.
 
 3. **Logging** — Watchdog output MUST be appended to a durable log (e.g. `$HERMES_HOME/logs/gateway-watchdog.log` when using the stock script) for post-incident review.
 

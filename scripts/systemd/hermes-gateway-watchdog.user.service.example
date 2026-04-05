@@ -1,0 +1,29 @@
+# Example user systemd unit — external shell watchdog aligned with `hermes gateway install`.
+#
+# Install (as the runtime user, e.g. hermesuser):
+#   mkdir -p ~/.hermes/bin
+#   cp /path/to/hermes-agent/scripts/gateway-watchdog.sh ~/.hermes/bin/
+#   chmod +x ~/.hermes/bin/gateway-watchdog.sh
+#   cp scripts/systemd/hermes-gateway-watchdog.user.service.example \
+#      ~/.config/systemd/user/hermes-gateway-watchdog.service
+#   # Edit Environment= lines if your repo path or profile base differs.
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hermes-gateway-watchdog.service
+#
+# Run at most ONE watchdog loop per machine; it coordinates with
+# hermes-gateway-<profile>.service (e.g. hermes-gateway-chief-orchestrator).
+
+[Unit]
+Description=Hermes external gateway watchdog (watchdog-check + recovery)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=HERMES_PROFILE_BASE=%h/.hermes
+Environment=HERMES_AGENT_DIR=%h/hermes-agent
+ExecStart=%h/.hermes/bin/gateway-watchdog.sh
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target
