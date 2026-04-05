@@ -96,7 +96,7 @@ _HERMES_SUBCOMMANDS = frozenset({
     "chat", "model", "gateway", "setup", "whatsapp", "login", "logout",
     "status", "cron", "doctor", "config", "pairing", "skills", "tools",
     "mcp", "sessions", "insights", "version", "update", "uninstall",
-    "profile", "plugins", "honcho", "acp",
+    "profile", "plugins", "honcho", "acp", "droplet",
 })
 
 
@@ -137,6 +137,11 @@ def validate_profile_name(name: str) -> None:
     """Raise ``ValueError`` if *name* is not a valid profile identifier."""
     if name == "default":
         return  # special alias for ~/.hermes
+    if name == "droplet":
+        raise ValueError(
+            "'droplet' is not allowed as a profile name — it is the VPS hop command. "
+            "Run: hermes droplet"
+        )
     if not _PROFILE_ID_RE.match(name):
         raise ValueError(
             f"Invalid profile name {name!r}. Must match "
@@ -1039,7 +1044,7 @@ _hermes_completion() {
 
     # Top-level subcommands
     if [[ "$COMP_CWORD" == 1 ]]; then
-        local commands="chat model gateway setup status cron doctor config skills tools mcp sessions profile update version"
+        local commands="chat model gateway setup status cron doctor config skills tools mcp sessions profile droplet update version"
         COMPREPLY=($(compgen -W "$commands" -- "$cur"))
     fi
 }
@@ -1064,7 +1069,7 @@ _hermes() {
     _arguments \\
         '-p[Profile name]:profile:($profiles)' \\
         '--profile[Profile name]:profile:($profiles)' \\
-        '1:command:(chat model gateway setup status cron doctor config skills tools mcp sessions profile update version)' \\
+        '1:command:(chat model gateway setup status cron doctor config skills tools mcp sessions profile droplet update version)' \\
         '*::arg:->args'
 
     case $words[1] in

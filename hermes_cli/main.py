@@ -39,6 +39,7 @@ Usage:
     hermes uninstall           Uninstall Hermes Agent
     hermes acp                 Run as an ACP server for editor integration
     hermes sessions browse     Interactive session picker with search
+    hermes droplet             Run Hermes CLI on the VPS over SSH (needs scripts/agent-droplet)
 
     hermes claw migrate --dry-run  # Preview migration without changes
 """
@@ -70,6 +71,21 @@ def _require_tty(command_name: str) -> None:
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _strip_trailing_droplet_hop_argv(argv: list) -> Optional[list]:
+    """If argv ends with the VPS hop token ``droplet``, return argv without it.
+
+    Mirrors ``scripts/hermes``: ``hermes … droplet`` runs ``agent-droplet`` with
+    preceding args. Does **not** strip when ``droplet`` is the value of ``-p`` /
+    ``--profile`` (that names a profile, not this hop).
+    """
+    if len(argv) < 1 or argv[-1] != "droplet":
+        return None
+    if len(argv) >= 2 and argv[-2] in ("-p", "--profile"):
+        return None
+    return argv[:-1]
+
 
 # ---------------------------------------------------------------------------
 # Profile override — MUST happen before any hermes module import.
@@ -170,7 +186,19 @@ def _apply_profile_override() -> None:
             return
         os.environ["HERMES_HOME"] = hermes_home
 
+
+# ``hermes droplet`` via the pip/console entry point (no repo ``scripts/hermes`` shim):
+# delegate before profile pre-parse so this is never mistaken for ``-p droplet``.
+_drop_argv = _strip_trailing_droplet_hop_argv(sys.argv[1:])
+_agent_droplet = PROJECT_ROOT / "scripts" / "agent-droplet"
+_delegate_droplet = bool(_drop_argv is not None and _agent_droplet.is_file())
+if _delegate_droplet:
+    sys.argv = [sys.argv[0]] + _drop_argv
+
 _apply_profile_override()
+
+if _delegate_droplet:
+    os.execv("/bin/bash", ["/bin/bash", str(_agent_droplet), *sys.argv[1:]])
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
@@ -3495,7 +3523,7 @@ def _coalesce_session_name_args(argv: list) -> list:
         "chat", "model", "gateway", "setup", "whatsapp", "login", "logout", "auth",
         "status", "cron", "doctor", "config", "pairing", "skills", "tools",
         "mcp", "sessions", "insights", "version", "update", "uninstall",
-        "profile",
+        "profile", "droplet",
     }
     _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
 
@@ -5220,6 +5248,39 @@ For more help on a command:
             sys.exit(1)
 
     acp_parser.set_defaults(func=cmd_acp)
+
+    # =========================================================================
+    # droplet command (VPS hop — parity with scripts/hermes + scripts/agent-droplet)
+    # =========================================================================
+    droplet_parser = subparsers.add_parser(
+        "droplet",
+        help="Run Hermes CLI on the VPS over SSH (requires repo scripts/agent-droplet)",
+        description=(
+            "Opens an SSH session that runs the same Hermes CLI on the server "
+            "(venv + HERMES_HOME). Optional arguments are forwarded to hermes on the VPS. "
+            "Configure ~/.env/.env with SSH_* (see scripts/ssh_droplet.sh)."
+        ),
+    )
+    droplet_parser.add_argument(
+        "remote_args",
+        nargs="*",
+        default=[],
+        help="Extra arguments passed to hermes on the server (e.g. doctor, profile list)",
+    )
+
+    def cmd_droplet(args):
+        script = PROJECT_ROOT / "scripts" / "agent-droplet"
+        if not script.is_file():
+            print(
+                "hermes droplet: scripts/agent-droplet not found.\n"
+                "  Install from a hermes-agent git checkout (editable pip install), or run:\n"
+                "    bash $HERMES_AGENT_REPO/scripts/agent-droplet",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        os.execv("/bin/bash", ["/bin/bash", str(script), *args.remote_args])
+
+    droplet_parser.set_defaults(func=cmd_droplet)
 
     # =========================================================================
     # profile command

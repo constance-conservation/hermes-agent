@@ -1075,6 +1075,8 @@ Run **`direnv allow`** once in the clone. Do **not** reorder those lines: `HERME
 
 **Without direnv:** export **`HERMES_REAL_BIN`** to the absolute path of your real `hermes` (or other CLI) binary, then **`export PATH="/path/to/this/clone/scripts:$PATH"`** so the same shim name (`hermes` in this repo) shadows the real binary.
 
+**Pip / venv entry point:** If you invoke **`hermes`** as **`venv/bin/hermes`** or **`python -m hermes_cli.main`** from an **editable** install of this checkout, **`hermes … droplet`** still works: **`hermes_cli.main`** detects a trailing **`droplet`**, applies local **`-p` / sticky** to the workstation, then **`exec`s `scripts/agent-droplet`**. You do not need **`scripts/`** ahead of **`venv/bin`** on `PATH` for that hop. **`droplet`** is a reserved CLI token, not a profile name — do not use **`hermes -p droplet`**.
+
 **Policy materialization:** run **`policies/core/scripts/start_pipeline.py`** (or your materialize helper) on the server before expecting updated policy trees; the `droplet` suffix only changes **where** the CLI runs.
 
 ---
