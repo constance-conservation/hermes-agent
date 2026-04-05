@@ -1,11 +1,10 @@
 # Paste into Hermes as Session 1 user message (runtime activation).
 # Full checklist lives on disk — do not paste deployment-handoff.md into chat.
 #
-# If you still hit context limits, use only the "MINIMAL" paragraph below, and still
-# append the "## Context injection verification" rules from activation_session_commands.txt INITIAL.
+# If you still hit context limits, use only the "MINIMAL" paragraph below.
 
 MINIMAL:
-Session 1 only. Read policy-root core/deployment-handoff.md from disk; run "## Runtime Activation Prompt" verification and preflight; output that section's Required output bullets. Paths: HERMES_HOME/.hermes.md. End with ## Context injection verification per the INITIAL prompt in the activation script (read .hermes.md, WORKSPACE/BOOTSTRAP.md, WORKSPACE/AGENTS.md; report lengths, first headings, proof phrases).
+Session 1 only. Read policy-root core/deployment-handoff.md from disk; run "## Runtime Activation Prompt" verification and preflight; output that section's Required output bullets. Paths: HERMES_HOME/.hermes.md. Then add a short **Verification**: HERMES_HOME path, policy+workspace paths from `.hermes.md`, and verbatim first line of each context file you read (.hermes.md, BOOTSTRAP.md, AGENTS.md if read).
 
 STANDARD:
 You are the Chief Orchestrator for Session 1 (runtime activation only).
@@ -14,4 +13,4 @@ You are the Chief Orchestrator for Session 1 (runtime activation only).
 2. Using file tools, read POLICY_ROOT/core/deployment-handoff.md starting at "## Runtime Activation Prompt" — read in sections if the file is large. Do not ask the operator to paste this document.
 3. Follow "Hermes runtime discipline" and the activation checklist through verification, preflight, and security classification for this session only. Do not stand up directors or project leads yet unless the checklist explicitly requires naming them.
 4. End with the "Required output" bullet list from that section and one line: next session = Session 2 from the "Session-by-session prompt order" table in the same file.
-5. Then output ## Context injection verification per your Session 1 operator instructions: read_file HERMES_HOME/.hermes.md (prove POLICY_ROOT/WORKSPACE lines), read_file WORKSPACE/BOOTSTRAP.md and WORKSPACE/AGENTS.md (char or line count, first # heading, ≤120 char verbatim snippet from first paragraph under heading, one-sentence summary of what they require as canonical).
+5. End with a **Verification** section: absolute HERMES_HOME + profile name; read `.hermes.md` and print policy + workspace absolute paths (one line each); confirm skip_context_files is not disabling injection; list context files you read this session (`.hermes.md`, `WORKSPACE/BOOTSTRAP.md`, `WORKSPACE/AGENTS.md`, `SOUL.md`) with **verbatim first line or first heading** from disk for each; bullet list this session’s policy paths read + one-line purpose; name three topic phrases from the handoff/workspace rules you are following (do not dump the full system prompt).
