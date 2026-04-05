@@ -122,13 +122,14 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
   SUDO_U="${1:?--sudo-user requires a username}"
   shift
   INNER=$(printf '%q' "$*")
-  # Already the target user — no privilege step (SSH key auth is still required).
+  # Workstation `hermes … droplet`: always sudo (even if SSH_USER matches target); sudo -k clears
+  # cached credentials so a password is normally required. No sudo -S / no SSH_SUDO_PASSWORD.
+  if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -k; sudo -u ${SUDO_U} -H bash -lc ${INNER}"
+  fi
+  # Automation / direct ssh_droplet: skip sudo when already the target account.
   if [[ "${SSH_USER}" == "${SUDO_U}" ]]; then
     exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "bash -lc ${INNER}"
-  fi
-  # Workstation `hermes … droplet`: type sudo password on the remote TTY (no sudo -S / no SSH_SUDO_PASSWORD).
-  if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
-    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -u ${SUDO_U} -H bash -lc ${INNER}"
   fi
   [[ -n "${SSH_SUDO_PASSWORD:-}" ]] || {
     echo "ssh_droplet.sh: SSH_SUDO_PASSWORD not set in ${ENV_FILE}" >&2

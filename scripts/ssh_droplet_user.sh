@@ -6,7 +6,7 @@
 # the password into sudo -S breaks interactive login shells (stdin EOF closes the session).
 #
 # Requires ~/.env/.env: SSH_PORT, SSH_USER, SSH_TAILSCALE_IP (or SSH_IP)
-# Same private key as ssh_droplet.sh. Optional: SSH_LOGIN_USER (default: hermesadmin).
+# Same private key as ssh_droplet.sh. Optional: SSH_LOGIN_USER (default: hermesuser).
 #
 # Usage:
 #   ./scripts/ssh_droplet_user.sh              # sudo -i login shell as SSH_LOGIN_USER
@@ -38,7 +38,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$ENV_FILE"
 
 HOST="${SSH_TAILSCALE_IP:-${SSH_IP:?}}"
-LOGIN_TARGET="${_LOGIN_USER:-${AGENT_DROPLET_RUNTIME_USER:-hermesadmin}}"
+LOGIN_TARGET="${_LOGIN_USER:-${AGENT_DROPLET_RUNTIME_USER:-hermesuser}}"
 LU=$(printf '%q' "$LOGIN_TARGET")
 
 REMOTE_BASE=(

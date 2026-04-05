@@ -3,10 +3,12 @@
 # policies/core/unified-deployment-and-security.md). Runs the same CLI on the VPS (venv + HERMES_HOME). All args forwarded.
 # Requires ~/.env/.env with SSH_* (host, port, user). SSH key passphrase is typed interactively
 # (env-file SSH_PASSPHRASE / HERMES_DROPLET_ALLOW_ENV_PASSPHRASE is ignored for this entrypoint).
-# If SSH_USER ≠ runtime user, remote sudo prompts for your sudo password (no SSH_SUDO_PASSWORD pipe).
+# Remote command always runs under sudo -u <runtime> (sudo -k first) so your sudo password is required
+# on the VPS TTY when your account is not passwordless-sudo for that user (no SSH_SUDO_PASSWORD pipe).
 # Optional env: AGENT_DROPLET_RUNTIME_USER, AGENT_DROPLET_RUNTIME_HOME, AGENT_DROPLET_REPO
 # HERMES_DROPLET_INTERACTIVE=1 lets ssh_droplet pass its TTY check when stdin is not a TTY (IDE).
-# Default runtime user and paths match a typical DO droplet (`hermesadmin` + chief-orchestrator profile).
+# Defaults: runtime user hermesuser, HERMES_HOME …/profiles/chief-orchestrator, repo ~/hermes-agent.
+# One-time VPS setup: sudo bash scripts/droplet_bootstrap_hermesuser.sh
 #
 # env -u: a parent-exported HERMES_DROPLET_ALLOW_ENV_PASSPHRASE must not re-enable file passphrase here;
 # ssh_droplet still reads the file, but HERMES_DROPLET_WORKSTATION_CLI=1 disables file-based unlock.
@@ -14,9 +16,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
-RUNTIME_USER="${AGENT_DROPLET_RUNTIME_USER:-hermesadmin}"
-HH=$(printf '%q' "${AGENT_DROPLET_RUNTIME_HOME:-/home/hermesadmin/.hermes/profiles/chief-orchestrator}")
-REPO_Q=$(printf '%q' "${AGENT_DROPLET_REPO:-/home/hermesadmin/hermes-agent}")
+RUNTIME_USER="${AGENT_DROPLET_RUNTIME_USER:-hermesuser}"
+HH=$(printf '%q' "${AGENT_DROPLET_RUNTIME_HOME:-/home/hermesuser/.hermes/profiles/chief-orchestrator}")
+REPO_Q=$(printf '%q' "${AGENT_DROPLET_REPO:-/home/hermesuser/hermes-agent}")
 cmd="export HERMES_HOME=${HH}; cd ${REPO_Q} && if [[ ! -x ./venv/bin/python ]]; then echo 'agent-droplet: missing ./venv/bin/python. On the droplet: python3 -m venv venv && ./venv/bin/pip install -e .' >&2; exit 127; fi && exec ./venv/bin/python -m hermes_cli.main"
 for a in "$@"; do
   cmd+=" $(printf '%q' "$a")"
