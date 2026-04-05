@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# OpenSSH directly as hermesuser@<host> — normal remote login shell (no admin hop, no sudo).
+#
+# Requires the same key in hermesuser's ~/.ssh/authorized_keys on the server. If you only have
+# admin SSH access, use ./scripts/ssh_droplet_user.sh instead (SSH as admin, sudo to hermesuser).
+#
+# Expects ~/.env/.env: SSH_PORT, SSH_TAILSCALE_IP (or SSH_IP)
+# Key: ~/.env/.ssh_key unless SSH_KEY_FILE is set.
+# Optional: SSH_LOGIN_USER (default hermesuser) — remote account to SSH as.
+#
+# Optional headless key unlock (same as ssh_droplet.sh): in ~/.env/.env set
+#   HERMES_DROPLET_ALLOW_ENV_PASSPHRASE=1
+#   SSH_PASSPHRASE=...
+#
+# Usage:
+#   ./scripts/ssh_droplet_hermesuser_direct.sh
+#   ./scripts/ssh_droplet_hermesuser_direct.sh 'hostname'
+
+set -euo pipefail
+
+_drop_cleanup() {
+  [[ -n "${_DROPLET_PASSFILE:-}" && -f "$_DROPLET_PASSFILE" ]] && rm -f "$_DROPLET_PASSFILE"
+  [[ -n "${_DROPLET_ASKPASS_SCRIPT:-}" && -f "$_DROPLET_ASKPASS_SCRIPT" ]] && rm -f "$_DROPLET_ASKPASS_SCRIPT"
+}
+trap _drop_cleanup EXIT
+
+ENV_FILE="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
+KEY_FILE="${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}"
+_LOGIN_USER=""
+_ALLOW_ENV_PASS_FROM_FILE=0
+_RAW_SSH_PASSPHRASE=""
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "ssh_droplet_hermesuser_direct.sh: missing env file ${ENV_FILE} (set HERMES_DROPLET_ENV)" >&2
+  exit 1
+fi
+if [[ ! -f "$KEY_FILE" ]]; then
+  echo "ssh_droplet_hermesuser_direct.sh: missing key ${KEY_FILE} (set SSH_KEY_FILE)" >&2
+  exit 1
+fi
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+  key="${line%%=*}"
+  val="${line#*=}"
+  case "$key" in
+    SSH_PORT|SSH_TAILSCALE_IP|SSH_IP) export "${key}=${val}" ;;
+    SSH_LOGIN_USER) _LOGIN_USER="${val}" ;;
+    HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
+      case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
+      ;;
+    SSH_PASSPHRASE) _RAW_SSH_PASSPHRASE="${val}" ;;
+  esac
+done < "$ENV_FILE"
+
+HOST="${SSH_TAILSCALE_IP:-${SSH_IP:?}}"
+REMOTE_USER="${_LOGIN_USER:-${AGENT_DROPLET_RUNTIME_USER:-hermesuser}}"
+
+REMOTE_BASE=(
+  ssh -tt -o BatchMode=no -o IdentitiesOnly=yes -o IdentityAgent=none
+  -o AddKeysToAgent=no -o ControlMaster=no -o ControlPath=none
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4
+  -i "$KEY_FILE" -p "${SSH_PORT:?}"
+  "${REMOTE_USER}@${HOST}"
+)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  REMOTE_BASE+=(-o UseKeychain=no)
+fi
+REMOTE=("${REMOTE_BASE[@]}")
+
+unset SSH_PASSPHRASE 2>/dev/null || true
+_DROPLET_ENV=(env -u SSH_AUTH_SOCK -u SSH_AUTH_SOCK_PRIVATE -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE)
+
+if [[ "$_ALLOW_ENV_PASS_FROM_FILE" == "1" ]]; then
+  if [[ -z "${_RAW_SSH_PASSPHRASE}" ]]; then
+    echo "ssh_droplet_hermesuser_direct.sh: HERMES_DROPLET_ALLOW_ENV_PASSPHRASE=1 but SSH_PASSPHRASE missing in ${ENV_FILE}" >&2
+    exit 1
+  fi
+  _DROPLET_PASSFILE=$(mktemp)
+  _DROPLET_ASKPASS_SCRIPT=$(mktemp)
+  chmod 600 "$_DROPLET_PASSFILE"
+  printf '%s' "$_RAW_SSH_PASSPHRASE" > "$_DROPLET_PASSFILE"
+  printf '%s\n' '#!/bin/sh' "exec cat '$_DROPLET_PASSFILE'" > "$_DROPLET_ASKPASS_SCRIPT"
+  chmod 700 "$_DROPLET_ASKPASS_SCRIPT"
+  export SSH_ASKPASS="$_DROPLET_ASKPASS_SCRIPT"
+  export SSH_ASKPASS_REQUIRE=force
+  export DISPLAY="${DISPLAY:-:0}"
+  _DROPLET_ENV=(env -u SSH_AUTH_SOCK -u SSH_AUTH_SOCK_PRIVATE)
+fi
+
+if [[ ! -t 0 && "${HERMES_DROPLET_INTERACTIVE:-}" != "1" && "$_ALLOW_ENV_PASS_FROM_FILE" != "1" ]]; then
+  echo "ssh_droplet_hermesuser_direct.sh: needs a TTY (or HERMES_DROPLET_INTERACTIVE=1, or env-file passphrase mode)." >&2
+  exit 1
+fi
+
+if [[ $# -eq 0 ]]; then
+  exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}"
+fi
+
+exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "$@"

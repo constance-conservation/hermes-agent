@@ -2,6 +2,9 @@
 # Open a shell (or run a command) as the normal login user by SSH-ing as the admin user
 # (SSH_USER from ~/.env/.env — same pubkey as ssh_droplet.sh), then sudo to that user.
 #
+# If hermesuser can receive SSH directly (same key in authorized_keys), prefer
+# ssh_droplet_hermesuser_direct.sh or the shell function `droplet` from scripts/shell/hermes-env.sh.
+#
 # Sudo is interactive (no sudo -S pipe): you type the sudo password on the remote TTY. Piping
 # the password into sudo -S breaks interactive login shells (stdin EOF closes the session).
 #

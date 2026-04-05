@@ -10,9 +10,11 @@
 # (or agent-droplet when the last argument is `droplet`). This avoids a global `hermes` on PATH
 # when you are not in a direnv-enabled repo directory.
 #
-# `droplet` — interactive SSH as hermesuser on the VPS (wraps scripts/ssh_droplet_user.sh; requires
-# ~/.env/.env with SSH_* and ~/.env/.ssh_key). Optional args: same as ssh_droplet_user.sh, e.g.
-#   droplet 'hostname'
+# `droplet` — plain OpenSSH to hermesuser@droplet (scripts/ssh_droplet_hermesuser_direct.sh). Your
+# pubkey must be in hermesuser's authorized_keys. If you only have admin SSH, use `droplet_sudo`.
+# ~/.env/.env: SSH_PORT, SSH_TAILSCALE_IP or SSH_IP (not SSH_USER for the connection target).
+#
+# `droplet_sudo` — SSH as admin then sudo to hermesuser (scripts/ssh_droplet_user.sh; needs SSH_USER).
 #
 # direnv users: `.envrc` already PATH_add scripts; you can still source this file so `hermes`
 # works from any cwd.
@@ -32,11 +34,21 @@ hermes() {
   command "$_HERMES_SHIM" "$@"
 }
 
-# Log into the droplet as hermesuser (from workstation). Not for use *on* the VPS.
+# Remote SSH session as hermesuser (direct ssh user@host — not a local Hermes process).
 droplet() {
-  local s="${HERMES_AGENT_REPO}/scripts/ssh_droplet_user.sh"
+  local s="${HERMES_AGENT_REPO}/scripts/ssh_droplet_hermesuser_direct.sh"
   if [[ ! -f "$s" ]]; then
     echo "droplet: missing $s — set HERMES_AGENT_REPO to your hermes-agent checkout" >&2
+    return 127
+  fi
+  bash "$s" "$@"
+}
+
+# Same destination user, but via admin account + sudo (when hermesuser cannot SSH directly).
+droplet_sudo() {
+  local s="${HERMES_AGENT_REPO}/scripts/ssh_droplet_user.sh"
+  if [[ ! -f "$s" ]]; then
+    echo "droplet_sudo: missing $s — set HERMES_AGENT_REPO to your hermes-agent checkout" >&2
     return 127
   fi
   bash "$s" "$@"
