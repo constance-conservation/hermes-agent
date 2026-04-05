@@ -1,8 +1,12 @@
-# Phased activation — Sessions 2–20 with cumulative cover context
+# Phased activation — Sessions 2–20 with cumulative cover + carry-in + handoff
 # =============================================================================
 # Assumes Session 1 (runtime activation / deployment-handoff) is DONE. Use one NEW chat per session.
 # Resolve POLICY_ROOT and WORKSPACE from HERMES_HOME/.hermes.md (absolute paths in real use).
-# Paste each block below as a single user message (cover + task + verification).
+#
+# Operator: before sending each block, paste under **Operator carry-in** the previous session’s
+# closing **Outstanding tasks** + **Next session** (or **Post-activation**) lists so the new agent sees todos.
+#
+# Paste each block below as a single user message (cover + carry-in + task + handoff rules + verification).
 
 # ── Session 2 ────────────────────────────────────────────────────────────────
 ---BEGIN SESSION 2---
@@ -12,11 +16,21 @@ We are continuing a **20-step procedural activation** of the agentic-company pol
 
 **This session = Session 2.** It **builds on** Session 1 by locking in **artifacts, archival memory, and the deployment pack constitution** so later sessions (security, token governance, org roles) have stable file/register contracts.
 
+**Operator carry-in (paste from Session 1 closing handoff — or write “None.”)**  
+
+(paste here: prior agent’s **A. Outstanding tasks**, **B. Next session** / summary bullets, and any critical notes)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/artifacts-and-archival-memory.md` and `POLICY_ROOT/core/agentic-company-deployment-pack.md` via tools; confirm `workspace/operations/` and archival layout; patch registers only if missing.
 
-**Verification** — Before you finish, add a section **"Verification"** with: (1) absolute `HERMES_HOME` + profile name; (2) read `.hermes.md` and print policy root + workspace paths (one line each); (3) confirm `skip_context_files` is not disabling injection; list context files you read this session (`.hermes.md`, `WORKSPACE/BOOTSTRAP.md`, `WORKSPACE/AGENTS.md`, `SOUL.md`) with **verbatim first line or first heading** from disk for each read; (4) bullet list this session’s policy paths + one-line purpose; (5) three topic phrases from the handoff/workspace rules you are following (no full system prompt dump).
+**Handoff (required)** — After your main work, **before** Verification, include:
+
+**A. Outstanding tasks** — Numbered list of items still open (blockers, human-only steps, deferred work). If none: `1. None.`
+
+**B. Next session (Session 3)** — Numbered list of **executable** tasks for the **next** activation chat (specific `POLICY_ROOT/...` paths, `WORKSPACE/...` files to read or edit). Write so a fresh-context agent can run the list **without** reading this thread. Planned focus for Session 3: **security prompts + Chief Security Governor / audit posture** (`security-prompts.md`).
+
+**Verification** — Then add **"Verification"** with: (1) absolute `HERMES_HOME` + profile name; (2) read `.hermes.md` and print policy root + workspace paths (one line each); (3) confirm `skip_context_files` is not disabling injection; list context files you read this session (`.hermes.md`, `WORKSPACE/BOOTSTRAP.md`, `WORKSPACE/AGENTS.md`, `SOUL.md`) with **verbatim first line or first heading** from disk for each read; (4) bullet list this session’s policy paths + one-line purpose; (5) three topic phrases from the handoff/workspace rules you are following (no full system prompt dump).
 
 ---END SESSION 2---
 
@@ -24,15 +38,25 @@ Read `POLICY_ROOT/core/governance/artifacts-and-archival-memory.md` and `POLICY_
 ---BEGIN SESSION 3---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–2 are done:** Session 1 = runtime activation; Session 2 = artifacts/archival + canonical deployment pack alignment and `workspace/operations/` layout. This chat is **empty of prior turns** — load continuity from **files and registers** only.
+**Sessions 1–2 are done:** Session 1 = runtime activation; Session 2 = artifacts/archival + canonical deployment pack alignment and `workspace/operations/` layout. This chat is **empty of prior turns** — load continuity from **files and registers** and the **operator carry-in** below.
 
 **This session = Session 3.** It **builds on** 1–2 by activating the **security layer** (Chief Security Governor posture, audit framing) using `security-prompts.md`, so token governance and org sessions later inherit a classified security baseline.
+
+**Operator carry-in (paste from Session 2 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/security-prompts.md` in chunks; run Chief Security Governor + audit posture for this runtime; summarize findings.
 
-**Verification** — Same five-part **Verification** section as Session 2 (HERMES_HOME, path wiring from `.hermes.md`, context files + verbatim first lines, policy reads list, three pack topics — no full system prompt dump).
+**Handoff (required)** — After main work, **before** Verification:
+
+**A. Outstanding tasks** — Numbered; `1. None.` if nothing open.
+
+**B. Next session (Session 4)** — Numbered **executable** tasks for the next chat; planned focus: **chief orchestrator directive** (`chief-orchestrator-directive.md`).
+
+**Verification** — Same five parts as Session 2 (HERMES_HOME, `.hermes.md` paths, context files + verbatim first lines, policy reads list, three pack topics — no full system prompt dump).
 
 ---END SESSION 3---
 
@@ -40,15 +64,21 @@ Read `POLICY_ROOT/core/security-prompts.md` in chunks; run Chief Security Govern
 ---BEGIN SESSION 4---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–3 complete:** activation → artifacts/pack → security prompts/audit posture. **No chat history here** — use registers, `WORKSPACE/`, and policy on disk.
+**Sessions 1–3 complete:** activation → artifacts/pack → security prompts/audit posture. **No chat history here** — use registers, `WORKSPACE/`, policy on disk, and carry-in.
 
 **This session = Session 4.** It **builds on** prior work by fixing **orchestrator doctrine** (chief directive): org stance, which roles to register next, and how later “lean org” and token sessions will align.
+
+**Operator carry-in (paste from Session 3 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/chief-orchestrator-directive.md` via tools; state org stance, initial roles to register, next step.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 5)** — Numbered executable tasks; planned focus: **token/model/tool/channel governance policy** (read-only summary).
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 4---
 
@@ -56,15 +86,21 @@ Read `POLICY_ROOT/core/chief-orchestrator-directive.md` via tools; state org sta
 ---BEGIN SESSION 5---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–4 complete:** through chief orchestrator directive and org stance. Fresh context — continuity is in **ORG/operations files** and your prior written outputs.
+**Sessions 1–4 complete:** through chief orchestrator directive and org stance. Fresh context — continuity in **ORG/operations files**, disk, and carry-in.
 
 **This session = Session 5.** It **builds on** Session 4 by loading **token / model / tool / channel governance policy** (read-only summary of binding rules) before implementation in Session 6.
+
+**Operator carry-in (paste from Session 4 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/token-model-tool-and-channel-governance-policy.md` via tools; summarize binding rules for this deployment.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 6)** — Numbered executable tasks; planned focus: **implement token governance** (`implement-token-model-and-tool-and-channel-governance-prompt.md`).
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 5---
 
@@ -72,15 +108,21 @@ Read `POLICY_ROOT/core/governance/standards/token-model-tool-and-channel-governa
 ---BEGIN SESSION 6---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–5 complete:** including token governance **policy** summary. Empty thread — use disk.
+**Sessions 1–5 complete:** including token governance **policy** summary. Empty thread — use disk and carry-in.
 
 **This session = Session 6.** It **builds on** Session 5 by **implementing** what that policy requires: registries/templates under `WORKSPACE/` and `WORKSPACE/operations/` only (per implement prompt).
+
+**Operator carry-in (paste from Session 5 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md` via tools; implement required registries/templates under `WORKSPACE/` and `WORKSPACE/operations/` only.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 7)** — Numbered executable tasks; planned focus: **minimal default deployment order** + ORG_REGISTRY / ORG_CHART vs Session 4.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 6---
 
@@ -92,11 +134,17 @@ Read `POLICY_ROOT/core/governance/role-prompts/implement-token-model-and-tool-an
 
 **This session = Session 7.** It **builds on** Sessions 4 and 6 by reconciling **minimal default deployment order** with orchestrator stance and **ORG_REGISTRY / ORG_CHART**.
 
+**Operator carry-in (paste from Session 6 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/role-prompts/minimal-default-deployment-order.md` via tools; align `ORG_REGISTRY` / `ORG_CHART` with Session 4.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 8)** — Numbered executable tasks; planned focus: **org-mapper / HR** standard + controller.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 7---
 
@@ -104,15 +152,21 @@ Read `POLICY_ROOT/core/governance/role-prompts/minimal-default-deployment-order.
 ---BEGIN SESSION 8---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–7 complete:** org chart alignment started. No history — files only.
+**Sessions 1–7 complete:** org chart alignment started. No history — files and carry-in.
 
 **This session = Session 8.** It **builds on** org registers by applying **org-mapper / HR** standard + controller to operations files.
+
+**Operator carry-in (paste from Session 7 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/org-mapper-hr-policy.md` then `POLICY_ROOT/core/governance/role-prompts/org-mapper-hr-controller.md` via tools; apply to registers.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 9)** — Numbered executable tasks; planned focus: **agent lifecycle / org hygiene**.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 8---
 
@@ -124,11 +178,17 @@ Read `POLICY_ROOT/core/governance/standards/org-mapper-hr-policy.md` then `POLIC
 
 **This session = Session 9.** It **builds on** org structure by enforcing **agent lifecycle and org hygiene** (standards + controller).
 
+**Operator carry-in (paste from Session 8 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/agent-lifecycle-org-hygiene-policy.md` then `POLICY_ROOT/core/governance/role-prompts/agent-lifecycle-org-hygiene-controller.md` via tools; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 10)** — Numbered executable tasks; planned focus: **task state and evidence**.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 9---
 
@@ -140,11 +200,17 @@ Read `POLICY_ROOT/core/governance/standards/agent-lifecycle-org-hygiene-policy.m
 
 **This session = Session 10.** It **builds on** governance by applying **task state and evidence** rules (standard + enforcer role prompt).
 
+**Operator carry-in (paste from Session 9 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/task-state-and-evidence-policy.md` then `POLICY_ROOT/core/governance/role-prompts/task-state-evidence-enforcer.md` via tools; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 11)** — Numbered executable tasks; planned focus: **board review**.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 10---
 
@@ -156,11 +222,17 @@ Read `POLICY_ROOT/core/governance/standards/task-state-and-evidence-policy.md` t
 
 **This session = Session 11.** It **builds on** prior registers by adding **board review** policy + role workflow.
 
+**Operator carry-in (paste from Session 10 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/board-of-directors-review-policy.md` then `POLICY_ROOT/core/governance/role-prompts/board-of-directors-review.md` via tools; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 12)** — Numbered executable tasks; planned focus: **channel architecture**.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 11---
 
@@ -172,11 +244,17 @@ Read `POLICY_ROOT/core/governance/standards/board-of-directors-review-policy.md`
 
 **This session = Session 12.** It **builds on** org + comms governance by planning **channel architecture** (standard + planner prompt).
 
+**Operator carry-in (paste from Session 11 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/channel-architecture-policy.md` then `POLICY_ROOT/core/governance/role-prompts/future-channel-architecture-planner.md` via tools; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 13)** — Numbered executable tasks; planned focus: **client deployment** intake.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 12---
 
@@ -188,11 +266,17 @@ Read `POLICY_ROOT/core/governance/standards/channel-architecture-policy.md` then
 
 **This session = Session 13.** It **builds on** the stack by applying **client deployment** intake (standard + template).
 
+**Operator carry-in (paste from Session 12 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/client-deployment-policy.md` then `POLICY_ROOT/core/governance/role-prompts/client-intake-deployment-template.md` via tools; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 14)** — Numbered executable tasks; planned focus: **agentic-company-template** + optional playbooks.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 13---
 
@@ -204,11 +288,17 @@ Read `POLICY_ROOT/core/governance/standards/client-deployment-policy.md` then `P
 
 **This session = Session 14.** It **builds on** the company template layer: **agentic-company-template** and optional **markdown playbooks** under workspace rules.
 
+**Operator carry-in (paste from Session 13 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via tools; if playbooks needed, read `POLICY_ROOT/core/governance/role-prompts/markdown-playbook-generator.md` and generate under workspace rules.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 15)** — Numbered executable tasks; planned focus: **functional director** (per function; repeat Session 15 per director if needed).
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 14---
 
@@ -220,11 +310,17 @@ Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via too
 
 **This session = Session 15.** It **builds on** ORG_CHART / registers by instantiating a **functional director** (substitute the function name in the template).
 
+**Operator carry-in (paste from Session 14 or prior Session 15 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 (Per director function) Read `POLICY_ROOT/core/governance/standards/functional-director-policy-template.md` then `POLICY_ROOT/core/governance/role-prompts/functional-director-template.md`; substitute function name; update registers.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session** — If more directors remain: number executable tasks for **another Session 15** (name the function). If directors are done: **Next session (Session 16)** — executable tasks for **project lead** (name project slug).
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 15---
 
@@ -236,11 +332,17 @@ Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via too
 
 **This session = Session 16.** It **builds on** org structure by defining a **project lead** for a concrete project slug.
 
+**Operator carry-in (paste from Session 15 or prior Session 16 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 (Per real project) Read `POLICY_ROOT/core/governance/standards/project-lead-policy-template.md` then `POLICY_ROOT/core/governance/role-prompts/project-lead-template.md`; apply for project slug.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session** — If more projects: executable tasks for **another Session 16**. Else if supervisor needed: **Session 17**; else skip to **Session 18** or **19** and say so explicitly in numbered steps.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 16---
 
@@ -252,11 +354,17 @@ Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via too
 
 **This session = Session 17.** It **builds on** project structure by adding a **supervisor** layer where justified.
 
+**Operator carry-in (paste from Session 16 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 (If needed) Read `POLICY_ROOT/core/governance/standards/supervisor-policy-template.md` then `POLICY_ROOT/core/governance/role-prompts/supervisor-template.md`; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 18)** — Numbered executable tasks if workers needed; else **Session 19** (runtime pack / BOOTSTRAP).
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 17---
 
@@ -268,11 +376,17 @@ Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via too
 
 **This session = Session 18.** It **builds on** project/supervisor structure by applying **worker/specialist** templates.
 
+**Operator carry-in (paste from Session 17 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 (If delegating) Read `POLICY_ROOT/core/governance/standards/worker-specialist-policy-template.md` then `POLICY_ROOT/core/governance/role-prompts/worker-specialist-template.md`; apply.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 19)** — Numbered executable tasks; planned focus: **WORKSPACE/BOOTSTRAP.md** + USER/IDENTITY/TOOLS/MEMORY.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 18---
 
@@ -284,11 +398,17 @@ Read `POLICY_ROOT/core/governance/standards/agentic-company-template.md` via too
 
 **This session = Session 19.** It **builds on** everything prior by **customizing the runtime agent markdown pack** at `WORKSPACE/` (identity, tools, memory, user-facing files) per `BOOTSTRAP.md`.
 
+**Operator carry-in (paste from Session 18 closing handoff — or write “None.”)**  
+
+(paste here)
+
 **Session task**
 
 Follow `WORKSPACE/BOOTSTRAP.md` checklist; edit `WORKSPACE/USER.md`, `IDENTITY.md`, `TOOLS.md`, `MEMORY.md` as needed.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered. **B. Next session (Session 20)** — Numbered executable tasks; planned focus: **gateway-watchdog.md** + production messaging checks.
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 19---
 
@@ -296,14 +416,20 @@ Follow `WORKSPACE/BOOTSTRAP.md` checklist; edit `WORKSPACE/USER.md`, `IDENTITY.m
 ---BEGIN SESSION 20---
 
 **Cover — phased activation (fresh context)**  
-**Sessions 1–19 complete:** runtime pack tuned. This is the **final scheduled activation chat** for production messaging hygiene.
+**Sessions 1–19 complete:** runtime pack tuned. This is the **final numbered activation chat** for production messaging hygiene.
 
 **This session = Session 20.** It **builds on** the full deployment by aligning **gateway watchdog** practice with what the operator runs on the VPS (`watchdog-check`, systemd, scripts).
+
+**Operator carry-in (paste from Session 19 closing handoff — or write “None.”)**  
+
+(paste here)
 
 **Session task**
 
 Read `POLICY_ROOT/core/gateway-watchdog.md`; confirm `hermes gateway watchdog-check` and external watchdog/systemd scripts match production messaging.
 
-**Verification** — Same five-part **Verification** section as Session 2.
+**Handoff (required)** — **A. Outstanding tasks** — Numbered (open ops items, incidents, config debt). **B. Post-activation (no Session 21)** — Numbered **ongoing** tasks (monitoring, token rotation, gateway upgrades). State clearly: **numbered activation sequence complete.**
+
+**Verification** — Same five parts as Session 2.
 
 ---END SESSION 20---

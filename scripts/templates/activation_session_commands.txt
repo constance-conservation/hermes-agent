@@ -17,8 +17,10 @@ Rules for you:
 Acknowledge in one short paragraph, then wait for **Session 1**.
 ---END INITIAL PROMPT---
 
-# Sessions 2–20 with cumulative “cover” + same tasks + Verification (Session 1 assumed done):
+# Sessions 2–20: cumulative cover + **Operator carry-in** (paste prior handoff) + **Handoff**
+# (A. Outstanding tasks, B. Next session executable list) + Verification — Session 1 assumed done:
 #   scripts/templates/activation_sessions_cumulative_cover_2_20.txt
+# Session 1 should end with the same Handoff shape — see runtime_activation_session1_operator_message.txt
 #
 # One session = one new chat. Paste ONE line per session (after resolving paths from HERMES_HOME/.hermes.md).
 # POLICY_ROOT = canonical bundle path from .hermes.md. WORKSPACE = HERMES_HOME/workspace.
