@@ -240,6 +240,11 @@ def apply_token_governance_runtime(agent: Any) -> None:
 
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
+    from agent.consultant_routing import (
+        consultant_routing_enabled,
+        format_status_line,
+        resolve_consultant_tier,
+    )
     from agent.tier_model_routing import (
         normalize_tier_models,
         should_apply_per_turn_routing,
@@ -251,10 +256,30 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     tier_models = normalize_tier_models((cfg or {}).get("tier_models")) if cfg else {}
     if not tier_models:
         return
-    # tier:dynamic always follows the same per-message tier pick as governance heuristics.
-    if not is_tier_dynamic(agent.model) and not should_apply_per_turn_routing(cfg):
+    cr_on = consultant_routing_enabled(cfg)
+    # tier:dynamic, dynamic_tier_routing, or consultant_routing alone can trigger per-turn picks.
+    if (
+        not is_tier_dynamic(agent.model)
+        and not should_apply_per_turn_routing(cfg)
+        and not cr_on
+    ):
         return
-    tier = select_tier_for_message(user_message, cfg)
+    deterministic_tier = select_tier_for_message(user_message, cfg)
+    tier = deterministic_tier
+    audit: dict = {}
+    if cr_on:
+        try:
+            tier, audit = resolve_consultant_tier(
+                user_message,
+                cfg,
+                deterministic_tier,
+                tier_models,
+                agent=agent,
+            )
+        except Exception:
+            logger.debug("resolve_consultant_tier failed", exc_info=True)
+            tier = deterministic_tier
+            audit = {}
     mid = tier_models.get(tier)
     if not mid:
         return
@@ -272,9 +297,14 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     # Always show tier + model for this user turn (even if unchanged).
     try:
         emit = getattr(agent, "_emit_status", None)
+        extra = format_status_line(audit, tier, mid) if audit else ""
         if callable(emit):
             emit(f"Token governance: this turn Tier {tier} → {mid}")
+            if extra:
+                emit(extra)
         else:
             logger.info("Token governance: this turn Tier %s → %s", tier, mid)
+            if extra:
+                logger.info("%s", extra)
     except Exception:
         logger.info("Token governance: this turn Tier %s → %s", tier, mid)

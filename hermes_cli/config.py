@@ -359,6 +359,28 @@ DEFAULT_CONFIG = {
             "api_key": "",
             "timeout": 30,
         },
+        # Internal consultant routing (tier pick + challenger + chief) — not user dialogue.
+        "consultant_router": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 45,
+        },
+        "consultant_challenger": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 45,
+        },
+        "consultant_chief": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 60,
+        },
     },
     
     "display": {

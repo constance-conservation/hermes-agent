@@ -56,6 +56,17 @@ auxiliary:
   flush_memories:
     provider: openrouter
     model: tier:dynamic
+  # Internal consultant pipeline (logged to workspace/operations/consultant_deliberations.jsonl).
+  # Router: cheap / openrouter auto; Chief: strong tier aligned with policy.
+  consultant_router:
+    provider: openrouter
+    model: openrouter/auto
+  consultant_challenger:
+    provider: openrouter
+    model: tier:B
+  consultant_chief:
+    provider: openrouter
+    model: tier:D
 
 delegation:
   provider: openrouter

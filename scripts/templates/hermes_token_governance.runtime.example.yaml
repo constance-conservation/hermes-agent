@@ -64,4 +64,26 @@ dynamic_fallback_long_chars: 2800
 dynamic_fallback_medium_tier: C
 dynamic_fallback_long_tier: D
 
+# Chief-orchestrator consultant routing (policy § Tier E/F): cheap LLM router + internal
+# challenger + Chief approval. Deliberation is logged to
+# workspace/operations/consultant_deliberations.jsonl (not injected into user chat).
+# Operators are not prompted; disable with HERMES_CONSULTANT_ROUTING_DISABLE=1.
+consultant_routing:
+  enabled: true
+  # hybrid: deterministic baseline + router LLM (router may upgrade; cannot downgrade below baseline).
+  # llm: router may also downgrade vs baseline. deterministic: skip router (legacy).
+  mode: hybrid
+  # Skip the router call when deterministic tier is in this list (save cost on obvious tier-B work).
+  skip_router_when_tier_in:
+    - B
+  router_task: consultant_router
+  challenger_task: consultant_challenger
+  chief_task: consultant_chief
+  tiers_requiring_deliberation:
+    - E
+    - F
+  # Optional: stop running full deliberation after N approvals this session (then cap tier).
+  # max_deliberations_per_session: 10
+  # cap_tier_when_deliberation_exhausted: D
+
 skip_context_files: false

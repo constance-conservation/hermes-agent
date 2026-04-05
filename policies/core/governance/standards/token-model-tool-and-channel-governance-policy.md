@@ -421,6 +421,8 @@ Examples:
 
 Use only under consultant rules.
 
+**Hermes runtime:** Enable `consultant_routing` in `HERMES_HOME/workspace/operations/hermes_token_governance.runtime.yaml` (see repo `scripts/templates/hermes_token_governance.runtime.example.yaml`). Hermes applies a cheap router LLM plus internal challenger and Chief-orchestrator LLM steps for tiers in `tiers_requiring_deliberation` (typically E/F); deliberation is appended to `workspace/operations/consultant_deliberations.jsonl`, not to the operator’s main dialogue. Configure `auxiliary.consultant_router`, `consultant_challenger`, and `consultant_chief` in the profile `config.yaml`. Human operators are not approval-gated; disable with `HERMES_CONSULTANT_ROUTING_DISABLE=1`.
+
 ---
 
 ## 8. Role-to-Model Defaults
