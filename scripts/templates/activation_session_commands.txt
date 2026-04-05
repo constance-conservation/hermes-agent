@@ -1,3 +1,12 @@
+# ── Operator pre-flight (do this once before the INITIAL PROMPT) ─────────────
+# - From repo: `cd ~/hermes-agent && source venv/bin/activate`
+# - Run: `hermes -p chief-orchestrator doctor` — fix any red errors (keys, model).
+# - Confirm: `hermes profile show chief-orchestrator` — sticky profile matches.
+# - CLI: `hermes -p chief-orchestrator tui` (recommended for activation). If you use
+#   messaging instead, do not run a second gateway with the same bot tokens as the VPS.
+# - One new Hermes conversation per numbered session below (fresh context per step).
+# - After activation, set `approvals.mode` back to `manual` or `smart` on trusted profiles.
+
 # ── Initial prompt (send once in the first chat, before Session 1) ───────────
 # Copy the block below (between the lines) as a single user message:
 
@@ -8,54 +17,66 @@ Over the next messages I will send you **one short instruction per chat** (Sessi
 
 Rules for you:
 - Do **not** ask me to paste large policy documents; use file tools and read on disk (in chunks if files are huge).
-- Keep Hermes default context injection as-is (`skip_context_files` off).
+- Keep Hermes default context injection as-is (`agent.skip_context_files` / `HERMES_SKIP_CONTEXT_FILES` must stay **off**).
 - When this pack tells you to stand up **another agent as a separate Hermes runtime**, use **`hermes profile create <slug>`** (flat slug under `~/.hermes/profiles/`); encode org level in the name and register slug ↔ role in `workspace/operations/ORG_REGISTRY.md` / `AGENT_LIFECYCLE_REGISTER.md` (see `POLICY_ROOT/core/deployment-handoff.md` — Hermes profiles).
 - After each session, give a brief summary and what the next session number will cover.
 - When I send only a numbered line, treat it as the **entire** task for that chat.
 
-Acknowledge in one short paragraph, then wait for **Session 1**.
+**End every reply (including this acknowledgment) with a section titled exactly:**
+
+`## Context injection verification`
+
+In that section you MUST:
+1. State explicitly that Hermes **context file injection is expected on** (i.e. not skipped): you do **not** ask the operator to enable `skip_context_files`.
+2. Using **read_file**, load **`HERMES_HOME/.hermes.md`** and quote the **single lines** (or tight excerpts) that define **`POLICY_ROOT`** and **`WORKSPACE`** / workspace root — enough to prove you read the wiring file.
+3. Using **read_file**, load **`WORKSPACE/BOOTSTRAP.md`** and **`WORKSPACE/AGENTS.md`**. For each file report: **character length** (or line count), the **title of the first markdown heading** (`# ...`), and **one short phrase** taken verbatim from the first paragraph under that heading (≤120 chars) to prove the read succeeded.
+4. Add **one bullet** summarizing what those two workspace files require the runtime to treat as canonical (one sentence).
+5. If you cannot read any of the above paths, say which failed and the exact error — do not invent content.
+
+Acknowledge in one short paragraph, then output **`## Context injection verification`** as specified, then wait for **Session 1**.
 ---END INITIAL PROMPT---
 
 # One session = one new chat. Paste ONE line per session (after resolving paths from HERMES_HOME/.hermes.md).
 # POLICY_ROOT = canonical bundle path from .hermes.md. WORKSPACE = HERMES_HOME/workspace.
 # All paths below are relative to POLICY_ROOT unless prefixed with WORKSPACE/
+# Every session: agent completes the task, then ends with ## Context injection verification (same rules as INITIAL).
 
-1  Session 1 — runtime activation (see deployment-handoff.md § Operator first message; or): Read POLICY_ROOT/core/deployment-handoff.md from "## Runtime Activation Prompt" through "Required output"; execute verification/preflight only; print Required output bullets.
+1  Session 1 — runtime activation: Read POLICY_ROOT/core/deployment-handoff.md from "## Runtime Activation Prompt" through "Required output"; execute verification/preflight only; print Required output bullets; end with ## Context injection verification (INITIAL rules).
 
-2  Read POLICY_ROOT/core/governance/artifacts-and-archival-memory.md and POLICY_ROOT/core/agentic-company-deployment-pack.md via tools; confirm workspace/operations/ and archival layout; patch registers only if missing.
+2  Read POLICY_ROOT/core/governance/artifacts-and-archival-memory.md and POLICY_ROOT/core/agentic-company-deployment-pack.md via tools; confirm workspace/operations/ and archival layout; patch registers only if missing; end with ## Context injection verification.
 
-3  Read POLICY_ROOT/core/security-prompts.md in chunks; run Chief Security Governor + audit posture for this runtime; summarize findings.
+3  Read POLICY_ROOT/core/security-prompts.md in chunks; run Chief Security Governor + audit posture for this runtime; summarize findings; end with ## Context injection verification.
 
-4  Read POLICY_ROOT/core/chief-orchestrator-directive.md via tools; state org stance, initial roles to register, next step.
+4  Read POLICY_ROOT/core/chief-orchestrator-directive.md via tools; state org stance, initial roles to register, next step; end with ## Context injection verification.
 
-5  Read POLICY_ROOT/core/governance/standards/token-model-tool-and-channel-governance-policy.md via tools; summarize binding rules for this deployment.
+5  Read POLICY_ROOT/core/governance/standards/token-model-tool-and-channel-governance-policy.md via tools; summarize binding rules for this deployment; end with ## Context injection verification.
 
-6  Read POLICY_ROOT/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md via tools; implement required registries/templates under WORKSPACE/ and WORKSPACE/operations/ only.
+6  Read POLICY_ROOT/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md via tools; implement required registries/templates under WORKSPACE/ and WORKSPACE/operations/ only; end with ## Context injection verification.
 
-7  Read POLICY_ROOT/core/governance/role-prompts/minimal-default-deployment-order.md via tools; align ORG_REGISTRY/ORG_CHART with Session 4.
+7  Read POLICY_ROOT/core/governance/role-prompts/minimal-default-deployment-order.md via tools; align ORG_REGISTRY/ORG_CHART with Session 4; end with ## Context injection verification.
 
-8  Read POLICY_ROOT/core/governance/standards/org-mapper-hr-policy.md then POLICY_ROOT/core/governance/role-prompts/org-mapper-hr-controller.md via tools; apply to registers.
+8  Read POLICY_ROOT/core/governance/standards/org-mapper-hr-policy.md then POLICY_ROOT/core/governance/role-prompts/org-mapper-hr-controller.md via tools; apply to registers; end with ## Context injection verification.
 
-9  Read POLICY_ROOT/core/governance/standards/agent-lifecycle-org-hygiene-policy.md then POLICY_ROOT/core/governance/role-prompts/agent-lifecycle-org-hygiene-controller.md via tools; apply.
+9  Read POLICY_ROOT/core/governance/standards/agent-lifecycle-org-hygiene-policy.md then POLICY_ROOT/core/governance/role-prompts/agent-lifecycle-org-hygiene-controller.md via tools; apply; end with ## Context injection verification.
 
-10 Read POLICY_ROOT/core/governance/standards/task-state-and-evidence-policy.md then POLICY_ROOT/core/governance/role-prompts/task-state-evidence-enforcer.md via tools; apply.
+10 Read POLICY_ROOT/core/governance/standards/task-state-and-evidence-policy.md then POLICY_ROOT/core/governance/role-prompts/task-state-evidence-enforcer.md via tools; apply; end with ## Context injection verification.
 
-11 Read POLICY_ROOT/core/governance/standards/board-of-directors-review-policy.md then POLICY_ROOT/core/governance/role-prompts/board-of-directors-review.md via tools; apply.
+11 Read POLICY_ROOT/core/governance/standards/board-of-directors-review-policy.md then POLICY_ROOT/core/governance/role-prompts/board-of-directors-review.md via tools; apply; end with ## Context injection verification.
 
-12 Read POLICY_ROOT/core/governance/standards/channel-architecture-policy.md then POLICY_ROOT/core/governance/role-prompts/future-channel-architecture-planner.md via tools; apply.
+12 Read POLICY_ROOT/core/governance/standards/channel-architecture-policy.md then POLICY_ROOT/core/governance/role-prompts/future-channel-architecture-planner.md via tools; apply; end with ## Context injection verification.
 
-13 Read POLICY_ROOT/core/governance/standards/client-deployment-policy.md then POLICY_ROOT/core/governance/role-prompts/client-intake-deployment-template.md via tools; apply.
+13 Read POLICY_ROOT/core/governance/standards/client-deployment-policy.md then POLICY_ROOT/core/governance/role-prompts/client-intake-deployment-template.md via tools; apply; end with ## Context injection verification.
 
-14 Read POLICY_ROOT/core/governance/standards/agentic-company-template.md via tools; if playbooks needed, read POLICY_ROOT/core/governance/role-prompts/markdown-playbook-generator.md and generate under workspace rules.
+14 Read POLICY_ROOT/core/governance/standards/agentic-company-template.md via tools; if playbooks needed, read POLICY_ROOT/core/governance/role-prompts/markdown-playbook-generator.md and generate under workspace rules; end with ## Context injection verification.
 
-15 (Per director function) Read POLICY_ROOT/core/governance/standards/functional-director-policy-template.md then POLICY_ROOT/core/governance/role-prompts/functional-director-template.md; substitute function name; update registers.
+15 (Per director function) Read POLICY_ROOT/core/governance/standards/functional-director-policy-template.md then POLICY_ROOT/core/governance/role-prompts/functional-director-template.md; substitute function name; update registers; end with ## Context injection verification.
 
-16 (Per real project) Read POLICY_ROOT/core/governance/standards/project-lead-policy-template.md then POLICY_ROOT/core/governance/role-prompts/project-lead-template.md; apply for project slug.
+16 (Per real project) Read POLICY_ROOT/core/governance/standards/project-lead-policy-template.md then POLICY_ROOT/core/governance/role-prompts/project-lead-template.md; apply for project slug; end with ## Context injection verification.
 
-17 (If needed) Read POLICY_ROOT/core/governance/standards/supervisor-policy-template.md then POLICY_ROOT/core/governance/role-prompts/supervisor-template.md; apply.
+17 (If needed) Read POLICY_ROOT/core/governance/standards/supervisor-policy-template.md then POLICY_ROOT/core/governance/role-prompts/supervisor-template.md; apply; end with ## Context injection verification.
 
-18 (If delegating) Read POLICY_ROOT/core/governance/standards/worker-specialist-policy-template.md then POLICY_ROOT/core/governance/role-prompts/worker-specialist-template.md; apply.
+18 (If delegating) Read POLICY_ROOT/core/governance/standards/worker-specialist-policy-template.md then POLICY_ROOT/core/governance/role-prompts/worker-specialist-template.md; apply; end with ## Context injection verification.
 
-19 Follow WORKSPACE/BOOTSTRAP.md checklist; edit WORKSPACE/USER.md, IDENTITY.md, TOOLS.md, MEMORY.md as needed.
+19 Follow WORKSPACE/BOOTSTRAP.md checklist; edit WORKSPACE/USER.md, IDENTITY.md, TOOLS.md, MEMORY.md as needed; end with ## Context injection verification.
 
-20 Read POLICY_ROOT/core/gateway-watchdog.md; confirm watchdog-check + systemd/watchdog scripts match production messaging.
+20 Read POLICY_ROOT/core/gateway-watchdog.md; confirm watchdog-check + systemd/watchdog scripts match production messaging; end with ## Context injection verification.
