@@ -1,0 +1,43 @@
+# One session = one new chat. Paste ONE line per session (after resolving paths from HERMES_HOME/.hermes.md).
+# POLICY_ROOT = canonical bundle path from .hermes.md. WORKSPACE = HERMES_HOME/workspace.
+# All paths below are relative to POLICY_ROOT unless prefixed with WORKSPACE/
+
+1  Session 1 — runtime activation (see deployment-handoff.md § Operator first message; or): Read POLICY_ROOT/core/deployment-handoff.md from "## Runtime Activation Prompt" through "Required output"; execute verification/preflight only; print Required output bullets.
+
+2  Read POLICY_ROOT/core/governance/artifacts-and-archival-memory.md and POLICY_ROOT/core/agentic-company-deployment-pack.md via tools; confirm workspace/operations/ and archival layout; patch registers only if missing.
+
+3  Read POLICY_ROOT/core/security-prompts.md in chunks; run Chief Security Governor + audit posture for this runtime; summarize findings.
+
+4  Read POLICY_ROOT/core/chief-orchestrator-directive.md via tools; state org stance, initial roles to register, next step.
+
+5  Read POLICY_ROOT/core/governance/standards/token-model-tool-and-channel-governance-policy.md via tools; summarize binding rules for this deployment.
+
+6  Read POLICY_ROOT/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md via tools; implement required registries/templates under WORKSPACE/ and WORKSPACE/operations/ only.
+
+7  Read POLICY_ROOT/core/governance/role-prompts/minimal-default-deployment-order.md via tools; align ORG_REGISTRY/ORG_CHART with Session 4.
+
+8  Read POLICY_ROOT/core/governance/standards/org-mapper-hr-policy.md then POLICY_ROOT/core/governance/role-prompts/org-mapper-hr-controller.md via tools; apply to registers.
+
+9  Read POLICY_ROOT/core/governance/standards/agent-lifecycle-org-hygiene-policy.md then POLICY_ROOT/core/governance/role-prompts/agent-lifecycle-org-hygiene-controller.md via tools; apply.
+
+10 Read POLICY_ROOT/core/governance/standards/task-state-and-evidence-policy.md then POLICY_ROOT/core/governance/role-prompts/task-state-evidence-enforcer.md via tools; apply.
+
+11 Read POLICY_ROOT/core/governance/standards/board-of-directors-review-policy.md then POLICY_ROOT/core/governance/role-prompts/board-of-directors-review.md via tools; apply.
+
+12 Read POLICY_ROOT/core/governance/standards/channel-architecture-policy.md then POLICY_ROOT/core/governance/role-prompts/future-channel-architecture-planner.md via tools; apply.
+
+13 Read POLICY_ROOT/core/governance/standards/client-deployment-policy.md then POLICY_ROOT/core/governance/role-prompts/client-intake-deployment-template.md via tools; apply.
+
+14 Read POLICY_ROOT/core/governance/standards/agentic-company-template.md via tools; if playbooks needed, read POLICY_ROOT/core/governance/role-prompts/markdown-playbook-generator.md and generate under workspace rules.
+
+15 (Per director function) Read POLICY_ROOT/core/governance/standards/functional-director-policy-template.md then POLICY_ROOT/core/governance/role-prompts/functional-director-template.md; substitute function name; update registers.
+
+16 (Per real project) Read POLICY_ROOT/core/governance/standards/project-lead-policy-template.md then POLICY_ROOT/core/governance/role-prompts/project-lead-template.md; apply for project slug.
+
+17 (If needed) Read POLICY_ROOT/core/governance/standards/supervisor-policy-template.md then POLICY_ROOT/core/governance/role-prompts/supervisor-template.md; apply.
+
+18 (If delegating) Read POLICY_ROOT/core/governance/standards/worker-specialist-policy-template.md then POLICY_ROOT/core/governance/role-prompts/worker-specialist-template.md; apply.
+
+19 Follow WORKSPACE/BOOTSTRAP.md checklist; edit WORKSPACE/USER.md, IDENTITY.md, TOOLS.md, MEMORY.md as needed.
+
+20 Read POLICY_ROOT/core/gateway-watchdog.md; confirm watchdog-check + systemd/watchdog scripts match production messaging.
