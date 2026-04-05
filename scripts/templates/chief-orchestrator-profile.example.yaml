@@ -7,7 +7,7 @@
 # 3. Put GEMINI_API_KEY in that profile's ~/.hermes/profiles/chief-orchestrator/.env
 #    (Google AI Studio: https://aistudio.google.com/apikey — free tier)
 #
-# Default `scripts/agent-droplet` uses HERMES_HOME=.../profiles/chief-orchestrator.
+# Default `scripts/agent-droplet` uses HERMES_HOME=.../profiles/chief-orchestrator (runtime user `hermesadmin` on a typical droplet).
 
 model:
   provider: gemini

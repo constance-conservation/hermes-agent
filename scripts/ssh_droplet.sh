@@ -4,7 +4,8 @@
 # Expects a shell-env file (default: ~/.env/.env) with at least:
 #   SSH_PORT, SSH_USER, SSH_TAILSCALE_IP (or SSH_IP)
 # and a private key at ~/.env/.ssh_key unless SSH_KEY_FILE is set.
-# Optional: SSH_SUDO_PASSWORD (required for --sudo-user; used only for sudo -S on the remote).
+# Optional: SSH_SUDO_PASSWORD (required for --sudo-user when not using workstation `hermes … droplet`;
+# see HERMES_DROPLET_WORKSTATION_CLI in this file).
 #
 # SSH key passphrase — default: entered interactively (or via /dev/tty). ssh-agent and inherited
 # SSH_ASKPASS are stripped unless you opt in below.
@@ -57,6 +58,13 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     SSH_PASSPHRASE) _RAW_SSH_PASSPHRASE="${val}" ;;
   esac
 done < "$ENV_FILE"
+
+# Workstation `hermes … droplet` sets this: never use SSH_PASSPHRASE / HERMES_DROPLET_ALLOW_ENV_PASSPHRASE
+# from the env file — unlock the SSH key interactively (TTY) instead of SSH_ASKPASS.
+if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
+  _ALLOW_ENV_PASS_FROM_FILE=0
+  _RAW_SSH_PASSPHRASE=""
+fi
 
 if [[ "$_ALLOW_ENV_PASS_FROM_FILE" == "1" && -n "${_RAW_SSH_PASSPHRASE}" ]]; then
   _DROPLET_KEY_PASS="${_RAW_SSH_PASSPHRASE}"
@@ -113,12 +121,20 @@ if [[ "${1:-}" == "--sudo-user" ]]; then
   shift
   SUDO_U="${1:?--sudo-user requires a username}"
   shift
+  INNER=$(printf '%q' "$*")
+  # Already the target user — no privilege step (SSH key auth is still required).
+  if [[ "${SSH_USER}" == "${SUDO_U}" ]]; then
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "bash -lc ${INNER}"
+  fi
+  # Workstation `hermes … droplet`: type sudo password on the remote TTY (no sudo -S / no SSH_SUDO_PASSWORD).
+  if [[ "${HERMES_DROPLET_WORKSTATION_CLI:-}" == "1" ]]; then
+    exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "sudo -u ${SUDO_U} -H bash -lc ${INNER}"
+  fi
   [[ -n "${SSH_SUDO_PASSWORD:-}" ]] || {
     echo "ssh_droplet.sh: SSH_SUDO_PASSWORD not set in ${ENV_FILE}" >&2
     exit 1
   }
   PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
-  INNER=$(printf '%q' "$*")
   exec "${_DROPLET_ENV[@]}" "${REMOTE[@]}" "printf '%s' '${PW_B64}' | base64 -d | sudo -S -u ${SUDO_U} -H bash -lc ${INNER}"
 fi
 
