@@ -82,10 +82,10 @@ consultant_routing:
   tiers_requiring_deliberation:
     - E
     - F
-  # When the user message matches activation/governance session heuristics (long Handoff-style
-  # briefs, ORG_REGISTRY, REM- items, etc.), raise merged tier to at least this letter so
-  # challenger + Chief deliberation always runs (Chief may still deny consultant use).
-  governance_activation_deliberation_floor: E
+  # Optional (off by default): set to E or F to always run challenger+Chief when the
+  # governance_activation_signal matches (forces merged tier floor). Most installs should
+  # leave this unset so only the router’s E/F recommendation triggers deliberation.
+  # governance_activation_deliberation_floor: E
   # governance_activation_min_chars: 1600
   # governance_activation_min_hits: 3
   # Optional: stop running full deliberation after N approvals this session (then cap tier).

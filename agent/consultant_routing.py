@@ -202,20 +202,20 @@ def resolve_consultant_tier(
             "You are a cost-aware routing advisor for a multi-agent organization. "
             "Tiers A–F increase in capability and cost (A lowest, F consultant). "
             "Prefer the cheapest tier that can succeed for trivial work. "
-            "Strongly consider tier E (premium internal) or F (consultant) when the user message is a "
-            "multi-step activation / governance session: numbered REM items, Handoff + Verification "
-            "blocks, ORG_REGISTRY / ORG_CHART reconciliation, policy path drills, security "
-            "remediation, or orchestrator deployment sequencing — these need sustained reasoning and "
-            "often justify consultant depth even when a length-only heuristic chose tier D. "
-            "If that applies, set request_consultant_escalation to true and recommended_tier to E or F."
+            "When the user message is a multi-step activation / governance session (Handoff, REM items, "
+            "ORG_REGISTRY / ORG_CHART, policy paths, deployment sequencing), you may recommend E or F "
+            "and set request_consultant_escalation true if that depth genuinely helps — but tier D or C "
+            "is often correct; you are never required to escalate. Declining consultant use is valid "
+            "when the work fits a strong mid-tier model."
         )
         hint = ""
         if gov_sig:
             hint = (
                 "\n\n[CLASSIFIER] This message matches org activation/governance session heuristics "
                 "(long structured brief with handoff, registry, or remediation-style tasks). "
-                "Bias toward recommended_tier E or F and request_consultant_escalation true unless "
-                "the substance is clearly clerical."
+                "Evaluate honestly whether E/F materially improves outcomes; if yes, recommend E or F "
+                "and set request_consultant_escalation true. If tier D (or C) is sufficient, say so — "
+                "do not escalate by default."
             )
         user_router = (
             f"Deterministic baseline tier (from org heuristics): {deterministic_tier}\n\n"
@@ -254,8 +254,7 @@ def resolve_consultant_tier(
             # Hybrid: do not serve a cheaper tier than deterministic heuristics (stability).
             merged = _max_tier(deterministic_tier, rec)
 
-        # Floor tier when activation/governance signal fires — forces Chief deliberation for E/F path
-        # (Chief may still deny and cap downward).
+        # Optional opt-in: raise merged tier floor when governance signal fires (forces deliberation).
         floor_raw = cr.get("governance_activation_deliberation_floor")
         if gov_sig and floor_raw not in (None, "", False):
             fl = _normalize_tier_letter(str(floor_raw), tier_models)
