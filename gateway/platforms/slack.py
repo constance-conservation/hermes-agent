@@ -325,10 +325,11 @@ class SlackAdapter(BasePlatformAdapter):
 
             # Slash commands: /hermes and every /hermes-* from the Slack app manifest.
             # - One case-insensitive regex listener so Slack always matches after manifest changes.
-            # - ack() must return JSON for Socket Mode slash commands. Empty ``text`` is
-            #   rejected with ``invalid_command_response``; use a minimal non-empty string.
-            # - Run _handle_slash_command in a task so the Socket Mode envelope is sent right
-            #   after ack; slow agent work must not delay the websocket response.
+            # - Socket Mode slash ack: send envelope only (no ``payload``). Slack validates
+            #   HTTP-style bodies (``text`` / ``response_type``) and may return
+            #   ``invalid_command_response``; see Socket Mode "Acknowledge events" + slash example.
+            # - Run _handle_slash_command in a task so the ack returns immediately; the real
+            #   reply is posted via the normal messaging path.
             _hermes_slash = re.compile(r"^/hermes(?:$|-(.+))$", re.IGNORECASE)
 
             async def _hermes_slash_router(ack, command):
@@ -340,8 +341,7 @@ class SlackAdapter(BasePlatformAdapter):
                     suffix = m.group(1).strip()
                     rest = (cmd_dict.get("text") or "").strip()
                     cmd_dict["text"] = f"{suffix} {rest}".strip() if rest else suffix
-                # NBSP: satisfies Slack's non-empty text rule; renders as blank in most clients.
-                await ack({"text": "\u00a0", "response_type": "ephemeral"})
+                await ack()
 
                 async def _slash_followup() -> None:
                     try:
