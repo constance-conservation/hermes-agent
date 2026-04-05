@@ -281,10 +281,10 @@ class TestAppMentionHandler:
         assert "message" in registered_events
         assert "app_mention" in registered_events
         assert "/hermes" in registered_commands
-        from hermes_cli.commands import slack_bolt_slash_command_paths
-
-        assert "/hermes-help" in registered_commands
-        assert len(registered_commands) == 1 + len(slack_bolt_slash_command_paths())
+        assert len(registered_commands) == 2
+        assert any(
+            getattr(c, "pattern", None) == r"^/hermes-.+" for c in registered_commands
+        )
 
 
 # ---------------------------------------------------------------------------

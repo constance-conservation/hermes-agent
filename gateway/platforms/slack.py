@@ -323,31 +323,26 @@ class SlackAdapter(BasePlatformAdapter):
                     return
                 await self._handle_slack_message(normalized)
 
-            # Slash commands: /hermes <text> plus one Slack app entry per subcommand
-            # (/hermes-help, /hermes-bg, …) so they appear in Slack's command picker.
-            from hermes_cli.commands import (
-                slack_bolt_slash_command_paths,
-                slack_socket_mode_prefixed_subcommand_keys,
-            )
-
-            _slack_prefix_keys = frozenset(slack_socket_mode_prefixed_subcommand_keys())
+            # Slash commands: exact /hermes plus any /hermes-* registered in the Slack app
+            # manifest. Use one regex Bolt listener for all /hermes-<subcommand> so every
+            # manifest entry is handled even if the gateway predates a specific path string
+            # (per-path registration can otherwise yield "app did not respond" / no ack).
+            _hermes_prefixed_slash = re.compile(r"^/hermes-.+")
 
             async def _hermes_slash_router(ack, command):
                 await ack()
                 cmd = (command.get("command") or "").strip()
-                if cmd.startswith("/hermes-") and len(cmd) > len("/hermes-"):
+                if _hermes_prefixed_slash.search(cmd) and cmd != "/hermes":
                     suffix = cmd[len("/hermes-") :]
-                    if suffix in _slack_prefix_keys:
-                        rest = (command.get("text") or "").strip()
-                        command = dict(command)
-                        command["text"] = (
-                            f"{suffix} {rest}".strip() if rest else suffix
-                        )
+                    rest = (command.get("text") or "").strip()
+                    command = dict(command)
+                    command["text"] = (
+                        f"{suffix} {rest}".strip() if rest else suffix
+                    )
                 await self._handle_slash_command(command)
 
             self._app.command("/hermes")(_hermes_slash_router)
-            for _path in slack_bolt_slash_command_paths():
-                self._app.command(_path)(_hermes_slash_router)
+            self._app.command(_hermes_prefixed_slash)(_hermes_slash_router)
 
             # Start Socket Mode handler in background
             self._handler = AsyncSocketModeHandler(self._app, app_token)
