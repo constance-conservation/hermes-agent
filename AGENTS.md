@@ -407,6 +407,10 @@ Those wrappers **always run the agent from your repo virtualenv**: they **`exec`
 
 If the venv path is missing, the wrapper prints an error and exits **`127`**. Ensure **`PATH`** includes **`~/.local/bin`** (see **`hermes profile create`** hints).
 
+### Org roles and `delegate_task(hermes_profile=…)`
+
+For **per-role tool and config isolation**, create named profiles from **`scripts/org_agent_profiles_manifest.yaml`** via **`./venv/bin/python scripts/bootstrap_org_agent_profiles.py`** (source profile defaults to **`chief-orchestrator`**). The chief (or any parent with the **delegation** toolset) can run a subagent under that profile using **`delegate_task`** with **`hermes_profile`** set to the profile name — **single-task only** (not combined with a multi-item **`tasks`** array). See **`scripts/templates/rem_operations/CHIEF_ORCHESTRATION_PLAYBOOK.md`** when materialized into **`HERMES_HOME/workspace/operations/`**.
+
 ### Rules for profile-safe code
 
 1. **Use `get_hermes_home()` for all HERMES_HOME paths.** Import from `hermes_constants`.

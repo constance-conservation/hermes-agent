@@ -2,7 +2,7 @@
 
 | AG-ID | Project slug | Status | Policy | Prompt |
 |-------|--------------|--------|--------|--------|
-| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `policies/core/governance/standards/project-lead-policy-template.md` | `policies/core/governance/role-prompts/project-lead-template.md` |
+| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `policies/core/governance/standards/project-lead-policy-template.md` | `policies/core/governance/role-prompts/project-lead-template.md` — Hermes profile **`ag-pl-agentic-company`** (manifest bootstrap) |
 
 ## Project brief (agentic-company)
 
@@ -14,7 +14,10 @@
 
 - Project workspace folder: `operations/projects/agentic-company/` (see `README.md` there).
 
-## Unfinished (expected)
+## Delegation
 
-- **Hermes delegate_tool** sub-agent profile for AG-005 is optional — not created automatically.
-- Human operator still owns irreversible production changes (SSH, firewall, secrets rotation).
+- Bootstrap profile: `./venv/bin/python scripts/bootstrap_org_agent_profiles.py` → **`ag-pl-agentic-company`**. Chief calls `delegate_task(..., hermes_profile="ag-pl-agentic-company")` for project-lane work.
+
+## Operator-owned
+
+- Irreversible production changes (SSH, firewall, secrets rotation) remain human-owned unless policy explicitly delegates.

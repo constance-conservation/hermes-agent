@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Copy REM-006/007/009 workspace templates into HERMES_HOME/workspace/operations/
-# (does not overwrite existing files). Run after materialize_policies_into_hermes_home.sh
-# or any time you need the registers on a new profile.
+# Copy REM / org workspace templates into HERMES_HOME/workspace/operations/
 #
 # Usage:
-#   export HERMES_HOME=/path/to/.hermes   # or profile path
+#   export HERMES_HOME=/path/to/.hermes   # or profile directory
 #   ./scripts/materialize_rem_operations.sh
+#
+# Overwrite existing files from repo templates (e.g. after git pull on droplet):
+#   REM_OPERATIONS_FORCE=1 ./scripts/materialize_rem_operations.sh
 #
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,22 +21,34 @@ fi
 
 mkdir -p "${DEST}/projects/agentic-company"
 
-copy_if_missing() {
+rem_copy() {
   local rel="$1"
   local from="${SRC}/${rel}"
   local to="${DEST}/${rel}"
   mkdir -p "$(dirname "$to")"
-  if [[ -f "$to" ]]; then
+  if [[ -f "$to" && "${REM_OPERATIONS_FORCE:-0}" != "1" ]]; then
     echo "materialize_rem: skip (exists) $to"
     return 0
   fi
   cp "$from" "$to"
-  echo "materialize_rem: created $to"
+  echo "materialize_rem: installed $to"
 }
 
-copy_if_missing "SECURITY_SUBAGENTS_REGISTER.md"
-copy_if_missing "FUNCTIONAL_DIRECTORS_REGISTER.md"
-copy_if_missing "PROJECT_LEADS_REGISTER.md"
-copy_if_missing "projects/agentic-company/README.md"
+rem_copy "SECURITY_SUBAGENTS_REGISTER.md"
+rem_copy "FUNCTIONAL_DIRECTORS_REGISTER.md"
+rem_copy "PROJECT_LEADS_REGISTER.md"
+rem_copy "CHIEF_ORCHESTRATION_PLAYBOOK.md"
+rem_copy "ORG_AGENT_ESCALATION_PLAYBOOK.md"
+rem_copy "SECURITY_ALERT_REGISTER.md"
+rem_copy "CHANNEL_ARCHITECTURE.md"
+rem_copy "SKILL_INVENTORY_REGISTER.md"
+rem_copy "CONSULTANT_REQUEST_REGISTER.md"
+rem_copy "CONSULTANT_REQUEST_TEMPLATE.md"
+rem_copy "BOARD_REVIEW_REGISTER.md"
+rem_copy "MEMORY_INTEGRATION_OVERRIDE.md"
+rem_copy "README.md"
+rem_copy "GOVERNANCE_CHANGELOG.md"
+rem_copy "MEMORY_MD_APPEND_SNIPPET.txt"
+rem_copy "projects/agentic-company/README.md"
 
-echo "materialize_rem: done DEST=$DEST"
+echo "materialize_rem: done DEST=$DEST (REM_OPERATIONS_FORCE=${REM_OPERATIONS_FORCE:-0})"

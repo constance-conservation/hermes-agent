@@ -20,9 +20,14 @@ import json
 import logging
 logger = logging.getLogger(__name__)
 import os
+import threading
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
+
+# Serialize delegate_task when switching HERMES_HOME for a child profile (process-global env).
+_HERMES_PROFILE_DELEGATE_LOCK = threading.RLock()
 
 
 # Tools that children must never have access to
@@ -65,6 +70,34 @@ def _build_child_system_prompt(goal: str, context: Optional[str] = None) -> str:
         "parent agent as a summary."
     )
     return "\n".join(parts)
+
+
+@contextmanager
+def _hermes_profile_env(profile_name: Optional[str]):
+    """Temporarily set HERMES_HOME to profiles/<profile_name> for child construction + run."""
+    name = (profile_name or "").strip()
+    if not name:
+        yield
+        return
+    from hermes_cli.profiles import get_profile_dir, profile_exists, validate_profile_name
+
+    validate_profile_name(name)
+    if not profile_exists(name):
+        raise ValueError(
+            f"hermes_profile {name!r} does not exist. Create it first "
+            f"(e.g. scripts/bootstrap_org_agent_profiles.py) or use an existing profile name."
+        )
+    target = str(get_profile_dir(name))
+    with _HERMES_PROFILE_DELEGATE_LOCK:
+        old = os.environ.get("HERMES_HOME")
+        try:
+            os.environ["HERMES_HOME"] = target
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = old
 
 
 def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
@@ -406,6 +439,7 @@ def delegate_task(
     toolsets: Optional[List[str]] = None,
     tasks: Optional[List[Dict[str, Any]]] = None,
     max_iterations: Optional[int] = None,
+    hermes_profile: Optional[str] = None,
     parent_agent=None,
 ) -> str:
     """
@@ -463,122 +497,151 @@ def delegate_task(
         if not task.get("goal", "").strip():
             return json.dumps({"error": f"Task {i} is missing a 'goal'."})
 
+    hp = (hermes_profile or "").strip() or None
+    if hp and len(task_list) != 1:
+        return json.dumps({
+            "error": (
+                "hermes_profile is only supported for a single delegated task. "
+                "Use goal (and optional context/toolsets), not a multi-item tasks[] array, "
+                "because profile-scoped children temporarily set process-wide HERMES_HOME."
+            )
+        })
+
     overall_start = time.monotonic()
-    results = []
+    results: List[Dict[str, Any]] = []
+    children: List[tuple] = []
 
     n_tasks = len(task_list)
-    # Track goal labels for progress display (truncated for readability)
     task_labels = [t["goal"][:40] for t in task_list]
 
-    # Save parent tool names BEFORE any child construction mutates the global.
-    # _build_child_agent() calls AIAgent() which calls get_tool_definitions(),
-    # which overwrites model_tools._last_resolved_tool_names with child's toolset.
     import model_tools as _model_tools
     _parent_tool_names = list(_model_tools._last_resolved_tool_names)
 
-    # Build all child agents on the main thread (thread-safe construction)
-    # Wrapped in try/finally so the global is always restored even if a
-    # child build raises (otherwise _last_resolved_tool_names stays corrupted).
-    children = []
-    try:
-        for i, t in enumerate(task_list):
-            prompt_for = (
-                f"{t.get('goal') or ''}\n{t.get('context') or ''}"
-                if per_task_dynamic
-                else ""
-            )
-            try:
-                creds = _resolve_delegation_credentials(cfg, parent_agent, prompt_for)
-            except ValueError as exc:
-                return json.dumps({"error": str(exc)})
-            child = _build_child_agent(
-                task_index=i, goal=t["goal"], context=t.get("context"),
-                toolsets=t.get("toolsets") or toolsets, model=creds["model"],
-                max_iterations=effective_max_iter, parent_agent=parent_agent,
-                override_provider=creds["provider"], override_base_url=creds["base_url"],
-                override_api_key=creds["api_key"],
-                override_api_mode=creds["api_mode"],
-            )
-            # Override with correct parent tool names (before child construction mutated global)
-            child._delegate_saved_tool_names = _parent_tool_names
-            children.append((i, t, child))
-    finally:
-        # Authoritative restore: reset global to parent's tool names after all children built
-        _model_tools._last_resolved_tool_names = _parent_tool_names
-
-    if n_tasks == 1:
-        # Single task -- run directly (no thread pool overhead)
-        _i, _t, child = children[0]
-        result = _run_single_child(0, _t["goal"], child, parent_agent)
-        results.append(result)
-    else:
-        # Batch -- run in parallel with per-task progress lines
-        completed_count = 0
-        spinner_ref = getattr(parent_agent, '_delegate_spinner', None)
-
-        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHILDREN) as executor:
-            futures = {}
-            for i, t, child in children:
-                future = executor.submit(
-                    _run_single_child,
-                    task_index=i,
-                    goal=t["goal"],
-                    child=child,
-                    parent_agent=parent_agent,
+    if hp:
+        t = task_list[0]
+        prompt_for = (
+            f"{t.get('goal') or ''}\n{t.get('context') or ''}"
+            if per_task_dynamic
+            else ""
+        )
+        try:
+            creds = _resolve_delegation_credentials(cfg, parent_agent, prompt_for)
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+        try:
+            with _hermes_profile_env(hp):
+                child = _build_child_agent(
+                    task_index=0, goal=t["goal"], context=t.get("context"),
+                    toolsets=t.get("toolsets") or toolsets, model=creds["model"],
+                    max_iterations=effective_max_iter, parent_agent=parent_agent,
+                    override_provider=creds["provider"], override_base_url=creds["base_url"],
+                    override_api_key=creds["api_key"],
+                    override_api_mode=creds["api_mode"],
                 )
-                futures[future] = i
-
-            for future in as_completed(futures):
+                child._delegate_saved_tool_names = _parent_tool_names
+                children = [(0, t, child)]
+                result = _run_single_child(0, t["goal"], child, parent_agent)
+        finally:
+            _model_tools._last_resolved_tool_names = _parent_tool_names
+        results = [result]
+    else:
+        try:
+            for i, t in enumerate(task_list):
+                prompt_for = (
+                    f"{t.get('goal') or ''}\n{t.get('context') or ''}"
+                    if per_task_dynamic
+                    else ""
+                )
                 try:
-                    entry = future.result()
-                except Exception as exc:
-                    idx = futures[future]
-                    entry = {
-                        "task_index": idx,
-                        "status": "error",
-                        "summary": None,
-                        "error": str(exc),
-                        "api_calls": 0,
-                        "duration_seconds": 0,
-                    }
-                results.append(entry)
-                completed_count += 1
+                    creds = _resolve_delegation_credentials(cfg, parent_agent, prompt_for)
+                except ValueError as exc:
+                    return json.dumps({"error": str(exc)})
+                child = _build_child_agent(
+                    task_index=i, goal=t["goal"], context=t.get("context"),
+                    toolsets=t.get("toolsets") or toolsets, model=creds["model"],
+                    max_iterations=effective_max_iter, parent_agent=parent_agent,
+                    override_provider=creds["provider"], override_base_url=creds["base_url"],
+                    override_api_key=creds["api_key"],
+                    override_api_mode=creds["api_mode"],
+                )
+                child._delegate_saved_tool_names = _parent_tool_names
+                children.append((i, t, child))
+        finally:
+            _model_tools._last_resolved_tool_names = _parent_tool_names
 
-                # Print per-task completion line above the spinner
-                idx = entry["task_index"]
-                label = task_labels[idx] if idx < len(task_labels) else f"Task {idx}"
-                dur = entry.get("duration_seconds", 0)
-                status = entry.get("status", "?")
-                icon = "✓" if status == "completed" else "✗"
-                remaining = n_tasks - completed_count
-                completion_line = f"{icon} [{idx+1}/{n_tasks}] {label}  ({dur}s)"
-                if spinner_ref:
+        if n_tasks == 1:
+            _i, _t, child = children[0]
+            result = _run_single_child(0, _t["goal"], child, parent_agent)
+            results.append(result)
+        else:
+            completed_count = 0
+            spinner_ref = getattr(parent_agent, '_delegate_spinner', None)
+
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHILDREN) as executor:
+                futures = {}
+                for i, t, child in children:
+                    future = executor.submit(
+                        _run_single_child,
+                        task_index=i,
+                        goal=t["goal"],
+                        child=child,
+                        parent_agent=parent_agent,
+                    )
+                    futures[future] = i
+
+                for future in as_completed(futures):
                     try:
-                        spinner_ref.print_above(completion_line)
-                    except Exception:
+                        entry = future.result()
+                    except Exception as exc:
+                        idx = futures[future]
+                        entry = {
+                            "task_index": idx,
+                            "status": "error",
+                            "summary": None,
+                            "error": str(exc),
+                            "api_calls": 0,
+                            "duration_seconds": 0,
+                        }
+                    results.append(entry)
+                    completed_count += 1
+
+                    idx = entry["task_index"]
+                    label = task_labels[idx] if idx < len(task_labels) else f"Task {idx}"
+                    dur = entry.get("duration_seconds", 0)
+                    status = entry.get("status", "?")
+                    icon = "✓" if status == "completed" else "✗"
+                    remaining = n_tasks - completed_count
+                    completion_line = f"{icon} [{idx+1}/{n_tasks}] {label}  ({dur}s)"
+                    if spinner_ref:
+                        try:
+                            spinner_ref.print_above(completion_line)
+                        except Exception:
+                            print(f"  {completion_line}")
+                    else:
                         print(f"  {completion_line}")
-                else:
-                    print(f"  {completion_line}")
 
-                # Update spinner text to show remaining count
-                if spinner_ref and remaining > 0:
-                    try:
-                        spinner_ref.update_text(f"🔀 {remaining} task{'s' if remaining != 1 else ''} remaining")
-                    except Exception as e:
-                        logger.debug("Spinner update_text failed: %s", e)
+                    if spinner_ref and remaining > 0:
+                        try:
+                            spinner_ref.update_text(
+                                f"🔀 {remaining} task{'s' if remaining != 1 else ''} remaining"
+                            )
+                        except Exception as e:
+                            logger.debug("Spinner update_text failed: %s", e)
 
-        # Sort by task_index so results match input order
-        results.sort(key=lambda r: r["task_index"])
+            results.sort(key=lambda r: r["task_index"])
 
-    # Notify parent's memory provider of delegation outcomes
     if parent_agent and hasattr(parent_agent, '_memory_manager') and parent_agent._memory_manager:
         for entry in results:
             try:
-                _task_goal = tasks[entry["task_index"]]["goal"] if entry["task_index"] < len(tasks) else ""
+                idx = entry["task_index"]
+                _task_goal = (
+                    task_list[idx]["goal"] if idx < len(task_list) else ""
+                )
+                ch = children[idx][2] if idx < len(children) else None
                 parent_agent._memory_manager.on_delegation(
                     task=_task_goal,
                     result=entry.get("summary", "") or "",
-                    child_session_id=getattr(children[entry["task_index"]][2], "session_id", "") if entry["task_index"] < len(children) else "",
+                    child_session_id=getattr(ch, "session_id", "") if ch is not None else "",
                 )
             except Exception:
                 pass
@@ -747,6 +810,9 @@ DELEGATE_TASK_SCHEMA = {
         "- Subagents CANNOT call: delegate_task, clarify, memory, send_message, "
         "execute_code.\n"
         "- Each subagent gets its own terminal session (separate working directory and state).\n"
+        "- Optional hermes_profile: run the subagent under that named Hermes profile's "
+        "HERMES_HOME (toolsets, keys, gateway state isolated). Single-task only; "
+        "create profiles with scripts/bootstrap_org_agent_profiles.py.\n"
         "- Results are always returned as an array, one entry per task."
     ),
     "parameters": {
@@ -808,6 +874,14 @@ DELEGATE_TASK_SCHEMA = {
                     "Only set lower for simple tasks."
                 ),
             },
+            "hermes_profile": {
+                "type": "string",
+                "description": (
+                    "Named Hermes profile (under ~/.hermes/profiles/<name>) whose HERMES_HOME "
+                    "the subagent uses for config, tool availability, and filesystem scope. "
+                    "Must be omitted when using batch tasks[] with more than one item."
+                ),
+            },
         },
         "required": [],
     },
@@ -827,6 +901,7 @@ registry.register(
         toolsets=args.get("toolsets"),
         tasks=args.get("tasks"),
         max_iterations=args.get("max_iterations"),
+        hermes_profile=args.get("hermes_profile"),
         parent_agent=kw.get("parent_agent")),
     check_fn=check_delegate_requirements,
     emoji="🔀",

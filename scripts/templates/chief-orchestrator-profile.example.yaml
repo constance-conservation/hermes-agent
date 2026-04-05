@@ -22,6 +22,10 @@
 #
 # `scripts/agent-droplet` uses the workstation sticky profile name on the VPS (HERMES_HOME=.../profiles/<name>);
 # if sticky is default/missing it uses chief-orchestrator. Trailing `droplet` on the CLI is not a profile.
+#
+# Org roles (security / directors / HR / project lead): after chief-orchestrator exists, run
+#   ./venv/bin/python scripts/bootstrap_org_agent_profiles.py
+# then delegate with delegate_task(..., hermes_profile="ag-sec-preflight" | "fd-product" | …).
 
 model:
   provider: openrouter

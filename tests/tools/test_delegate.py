@@ -62,6 +62,7 @@ class TestDelegateRequirements(unittest.TestCase):
         self.assertIn("context", props)
         self.assertIn("toolsets", props)
         self.assertIn("max_iterations", props)
+        self.assertIn("hermes_profile", props)
         self.assertEqual(props["tasks"]["maxItems"], 3)
 
 
@@ -123,6 +124,35 @@ class TestDelegateTask(unittest.TestCase):
         parent = _make_mock_parent()
         result = json.loads(delegate_task(tasks=[{"context": "no goal here"}], parent_agent=parent))
         self.assertIn("error", result)
+
+    def test_hermes_profile_rejects_batch(self):
+        parent = _make_mock_parent()
+        result = json.loads(delegate_task(
+            hermes_profile="ag-sec-preflight",
+            tasks=[{"goal": "A"}, {"goal": "B"}],
+            parent_agent=parent,
+        ))
+        self.assertIn("error", result)
+        self.assertIn("hermes_profile", result["error"].lower())
+
+    @patch("tools.delegate_tool._hermes_profile_env")
+    @patch("tools.delegate_tool._run_single_child")
+    def test_hermes_profile_wraps_build_and_run(self, mock_run, mock_profile_env):
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=None)
+        mock_ctx.__exit__ = MagicMock(return_value=False)
+        mock_profile_env.return_value = mock_ctx
+        mock_run.return_value = {
+            "task_index": 0, "status": "completed",
+            "summary": "ok", "api_calls": 1, "duration_seconds": 1.0,
+        }
+        parent = _make_mock_parent()
+        json.loads(delegate_task(
+            goal="preflight check",
+            hermes_profile="ag-sec-preflight",
+            parent_agent=parent,
+        ))
+        mock_profile_env.assert_called_once_with("ag-sec-preflight")
 
     @patch("tools.delegate_tool._run_single_child")
     def test_single_task_mode(self, mock_run):

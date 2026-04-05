@@ -1,23 +1,19 @@
 # Functional Directors register (REM-007)
 
-> **REM-007 decision:** Directors remain **DORMANT** until workload justifies activation. This register records the four **default** director slots from `policies/core/unified-deployment-and-security.md` Phase 6.
+> **REM-007 (active pipeline test):** Directors are **ACTIVE** for delegation testing. Hermes profiles: `fd-product`, `fd-engineering`, `fd-operations`, `fd-it-security` (see `scripts/org_agent_profiles_manifest.yaml` + `scripts/bootstrap_org_agent_profiles.py`). Canonical policy slots remain in `policies/core/unified-deployment-and-security.md` Phase 6.
 
-| Role | Policy template | Prompt template | Status |
-|------|-----------------|-----------------|--------|
-| Product Director | `policies/core/governance/standards/functional-director-policy-template.md` (tailor title) | `policies/core/governance/role-prompts/functional-director-template.md` | **DORMANT** |
-| Engineering Director | same | same | **DORMANT** |
-| Operations Director | same | same | **DORMANT** |
-| IT / Security Director | same | same | **DORMANT** |
+| Role | Hermes profile | Policy template | Prompt template | Status |
+|------|----------------|-----------------|-----------------|--------|
+| Product Director | `fd-product` | `policies/core/governance/standards/functional-director-policy-template.md` (tailor title) | `policies/core/governance/role-prompts/functional-director-template.md` | **ACTIVE** |
+| Engineering Director | `fd-engineering` | same | same | **ACTIVE** |
+| Operations Director | `fd-operations` | same | same | **ACTIVE** |
+| IT / Security Director | `fd-it-security` | same | same | **ACTIVE** |
 
-## Activation criteria (operator)
+## Chief usage
 
-Instantiate a director when **all** are true:
+- Delegate department-level coordination with `delegate_task(..., hermes_profile="fd-<lane>")` per `CHIEF_ORCHESTRATION_PLAYBOOK.md`.
+- Stand down a director: remove or comment its manifest entry, `hermes profile delete fd-…`, and set status back to DORMANT in a fork of this register if needed.
 
-1. Multiple active projects need **function-wide** standards or portfolio summaries.
-2. Chief Orchestrator is spending cycles on department-level coordination that should be delegated.
-3. You can name a **single accountable** session/profile per director (no overlapping “shadow” directors).
+## Cadence
 
-## Unfinished (expected)
-
-- No automatic promotion from DORMANT → ACTIVE; operator updates this file and `ORG_CHART.md` when activating.
-- Hermes does not schedule director reviews unless you add cron / manual cadence.
+- Hermes does not schedule director reviews unless you add **cron** or a **manual** cadence on the chief profile.

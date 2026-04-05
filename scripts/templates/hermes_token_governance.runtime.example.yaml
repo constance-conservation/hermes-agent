@@ -52,7 +52,8 @@ blocked_model_substrings:
   - openai/o1
   - openai/o3
 
-max_agent_turns: 60
+# Session 6–7 governance target: cap chief iterations (apply_token_governance_runtime in run_agent).
+max_agent_turns: 50
 delegation_max_iterations: 30
 
 # Per user message, pick tier and set the main agent model from tier_models (default: true).
