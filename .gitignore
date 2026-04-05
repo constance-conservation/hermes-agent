@@ -21,6 +21,9 @@ tmp/
 temp_vision_images/
 hermes-*/*
 examples/
+# Keep canonical policy tree example stub (otherwise clones miss this path and apply_read_order_navigation fails).
+!policies/core/governance/generated/by_role/examples/
+!policies/core/governance/generated/by_role/examples/**
 tests/quick_test_dataset.jsonl
 tests/sample_dataset.jsonl
 run_datagen_kimik2-thinking.sh
