@@ -18,9 +18,11 @@
 #   sudo ./scripts/harden_ssh_management_port_tailscale.sh rollback        # immediate revert
 #
 # Timed safety rollback (default 180s after apply):
-#   - PID written to /tmp/rem001-arm-rollback.pid
+#   - File /tmp/rem001-arm-rollback.pid holds the **sleep(1) PID** (not the subshell).
 #   - Cancel after a successful NEW Tailscale SSH test:
-#       sudo kill "$(cat /tmp/rem001-arm-rollback.pid)" && rm -f /tmp/rem001-arm-rollback.pid
+#       sudo kill "$(cat /tmp/rem001-arm-rollback.pid)" && sudo rm -f /tmp/rem001-arm-rollback.pid
+#     Killing sleep prevents auto-rollback. Do **not** only kill the parent subshell — that can
+#     orphan sleep and still fire rollback later.
 #   - Or wait for timer to remove rules automatically
 #
 # Env:
@@ -177,21 +179,26 @@ fi
 
 echo "rem-001: applied. Open a NEW SSH session over Tailscale to port $PORT to verify."
 
-# Timed auto-rollback (background)
+# Timed auto-rollback (background). PID file = sleep(1) only: killing it cancels rollback.
 if [[ "$NO_ARM" != "1" ]] && [[ "$ROLLBACK_SECS" =~ ^[0-9]+$ ]] && [[ "$ROLLBACK_SECS" -gt 0 ]]; then
-  # shellcheck disable=SC2090
-  export REM001_PORT="$PORT" REM001_TAILSCALE_IF="$TS_IF" REM001_SKIP_V6="$SKIP_V6"
   (
-    sleep "$ROLLBACK_SECS"
+    sleep "$ROLLBACK_SECS" &
+    _sleep_pid=$!
+    echo "$_sleep_pid" >"$ARM_PID_FILE"
+    if ! wait "$_sleep_pid"; then
+      rm -f "$ARM_PID_FILE"
+      exit 0
+    fi
+    rm -f "$ARM_PID_FILE"
     echo "rem-001: auto-rollback after ${ROLLBACK_SECS}s (no disarm)" | logger -t rem001 2>/dev/null || true
     REM001_ROLLBACK=1 REM001_PORT="$PORT" REM001_TAILSCALE_IF="$TS_IF" REM001_SKIP_V6="$SKIP_V6" \
       exec bash "$SCRIPT_SELF" rollback
   ) &
-  _arm_pid=$!
-  echo "$_arm_pid" >"$ARM_PID_FILE"
-  echo "rem-001: armed auto-rollback in ${ROLLBACK_SECS}s — PID ${_arm_pid}"
+  _arm_parent=$!
+  echo "rem-001: armed auto-rollback in ${ROLLBACK_SECS}s — subshell=${_arm_parent}"
+  echo "rem-001: sleep PID (cancel this to disarm) is in: $ARM_PID_FILE"
   echo "rem-001: cancel timer after successful test:"
-  echo "         sudo kill ${_arm_pid} && rm -f $ARM_PID_FILE"
+  echo "         sudo kill \"\$(cat $ARM_PID_FILE)\" && sudo rm -f $ARM_PID_FILE"
 else
   echo "rem-001: auto-rollback timer disabled (REM001_ROLLBACK_SECONDS=$ROLLBACK_SECS or REM001_NO_ARM=1)"
 fi
