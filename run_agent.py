@@ -4886,18 +4886,28 @@ class AIAgent:
             if fb_provider == "huggingface":
                 import os as _os
 
-                _ek = (
-                    _os.environ.get("HF_TOKEN")
-                    or _os.environ.get("HUGGING_FACE_HUB_TOKEN")
-                    or _os.environ.get("HUGGINGFACE_API_KEY")
-                    or ""
-                ).strip()
-                if _ek:
-                    explicit_key = _ek
-                    explicit_base = (
-                        _os.environ.get("HF_BASE_URL", "").strip()
-                        or "https://router.huggingface.co/v1"
-                    )
+                try:
+                    from agent.local_inference import local_inference_override_for_hub_model
+
+                    _loc = local_inference_override_for_hub_model(fb_model)
+                except Exception:
+                    _loc = None
+                    logger.debug("local_inference override failed", exc_info=True)
+                if _loc:
+                    explicit_base, explicit_key = _loc[0], _loc[1]
+                else:
+                    _ek = (
+                        _os.environ.get("HF_TOKEN")
+                        or _os.environ.get("HUGGING_FACE_HUB_TOKEN")
+                        or _os.environ.get("HUGGINGFACE_API_KEY")
+                        or ""
+                    ).strip()
+                    if _ek:
+                        explicit_key = _ek
+                        explicit_base = (
+                            _os.environ.get("HF_BASE_URL", "").strip()
+                            or "https://router.huggingface.co/v1"
+                        )
             fb_client, _ = resolve_provider_client(
                 fb_provider,
                 model=fb_model,
