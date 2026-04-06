@@ -45,13 +45,12 @@ def test_classify_skips_when_wrong_current_profile():
     assert "not in only_when_current" in reason
 
 
-@patch.dict("os.environ", {"GEMINI_API_KEY": "x"}, clear=False)
+@patch("agent.profile_router._call_profile_router_llm")
 @patch("agent.auxiliary_client.extract_content_or_reasoning")
-@patch("agent.auxiliary_client.call_llm")
-def test_classify_uses_gemini_fallback_when_primary_raises(mock_call, mock_extract):
+def test_classify_success_when_profile_router_llm_returns_json(mock_extract, mock_pr_llm):
     from agent.profile_router import classify_profile_for_prompt
 
-    mock_call.side_effect = [RuntimeError("openrouter 403"), object()]
+    mock_pr_llm.return_value = object()
     mock_extract.return_value = '{"profile": "sec-bot", "confidence": 0.95, "reason": "ok"}'
 
     t, conf, _reason = classify_profile_for_prompt(
@@ -66,20 +65,36 @@ def test_classify_uses_gemini_fallback_when_primary_raises(mock_call, mock_extra
     )
     assert t == "sec-bot"
     assert conf == 0.95
-    assert mock_call.call_count == 2
-    second = mock_call.call_args_list[1]
-    assert second.kwargs.get("provider") == "gemini"
-    assert second.kwargs.get("model") == "gemini-2.5-flash"
-    assert second.kwargs.get("task") is None
+    mock_pr_llm.assert_called_once()
+
+
+@patch("agent.profile_router._call_profile_router_llm", side_effect=RuntimeError("no HF token"))
+@patch("agent.auxiliary_client.extract_content_or_reasoning")
+def test_classify_returns_error_when_profile_router_llm_raises(_mock_extract, _mock_pr_llm):
+    from agent.profile_router import classify_profile_for_prompt
+
+    t, conf, reason = classify_profile_for_prompt(
+        "full security posture audit please",
+        candidates=["sec-bot", "other"],
+        current_profile="chief-orchestrator",
+        router_cfg={
+            "only_when_current_profiles": ["chief-orchestrator"],
+            "min_message_chars": 3,
+            "confidence_threshold": 0.72,
+        },
+    )
+    assert t is None
+    assert conf == 0.0
+    assert "router error" in reason
 
 
 @patch("agent.profile_router.list_routable_profile_names", return_value=["worker"])
+@patch("agent.profile_router._call_profile_router_llm")
 @patch("agent.auxiliary_client.extract_content_or_reasoning")
-@patch("agent.auxiliary_client.call_llm")
-def test_route_and_delegate_calls_delegate(mock_call, mock_extract, _lr):
+def test_route_and_delegate_calls_delegate(mock_extract, mock_pr_llm, _lr):
     from agent.profile_router import route_and_delegate_if_configured
 
-    mock_call.return_value = object()
+    mock_pr_llm.return_value = object()
     mock_extract.return_value = '{"profile": "worker", "confidence": 0.99, "reason": "ok"}'
 
     parent = MagicMock()

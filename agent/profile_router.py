@@ -126,6 +126,115 @@ def _parse_router_json(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _user_text_from_messages(messages: List[Dict[str, Any]]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return str(m.get("content") or "")
+    return ""
+
+
+def _call_profile_router_llm(
+    messages: List[Dict[str, Any]],
+    router_cfg: Dict[str, Any],
+) -> Any:
+    """Run the profile-router JSON classifier on Hugging Face Inference only.
+
+    Order (when ``use_free_model_routing`` is true, the default):
+
+    1. Optional pinned ``router_provider``/``router_model`` if both are set to
+       ``huggingface`` + a hub id (tried first; on failure, continue).
+    2. ``free_model_routing.inference`` — official policy suffix on ``router.huggingface.co``.
+    3. ``free_model_routing.kimi_router`` — Kimi router model picks one hub id from *tiers*,
+       then that model runs the JSON classification.
+
+    Requires ``HF_TOKEN`` (or ``HUGGING_FACE_HUB_TOKEN``). No Gemini / paid Google path.
+    """
+    from agent.auxiliary_client import call_llm
+
+    use_free = router_cfg.get("use_free_model_routing", True)
+    explicit_p = (router_cfg.get("router_provider") or "").strip().lower()
+    explicit_m = (router_cfg.get("router_model") or "").strip()
+
+    kwargs = dict(
+        task=None,
+        messages=messages,
+        temperature=0.1,
+        max_tokens=256,
+    )
+
+    if not use_free:
+        if explicit_p and explicit_m:
+            return call_llm(provider=explicit_p, model=explicit_m, **kwargs)
+        raise RuntimeError(
+            "profile_router: with use_free_model_routing=false, set router_provider and router_model",
+        )
+
+    tok = (
+        os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        or ""
+    ).strip()
+    base = (os.environ.get("HF_BASE_URL", "").strip() or "https://router.huggingface.co/v1").rstrip("/")
+    if not tok:
+        raise RuntimeError(
+            "Profile router requires HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) for Hugging Face Inference — "
+            "set in ~/.hermes/.env or the profile .env (shared parent .env is loaded for profiles).",
+        )
+
+    from hermes_cli.config import load_config
+
+    from agent.free_model_routing import normalize_kimi_tiers
+    from agent.hf_fallback_router import apply_hf_inference_policy, resolve_hf_routed_model
+
+    cfg = load_config()
+    fmr = (cfg.get("free_model_routing") or {}) if isinstance(cfg, dict) else {}
+    if not (isinstance(fmr, dict) and fmr.get("enabled")):
+        fmr = {}
+
+    user_text = _user_text_from_messages(messages)
+
+    if explicit_p == "huggingface" and explicit_m:
+        try:
+            return call_llm(provider="huggingface", model=explicit_m, **kwargs)
+        except Exception as exc:
+            logger.warning(
+                "profile_router: pinned router_model failed, using free_model_routing chain: %s",
+                exc,
+            )
+
+    inf = fmr.get("inference") if isinstance(fmr.get("inference"), dict) else {}
+    mid = str(inf.get("model") or "").strip()
+    if mid:
+        pol = str(inf.get("policy") or "").strip()
+        pol_use = pol if pol in ("fastest", "cheapest", "preferred") else None
+        routed_mid = apply_hf_inference_policy(mid, pol_use)
+        try:
+            return call_llm(provider="huggingface", model=routed_mid, **kwargs)
+        except Exception as exc:
+            logger.warning(
+                "profile_router: HF inference route failed, trying Kimi tier pick: %s",
+                exc,
+            )
+
+    kr = fmr.get("kimi_router") if isinstance(fmr.get("kimi_router"), dict) else {}
+    router_model = str(kr.get("router_model") or "").strip()
+    tiers = normalize_kimi_tiers(kr.get("tiers"))
+    if router_model and tiers:
+        picked = resolve_hf_routed_model(
+            user_text,
+            api_key=tok,
+            base_url=base,
+            router_model=router_model,
+            tiers=tiers,
+        )
+        return call_llm(provider="huggingface", model=picked, **kwargs)
+
+    raise RuntimeError(
+        "profile_router: set free_model_routing.inference.model and/or kimi_router in config.yaml, "
+        "or agent.profile_router with router_provider=huggingface and router_model=<hub id>.",
+    )
+
+
 def classify_profile_for_prompt(
     user_message: str,
     *,
@@ -168,9 +277,6 @@ def classify_profile_for_prompt(
     if kw and kw[0]:
         return kw[0], kw[1], kw[2]
 
-    model_override = (router_cfg.get("router_model") or "").strip() or None
-    provider_override = (router_cfg.get("router_provider") or "").strip() or None
-
     system = (
         "You route user turns to Hermes profile slugs (each profile is an isolated agent runtime). "
         "Reply with ONLY valid JSON, no markdown.\n"
@@ -187,7 +293,7 @@ def classify_profile_for_prompt(
         f"User message:\n{user_message.strip()[:8000]}"
     )
 
-    from agent.auxiliary_client import call_llm, extract_content_or_reasoning
+    from agent.auxiliary_client import extract_content_or_reasoning
 
     _messages = [
         {"role": "system", "content": system},
@@ -195,37 +301,11 @@ def classify_profile_for_prompt(
     ]
     text: Optional[str] = None
     try:
-        resp = call_llm(
-            task="profile_router",
-            provider=provider_override,
-            model=model_override,
-            messages=_messages,
-            temperature=0.1,
-            max_tokens=256,
-        )
+        resp = _call_profile_router_llm(_messages, router_cfg)
         text = extract_content_or_reasoning(resp)
     except Exception as exc:
         logger.warning("profile_router LLM call failed: %s", exc)
-        # Chief/orchestrator configs often route auxiliary tasks through OpenRouter + tier.
-        # When the OpenRouter key is exhausted (403), fall back to Gemini direct — same as
-        # fallback_model for the main agent — so routing still works.
-        if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
-            try:
-                resp = call_llm(
-                    task=None,
-                    provider="gemini",
-                    model="gemini-2.5-flash",
-                    messages=_messages,
-                    temperature=0.1,
-                    max_tokens=256,
-                )
-                text = extract_content_or_reasoning(resp)
-                logger.info("profile_router: used Gemini fallback after auxiliary failure")
-            except Exception as exc2:
-                logger.warning("profile_router Gemini fallback failed: %s", exc2)
-                return None, 0.0, f"router error: {exc}"
-        else:
-            return None, 0.0, f"router error: {exc}"
+        return None, 0.0, f"router error: {exc}"
 
     if not (text and str(text).strip()):
         return None, 0.0, "empty router model output"

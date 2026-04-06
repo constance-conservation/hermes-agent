@@ -43,10 +43,12 @@ agent:
     min_message_chars: 12
     only_when_current_profiles:
       - chief-orchestrator
-    # Router LLM (classification JSON). Use Gemini so OpenRouter quota exhaustion
-    # does not block delegation; optional overrides of auxiliary.profile_router.
-    router_provider: gemini
-    router_model: gemini-2.5-flash
+    # Router LLM: Hugging Face Inference (``free_model_routing.inference`` policy) then
+    # Kimi tier pick (``free_model_routing.kimi_router``). Requires HF_TOKEN in .env.
+    use_free_model_routing: true
+    # Optional: pin a hub id before the free_model_routing chain (same provider as main HF path):
+    # router_provider: huggingface
+    # router_model: MiniMaxAI/MiniMax-M2.5
   org_automation:
     enabled: true
 
@@ -94,18 +96,15 @@ auxiliary:
   consultant_chief:
     provider: openrouter
     model: tier:D
-  # CLI per-turn profile router: keep off OpenRouter when the key is exhausted (403);
-  # tier:dynamic here would hit the same quota as other auxiliary tasks.
-  profile_router:
-    provider: gemini
-    model: gemini-2.5-flash
+  # CLI profile routing does not use auxiliary.profile_router — it uses agent.profile_router
+  # + free_model_routing (HF Inference + Kimi tier pick). Leave at defaults or omit.
 
 delegation:
   provider: openrouter
   model: tier:dynamic
 
 # Free-model pipeline when paid/OpenRouter paths fail (do not set legacy ``fallback_model`` here —
-# it overrides this entire chain). Order: HF Inference Providers → Kimi tiered router → optional Gemini.
+# it overrides this entire chain). Order: HF Inference Providers → Kimi tiered router → optional Gemini (main agent only).
 # MiniMax-M2.5: https://huggingface.co/MiniMaxAI/MiniMax-M2.5 (HF_TOKEN / Hugging Face Inference Providers).
 # Gemma on Gemini API: https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api
 free_model_routing:
