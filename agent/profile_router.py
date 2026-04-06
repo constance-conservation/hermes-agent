@@ -42,6 +42,68 @@ def list_routable_profile_names() -> List[str]:
     return sorted(names)
 
 
+def _keyword_route_profile(
+    user_message: str,
+    candidates: List[str],
+    *,
+    current_profile: str,
+    skip_current: bool,
+    threshold: float,
+) -> Optional[Tuple[str, float, str]]:
+    """Fast path: route obvious security/compliance questions without an LLM (no OpenRouter cost).
+
+    Used when auxiliary APIs are exhausted or to avoid latency; still respects
+    ``only_when_current_profiles`` / filters via *candidates*.
+    """
+    low = (user_message or "").strip().lower()
+    if len(low) < 10:
+        return None
+
+    security_q = any(
+        k in low
+        for k in (
+            "security posture",
+            "security audit",
+            "security review",
+            "security status",
+            "threat model",
+            "vulnerability assessment",
+            "compliance posture",
+            "preflight security",
+        )
+    ) or (
+        "security" in low
+        and any(w in low for w in ("posture", "today", "status", "review", "audit", "risk", "threat"))
+    )
+    if not security_q:
+        return None
+
+    # Require an unambiguous specialist slug — avoid grabbing generic ``sec-bot``-style
+    # names where "sec" is just a token (those stay on the LLM router).
+    scored: List[Tuple[int, str]] = []
+    for slug in candidates:
+        s = slug.lower()
+        strong = (
+            "security" in s
+            or "preflight" in s
+            or "compliance" in s
+            or "infosec" in s
+            or "ag-sec" in s
+            or s.startswith("sec-ops")
+            or "sec-guard" in s
+        )
+        if strong:
+            scored.append((50 + len(s), slug))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    best = scored[0][1]
+    if skip_current and best == current_profile:
+        return None, 0.0, "keyword target is current profile"
+    conf = max(float(threshold), 0.78)
+    return best, conf, "keyword security routing"
+
+
 def _parse_router_json(text: str) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
@@ -95,6 +157,16 @@ def classify_profile_for_prompt(
     if skip_current and current_profile in candidates and current_profile != "default":
         # Still allow routing *to* another profile when current is chief; remove self from targets only if same name chosen later
         pass
+
+    kw = _keyword_route_profile(
+        user_message,
+        candidates,
+        current_profile=current_profile,
+        skip_current=skip_current,
+        threshold=threshold,
+    )
+    if kw and kw[0]:
+        return kw[0], kw[1], kw[2]
 
     model_override = (router_cfg.get("router_model") or "").strip() or None
     provider_override = (router_cfg.get("router_provider") or "").strip() or None

@@ -97,3 +97,23 @@ def test_route_and_delegate_calls_delegate(mock_call, mock_extract, _lr):
         dt.assert_called_once()
         cargs, ckwargs = dt.call_args
         assert ckwargs.get("hermes_profile") == "worker"
+
+
+def test_classify_keyword_security_skips_llm():
+    from agent.profile_router import classify_profile_for_prompt
+
+    with patch("agent.auxiliary_client.call_llm") as mock_call:
+        t, conf, reason = classify_profile_for_prompt(
+            "what is my security posture today?",
+            candidates=["ag-sec-preflight", "other-bot"],
+            current_profile="chief-orchestrator",
+            router_cfg={
+                "only_when_current_profiles": ["chief-orchestrator"],
+                "min_message_chars": 3,
+                "confidence_threshold": 0.65,
+            },
+        )
+    assert mock_call.call_count == 0
+    assert t == "ag-sec-preflight"
+    assert conf >= 0.65
+    assert "keyword" in reason.lower()

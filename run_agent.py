@@ -4876,6 +4876,12 @@ class AIAgent:
                 logging.warning(
                     "Fallback to %s failed: provider not configured",
                     fb_provider)
+                if fb_provider == "huggingface":
+                    self._emit_status(
+                        "⚠️ Hugging Face fallback skipped — set HF_TOKEN (e.g. in ~/.hermes/.env; "
+                        "profile runtimes inherit that file). Trying next fallback…",
+                        "fallback",
+                    )
                 return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain
 
             # Determine api_mode from provider / base URL

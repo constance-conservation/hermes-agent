@@ -33,6 +33,28 @@ def test_project_env_overrides_stale_shell_values_when_user_env_missing(tmp_path
     assert os.getenv("OPENAI_BASE_URL") == "https://project.example/v1"
 
 
+def test_profile_runtime_inherits_root_hermes_env(tmp_path, monkeypatch):
+    """HERMES_HOME under profiles/<name> loads parent ~/.hermes/.env then profile .env."""
+    root = tmp_path / ".hermes"
+    prof = root / "profiles" / "chief"
+    prof.mkdir(parents=True)
+    root_env = root / ".env"
+    root_env.write_text("HF_TOKEN=from-root\nSHARED=root\n", encoding="utf-8")
+    prof_env = prof / ".env"
+    prof_env.write_text("SHARED=from-profile\n", encoding="utf-8")
+
+    monkeypatch.setenv("HERMES_HOME", str(prof))
+    for key in ("HF_TOKEN", "SHARED"):
+        monkeypatch.delenv(key, raising=False)
+
+    loaded = load_hermes_dotenv(hermes_home=prof)
+
+    assert root_env in loaded
+    assert prof_env in loaded
+    assert os.getenv("HF_TOKEN") == "from-root"
+    assert os.getenv("SHARED") == "from-profile"
+
+
 def test_user_env_takes_precedence_over_project_env(tmp_path, monkeypatch):
     home = tmp_path / "hermes"
     home.mkdir()
