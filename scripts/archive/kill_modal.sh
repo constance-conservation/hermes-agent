@@ -2,8 +2,8 @@
 # Kill all running Modal apps (sandboxes, deployments, etc.)
 #
 # Usage:
-#   bash scripts/kill_modal.sh          # Stop hermes-agent sandboxes
-#   bash scripts/kill_modal.sh --all    # Stop ALL Modal apps
+#   bash scripts/archive/kill_modal.sh          # Stop hermes-agent sandboxes
+#   bash scripts/archive/kill_modal.sh --all    # Stop ALL Modal apps
 
 set -uo pipefail
 

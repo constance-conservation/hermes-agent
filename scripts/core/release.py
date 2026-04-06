@@ -5,19 +5,19 @@ Generates changelogs and creates GitHub releases with CalVer tags.
 
 Usage:
     # Preview changelog (dry run)
-    python scripts/release.py
+    python scripts/core/release.py
 
     # Preview with semver bump
-    python scripts/release.py --bump minor
+    python scripts/core/release.py --bump minor
 
     # Create the release
-    python scripts/release.py --bump minor --publish
+    python scripts/core/release.py --bump minor --publish
 
     # First release (no previous tag)
-    python scripts/release.py --bump minor --publish --first-release
+    python scripts/core/release.py --bump minor --publish --first-release
 
     # Override CalVer date (e.g. for a belated release)
-    python scripts/release.py --bump minor --publish --date 2026.3.15
+    python scripts/core/release.py --bump minor --publish --date 2026.3.15
 """
 
 import argparse
@@ -624,7 +624,7 @@ def main():
     else:
         print(f"\n{'='*60}")
         print(f"  Dry run complete. To publish, add --publish")
-        print(f"  Example: python scripts/release.py --bump minor --publish")
+        print(f"  Example: python scripts/core/release.py --bump minor --publish")
         print(f"{'='*60}")
 
 

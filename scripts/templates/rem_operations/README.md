@@ -28,7 +28,7 @@ The numbering maps to **`POLICY_ROOT/core/governance/standards/agent-lifecycle-o
 | Cadence | Actions |
 |---------|---------|
 | **Weekly** | Scan `SECURITY_ALERT_REGISTER.md` for non-COMPLETE rows; `hermes gateway watchdog-check` healthy; glance `gateway_state.json` for platform errors. |
-| **Monthly** | Re-run `scripts/render_workspace_registers_from_env.py` after messaging `.env` changes; spot-check `CHANNEL_ARCHITECTURE.md` vs Slack/Telegram/Discord/WhatsApp invites; audit `SKILL_INVENTORY_REGISTER.md` vs `skills/*/SKILL.md` permissions. |
+| **Monthly** | Re-run `scripts/core/render_workspace_registers_from_env.py` after messaging `.env` changes; spot-check `CHANNEL_ARCHITECTURE.md` vs Slack/Telegram/Discord/WhatsApp invites; audit `SKILL_INVENTORY_REGISTER.md` vs `skills/*/SKILL.md` permissions. |
 | **Quarterly** | `BOARD_REVIEW_REGISTER.md` real session **or** explicit “no review required” row; `CONSULTANT_REQUEST_REGISTER.md` backlog review; `tier_models` vs OpenRouter catalog; org profile list vs `org_agent_profiles_manifest.yaml`. |
 
 ## Sync from repo templates
@@ -37,7 +37,7 @@ From repo root, with `HERMES_HOME` set to the chief profile:
 
 ```bash
 export HERMES_HOME="$HOME/.hermes/profiles/chief-orchestrator"
-REM_OPERATIONS_FORCE=1 ./scripts/materialize_rem_operations.sh
+REM_OPERATIONS_FORCE=1 ./scripts/core/materialize_rem_operations.sh
 ```
 
 `REM_OPERATIONS_FORCE=1` **overwrites** listed templates (use after `git pull` to refresh registers).
@@ -48,7 +48,7 @@ After changing messaging **`.env`**, regenerate operational tables from the acti
 
 ```bash
 export HERMES_HOME="$HOME/.hermes/profiles/chief-orchestrator"
-./venv/bin/python scripts/render_workspace_registers_from_env.py
+./venv/bin/python scripts/core/render_workspace_registers_from_env.py
 ```
 
 Then restart the gateway if you changed allowlists or tokens.

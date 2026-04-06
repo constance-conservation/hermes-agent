@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# If the last argument is "droplet", run the same CLI on the VPS (see scripts/agent-droplet).
+# If the last argument is "droplet", run the same CLI on the VPS (see scripts/core/agent-droplet).
 # Otherwise run the repo venv's `hermes` when present (see .envrc); else HERMES_REAL_BIN.
 set -euo pipefail
 _root="$(cd "$(dirname "$0")" && pwd)"
-_repo="$(cd "$_root/.." && pwd)"
+_repo="$(cd "$_root/../.." && pwd)"
 _venv_hermes="$_repo/venv/bin/hermes"
 _venv_py="$_repo/venv/bin/python"
 _last=

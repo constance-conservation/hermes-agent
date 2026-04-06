@@ -2,7 +2,7 @@
 # OpenSSH directly as hermesuser@<host> — normal remote login shell (no admin hop, no sudo).
 #
 # Requires the same key in hermesuser's ~/.ssh/authorized_keys on the server. If you only have
-# admin SSH access, use ./scripts/ssh_droplet_user.sh instead (SSH as admin, sudo to hermesuser).
+# admin SSH access, use ./scripts/core/ssh_droplet_user.sh instead (SSH as admin, sudo to hermesuser).
 #
 # Expects ~/.env/.env: SSH_PORT, SSH_TAILSCALE_IP (or SSH_IP)
 # Key: ~/.env/.ssh_key unless SSH_KEY_FILE is set.
@@ -14,8 +14,8 @@
 #   SSH_PASSPHRASE=...
 #
 # Usage:
-#   ./scripts/ssh_droplet_hermesuser_direct.sh
-#   ./scripts/ssh_droplet_hermesuser_direct.sh 'hostname'
+#   ./scripts/core/ssh_droplet_hermesuser_direct.sh
+#   ./scripts/core/ssh_droplet_hermesuser_direct.sh 'hostname'
 
 set -euo pipefail
 

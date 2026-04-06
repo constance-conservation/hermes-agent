@@ -19,9 +19,9 @@
 # Non-interactive use without that opt-in fails unless HERMES_DROPLET_INTERACTIVE=1.
 #
 # Usage:
-#   ./scripts/ssh_droplet.sh
-#   ./scripts/ssh_droplet.sh 'hostname'
-#   ./scripts/ssh_droplet.sh --sudo-user hermesuser 'cd ~/hermes-agent && git pull'
+#   ./scripts/core/ssh_droplet.sh
+#   ./scripts/core/ssh_droplet.sh 'hostname'
+#   ./scripts/core/ssh_droplet.sh --sudo-user hermesuser 'cd ~/hermes-agent && git pull'
 #
 # Sudo for workstation `hermes … droplet` (HERMES_DROPLET_WORKSTATION_CLI=1 + --sudo-user):
 #   ON  (default): if SSH_SUDO_PASSWORD is set in the env file, remote runs `sudo -S -u <runtime> …`;
@@ -29,24 +29,24 @@
 #   OFF: remote runs `bash -lc …` as SSH_USER (no sudo). Use for headless git pull, etc., when
 #        SSH_USER is already the account that should own the work, or you accept running as admin.
 #   Toggle per invocation:
-#     HERMES_DROPLET_REQUIRE_SUDO=0 ./scripts/ssh_droplet.sh 'cd ~/hermes-agent && git pull'
+#     HERMES_DROPLET_REQUIRE_SUDO=0 ./scripts/core/ssh_droplet.sh 'cd ~/hermes-agent && git pull'
 #     AGENT_DROPLET_REQUIRE_SUDO=1 hermes tui droplet   # with repo scripts/ on PATH (see .envrc)
 #   Or prefix flags (before --sudo-user / remote command):
-#     ./scripts/ssh_droplet.sh --droplet-no-sudo '…'
-#     ./scripts/ssh_droplet.sh --droplet-require-sudo --sudo-user hermesuser '…'
+#     ./scripts/core/ssh_droplet.sh --droplet-no-sudo '…'
+#     ./scripts/core/ssh_droplet.sh --droplet-require-sudo --sudo-user hermesuser '…'
 #   Optional line in the same env file as SSH_*: HERMES_DROPLET_REQUIRE_SUDO=0 (default for scripts).
 #
-# Automation (AI / CI): ./scripts/droplet_run.sh 'remote command' — sudo off for that process only;
+# Automation (AI / CI): ./scripts/core/droplet_run.sh 'remote command' — sudo off for that process only;
 # `hermes … droplet` still uses sudo on by default (agent-droplet does not inherit parent REQUIRE_SUDO).
 #
 # Cursor / batch droplet work — toggle sudo per invocation, not in ~/.env/.env:
-#   • Default automation path: ./scripts/droplet_run.sh '…'  → REQUIRE_SUDO=0, remote runs as SSH_USER.
+#   • Default automation path: ./scripts/core/droplet_run.sh '…'  → REQUIRE_SUDO=0, remote runs as SSH_USER.
 #   • Need hermesuser for that step only: add --droplet-require-sudo --sudo-user hermesuser (needs
 #     SSH_SUDO_PASSWORD in the env file for non-interactive sudo). When the step finishes, the next
 #     plain droplet_run / new shell is unchanged — no “switch back” file edit required.
 #   • Direct ssh_droplet.sh: HERMES_DROPLET_REQUIRE_SUDO=0 … or prefix --droplet-no-sudo / --droplet-require-sudo.
 #
-# Remote side of "<cli> … droplet" (workstation): scripts/hermes → scripts/agent-droplet.
+# Remote side of "<cli> … droplet" (workstation): scripts/core/hermes → scripts/core/agent-droplet.
 # See policies/core/unified-deployment-and-security.md (Step 15).
 
 set -euo pipefail

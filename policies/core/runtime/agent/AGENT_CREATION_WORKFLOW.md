@@ -46,7 +46,7 @@ Lifecycle states and hygiene rules: [`agent-lifecycle-org-hygiene-policy.md`](..
 
 Do **not** create a one-line “placeholder” file. Refresh the workspace pack from the repository:
 
-- Run `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` (or `./scripts/materialize_policies_into_hermes_home.sh` for Hermes), **or**  
+- Run `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` (or `./scripts/core/materialize_policies_into_hermes_home.sh` for Hermes), **or**  
 - Copy `POLICY_ROOT/core/runtime/agent/AGENT_CREATION_WORKFLOW.md` to `WORKSPACE/AGENT_CREATION_WORKFLOW.md` verbatim.
 
 <!-- policy-read-order-nav:bottom -->

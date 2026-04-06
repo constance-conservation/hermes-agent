@@ -26,7 +26,7 @@ Before you finish your reply, add a section **"Verification"** with:
 #
 # **Prerequisite for Session 1:** Active Hermes profile; `HERMES_HOME/.hermes.md` exists with
 # `POLICY_ROOT` and workspace paths; `WORKSPACE/operations/` exists (run
-# `scripts/materialize_policies_into_hermes_home.sh` for this profile if the tree is empty).
+# `scripts/core/materialize_policies_into_hermes_home.sh` for this profile if the tree is empty).
 #
 # **Hermes internals (reimplementation):** `POLICY_ROOT/core/hermes-model-delegation-and-tier-runtime.md`.
 #

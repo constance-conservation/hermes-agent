@@ -8,17 +8,17 @@
 #
 # Usage (on the host that has the hermes-agent checkout + venv):
 #   export HERMES_HOME=/home/hermesuser/.hermes
-#   ./scripts/materialize_policies_into_hermes_home.sh
+#   ./scripts/core/materialize_policies_into_hermes_home.sh
 #
 # Chief orchestrator profile (same as agent-droplet default HERMES_HOME layout):
 #   HERMES_PROFILE=chief-orchestrator HERMES_PROFILE_BASE=/home/hermesuser/.hermes \
-#     ./scripts/materialize_policies_into_hermes_home.sh
+#     ./scripts/core/materialize_policies_into_hermes_home.sh
 #   (HERMES_PROFILE_BASE defaults to $HOME/.hermes when unset — set it when sudo SSH uses a different $HOME.)
 #
 # Optional: SKIP_GOVERNANCE_MD=1 to skip writing HERMES_HOME/.hermes.md (paths-only stub).
 # Optional: SKIP_SOUL_SYMLINK=1 to skip creating HERMES_HOME/SOUL.md -> workspace/SOUL.md.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [[ -n "${HERMES_PROFILE:-}" ]]; then
   if [[ -n "${HERMES_PROFILE_BASE:-}" ]]; then
     _base="${HERMES_PROFILE_BASE}"
@@ -50,8 +50,8 @@ if [[ "${SKIP_GOVERNANCE_MD:-0}" != "1" ]]; then
 fi
 "$PY" "${ARGS[@]}"
 
-if [[ -x "${ROOT}/scripts/materialize_rem_operations.sh" ]]; then
-  bash "${ROOT}/scripts/materialize_rem_operations.sh"
+if [[ -x "${ROOT}/scripts/core/materialize_rem_operations.sh" ]]; then
+  bash "${ROOT}/scripts/core/materialize_rem_operations.sh"
 fi
 
 _ws_soul="${HERMES_HOME}/workspace/SOUL.md"

@@ -6,7 +6,7 @@ after messaging env is configured.
 
 Usage:
   export HERMES_HOME=/path/to/profile
-  ./venv/bin/python scripts/render_workspace_registers_from_env.py
+  ./venv/bin/python scripts/core/render_workspace_registers_from_env.py
 
 Does not print secrets to stdout; writes markdown under workspace/operations/.
 """
@@ -66,7 +66,7 @@ def render_channel_architecture(home: Path, env: dict[str, str]) -> str:
 
     intro = f"""# Channel architecture (W003 — generated)
 
-> **Generated:** {now} from `{home}/.env` via `scripts/render_workspace_registers_from_env.py`  
+> **Generated:** {now} from `{home}/.env` via `scripts/core/render_workspace_registers_from_env.py`  
 > **Do not commit secrets:** user/channel IDs are operational data; rotate tokens via `.env` only.
 
 This file mirrors **live gateway allowlists** and **home channel** hints. Integration surface checks use
@@ -232,7 +232,7 @@ def merge_org_tool_policy_notes(home: Path) -> None:
     if data.get("org_tool_policy_notes"):
         return
     data["org_tool_policy_notes"] = (
-        "Security foundation profiles (ag-sec-*) use toolsets from scripts/org_agent_profiles_manifest.yaml "
+        "Security foundation profiles (ag-sec-*) use toolsets from scripts/core/org_agent_profiles_manifest.yaml "
         "after bootstrap; not duplicated in core. Default delegation uses chief tier_models; use consultant "
         "routing / tier E–F for incident or board-class work per MODEL_ROUTING_REGISTRY.md."
     )
@@ -260,7 +260,7 @@ def patch_security_alert_w003_w004(home: Path) -> None:
     text2 = re.sub(
         r"\| W004 \|[^\n]+\n",
         "| W004 | Skill inventory populated from live `skills/` | Low | **COMPLETE** | AG-012 | "
-        "Regenerated via `scripts/render_workspace_registers_from_env.py`; refine Network/Secrets per each `SKILL.md`. |\n",
+        "Regenerated via `scripts/core/render_workspace_registers_from_env.py`; refine Network/Secrets per each `SKILL.md`. |\n",
         text2,
         count=1,
     )

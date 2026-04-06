@@ -13,7 +13,7 @@ Everything substantive for the agentic company lives under **`policies/core/`**.
 | **First file to read (ever)** | [`security-first-setup.md`](security-first-setup.md) | Trust boundaries — **start here** |
 | Second runbook | [`unified-deployment-and-security.md`](unified-deployment-and-security.md) | Full deployment + security |
 | Handoff to builder/runtime | [`deployment-handoff.md`](deployment-handoff.md) | What to deploy next (not the pipeline script) |
-| Messaging gateway uptime (watchdog) | [`gateway-watchdog.md`](gateway-watchdog.md) | Policy for `watchdog-check`, `scripts/gateway-watchdog.sh`, doctor recovery — **after** handoff when deploying always-on messaging |
+| Messaging gateway uptime (watchdog) | [`gateway-watchdog.md`](gateway-watchdog.md) | Policy for `watchdog-check`, `scripts/core/gateway-watchdog.sh`, doctor recovery — **after** handoff when deploying always-on messaging |
 | Map of this folder | **`README.md` (this file)** | Index + wiring |
 | Constitutional packs | [`agentic-company-deployment-pack.md`](agentic-company-deployment-pack.md) → [`global-agentic-company-deployment-policy.md`](global-agentic-company-deployment-policy.md) | Authority |
 | **Pipeline tooling only** (verify / `INDEX.md`) | [`pipeline-runbook.md`](pipeline-runbook.md) | How to run `python policies/core/scripts/start_pipeline.py` — read **after** runbooks + handoff when you need automation |

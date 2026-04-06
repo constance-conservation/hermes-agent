@@ -14,7 +14,7 @@
 ## Chief decision
 
 - The **chief** accepts or rejects implementation. **Unanimous director + HR sign-off** is required before the chief treats a proposal as **ready to implement**.
-- On **accept**: update `scripts/org_agent_profiles_manifest.yaml`, run `scripts/bootstrap_org_agent_profiles.py`, update `ORG_CHART.md` / registers as your org requires, and document new `hermes_profile` names for `delegate_task`.
+- On **accept**: update `scripts/core/org_agent_profiles_manifest.yaml`, run `scripts/core/bootstrap_org_agent_profiles.py`, update `ORG_CHART.md` / registers as your org requires, and document new `hermes_profile` names for `delegate_task`.
 - On **reject**: record rationale in workspace governance notes; do not add profiles or gateway bots without a new proposal cycle.
 
 ## Automatic HR consultation (runtime)

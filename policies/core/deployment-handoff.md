@@ -312,7 +312,7 @@ Required output:
 
 Use a **new messaging/CLI session per step** when you want the lowest conversation context: paste **one** block per session. Paths are under the materialized **`AGENT_HOME`** (for Hermes profile deployments, typically `HERMES_HOME/policies/...` and `HERMES_HOME/workspace/...` — see `HERMES_HOME/.hermes.md`).
 
-**Cost controls first:** Sessions **1–2** install token governance **policy** and **`hermes_token_governance.runtime.yaml`** so tier caps, blocklists, and delegation limits apply before the heavy **Session 3** runtime-activation audit. **Prerequisite:** profile + `HERMES_HOME/.hermes.md` + materialized `workspace/operations/` (see `scripts/materialize_policies_into_hermes_home.sh`). Cumulative paste blocks: `scripts/templates/activation_sessions_cumulative_cover_2_20.txt`. Hermes wiring reference: `policies/core/hermes-model-delegation-and-tier-runtime.md`.
+**Cost controls first:** Sessions **1–2** install token governance **policy** and **`hermes_token_governance.runtime.yaml`** so tier caps, blocklists, and delegation limits apply before the heavy **Session 3** runtime-activation audit. **Prerequisite:** profile + `HERMES_HOME/.hermes.md` + materialized `workspace/operations/` (see `scripts/core/materialize_policies_into_hermes_home.sh`). Cumulative paste blocks: `scripts/templates/activation_sessions_cumulative_cover_2_20.txt`. Hermes wiring reference: `policies/core/hermes-model-delegation-and-tier-runtime.md`.
 
 | Session | What to paste / instruct |
 |--------|---------------------------|

@@ -39,7 +39,7 @@ Usage:
     hermes uninstall           Uninstall Hermes Agent
     hermes acp                 Run as an ACP server for editor integration
     hermes sessions browse     Interactive session picker with search
-    hermes droplet             Run Hermes CLI on the VPS over SSH (needs scripts/agent-droplet)
+    hermes droplet             Run Hermes CLI on the VPS over SSH (needs scripts/core/agent-droplet)
 
     hermes claw migrate --dry-run  # Preview migration without changes
 """
@@ -76,7 +76,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 def _strip_trailing_droplet_hop_argv(argv: list) -> Optional[list]:
     """If argv ends with the VPS hop token ``droplet``, return argv without it.
 
-    Mirrors ``scripts/hermes``: ``hermes … droplet`` runs ``agent-droplet`` with
+    Mirrors ``scripts/core/hermes``: ``hermes … droplet`` runs ``agent-droplet`` with
     preceding args. Does **not** strip when ``droplet`` is the value of ``-p`` /
     ``--profile`` (that names a profile, not this hop).
     """
@@ -200,10 +200,10 @@ def _apply_profile_override() -> None:
         os.environ["HERMES_HOME"] = hermes_home
 
 
-# ``hermes droplet`` via the pip/console entry point (no repo ``scripts/hermes`` shim):
+# ``hermes droplet`` via the pip/console entry point (no repo ``scripts/core/hermes`` shim):
 # delegate before profile pre-parse so this is never mistaken for ``-p droplet``.
 _drop_argv = _strip_trailing_droplet_hop_argv(sys.argv[1:])
-_agent_droplet = PROJECT_ROOT / "scripts" / "agent-droplet"
+_agent_droplet = PROJECT_ROOT / "scripts" / "core" / "agent-droplet"
 _delegate_droplet = bool(_drop_argv is not None and _agent_droplet.is_file())
 if _delegate_droplet:
     sys.argv = [sys.argv[0]] + _drop_argv
@@ -3057,7 +3057,7 @@ def cmd_update(args):
             use_zip_update = True
         else:
             print("✗ Not a git repository. Please reinstall:")
-            print("  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash")
+            print("  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/core/install.sh | bash")
             sys.exit(1)
     
     # On Windows, git can fail with "unable to write loose object file: Invalid argument"
@@ -5263,7 +5263,7 @@ For more help on a command:
     acp_parser.set_defaults(func=cmd_acp)
 
     # =========================================================================
-    # droplet command (VPS hop — parity with scripts/hermes + scripts/agent-droplet)
+    # droplet command (VPS hop — parity with scripts/core/hermes + scripts/core/agent-droplet)
     # =========================================================================
     droplet_parser = subparsers.add_parser(
         "droplet",
@@ -5271,8 +5271,8 @@ For more help on a command:
         description=(
             "SSH to the VPS and run Hermes there (venv + HERMES_HOME). "
             "Normally you append droplet as the last argument (e.g. hermes doctor droplet); "
-            "this subcommand is a fallback when scripts/agent-droplet was not available at startup. "
-            "Configure ~/.env/.env with SSH_* (see scripts/ssh_droplet.sh)."
+            "this subcommand is a fallback when scripts/core/agent-droplet was not available at startup. "
+            "Configure ~/.env/.env with SSH_* (see scripts/core/ssh_droplet.sh)."
         ),
     )
     droplet_parser.add_argument(
@@ -5283,12 +5283,12 @@ For more help on a command:
     )
 
     def cmd_droplet(args):
-        script = PROJECT_ROOT / "scripts" / "agent-droplet"
+        script = PROJECT_ROOT / "scripts" / "core" / "agent-droplet"
         if not script.is_file():
             print(
-                "hermes droplet: scripts/agent-droplet not found.\n"
+                "hermes droplet: scripts/core/agent-droplet not found.\n"
                 "  Install from a hermes-agent git checkout (editable pip install), or run:\n"
-                "    bash $HERMES_AGENT_REPO/scripts/agent-droplet",
+                "    bash $HERMES_AGENT_REPO/scripts/core/agent-droplet",
                 file=sys.stderr,
             )
             sys.exit(1)

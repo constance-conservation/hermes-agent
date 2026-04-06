@@ -1,6 +1,6 @@
 # Hermes profiles for org / REM roles (security sub-agents, directors, HR, project lead).
 # Bootstrap: from repo root, with chief-orchestrator (or another source) already created:
-#   ./venv/bin/python scripts/bootstrap_org_agent_profiles.py
+#   ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py
 # Optional: --refresh-config to merge toolsets / max_turns / SOUL snippets into existing profiles.
 #
 # Chief delegates with delegate_task(..., hermes_profile="<name>") for scoped tool/config isolation.

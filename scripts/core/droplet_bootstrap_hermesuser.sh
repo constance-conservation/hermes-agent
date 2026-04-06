@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run on the VPS as root:
 #   cd /home/hermesadmin/hermes-agent   # or any checkout readable by root
-#   sudo bash scripts/droplet_bootstrap_hermesuser.sh
+#   sudo bash scripts/core/droplet_bootstrap_hermesuser.sh
 #
 # Ensures hermesuser has ~/hermes-agent with venv, pip install -e ., sticky profile
 # chief-orchestrator, and materialized policies under that profile's HERMES_HOME.

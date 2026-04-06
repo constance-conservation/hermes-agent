@@ -9,9 +9,9 @@
 # Removes stale gateway.pid files under .hermes (Linux vs macOS PID confusion).
 #
 # Usage:
-#   ./scripts/droplet_push_hermes_home.sh              # pack, upload, replace, restart gateway
-#   ./scripts/droplet_push_hermes_home.sh --dry-run
-#   ./scripts/droplet_push_hermes_home.sh --no-gateway-restart
+#   ./scripts/core/droplet_push_hermes_home.sh              # pack, upload, replace, restart gateway
+#   ./scripts/core/droplet_push_hermes_home.sh --dry-run
+#   ./scripts/core/droplet_push_hermes_home.sh --no-gateway-restart
 #
 set -euo pipefail
 

@@ -549,7 +549,7 @@ Hermes runs on Linux, macOS, and Windows. When writing code that touches the OS:
 
 4. **Path separators.** Use `pathlib.Path` instead of string concatenation with `/`.
 
-5. **Shell commands in installers.** If you change `scripts/install.sh`, check if the equivalent change is needed in `scripts/install.ps1`.
+5. **Shell commands in installers.** If you change `scripts/core/install.sh`, check if the equivalent change is needed in `scripts/core/install.ps1`.
 
 ---
 

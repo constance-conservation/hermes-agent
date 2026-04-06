@@ -3,13 +3,13 @@
 #
 # Usage:
 #   export HERMES_HOME=/path/to/.hermes   # or profile directory
-#   ./scripts/materialize_rem_operations.sh
+#   ./scripts/core/materialize_rem_operations.sh
 #
 # Overwrite existing files from repo templates (e.g. after git pull on droplet):
-#   REM_OPERATIONS_FORCE=1 ./scripts/materialize_rem_operations.sh
+#   REM_OPERATIONS_FORCE=1 ./scripts/core/materialize_rem_operations.sh
 #
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 : "${HERMES_HOME:?Set HERMES_HOME (e.g. profile directory)}"
 SRC="${ROOT}/scripts/templates/rem_operations"
 DEST="${HERMES_HOME}/workspace/operations"

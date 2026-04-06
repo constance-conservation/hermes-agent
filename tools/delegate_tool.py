@@ -85,7 +85,7 @@ def _hermes_profile_env(profile_name: Optional[str]):
     if not profile_exists(name):
         raise ValueError(
             f"hermes_profile {name!r} does not exist. Create it first "
-            f"(e.g. scripts/bootstrap_org_agent_profiles.py) or use an existing profile name."
+            f"(e.g. scripts/core/bootstrap_org_agent_profiles.py) or use an existing profile name."
         )
     target = str(get_profile_dir(name))
     with _HERMES_PROFILE_DELEGATE_LOCK:
@@ -812,7 +812,7 @@ DELEGATE_TASK_SCHEMA = {
         "- Each subagent gets its own terminal session (separate working directory and state).\n"
         "- Optional hermes_profile: run the subagent under that named Hermes profile's "
         "HERMES_HOME (toolsets, keys, gateway state isolated). Single-task only; "
-        "create profiles with scripts/bootstrap_org_agent_profiles.py.\n"
+        "create profiles with scripts/core/bootstrap_org_agent_profiles.py.\n"
         "- Results are always returned as an array, one entry per task."
     ),
     "parameters": {

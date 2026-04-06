@@ -16,7 +16,7 @@
 
 ## Delegation
 
-- Bootstrap profile: `./venv/bin/python scripts/bootstrap_org_agent_profiles.py` → **`ag-pl-agentic-company`**. Chief calls `delegate_task(..., hermes_profile="ag-pl-agentic-company")` for project-lane work.
+- Bootstrap profile: `./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py` → **`ag-pl-agentic-company`**. Chief calls `delegate_task(..., hermes_profile="ag-pl-agentic-company")` for project-lane work.
 
 ## Operator-owned
 

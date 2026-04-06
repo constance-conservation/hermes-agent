@@ -1,8 +1,8 @@
 # Example Hermes profile layout for a VPS "chief-orchestrator" instance.
 #
-# 1. From repo: ./scripts/droplet_bootstrap_chief_orchestrator.sh
+# 1. From repo: ./scripts/core/droplet_bootstrap_chief_orchestrator.sh
 #    (or: ./venv/bin/hermes profile create chief-orchestrator && ./venv/bin/hermes profile use chief-orchestrator)
-#    Bootstrap also runs ./scripts/ensure_chief_orchestrator_profile_env.sh so the profile has
+#    Bootstrap also runs ./scripts/core/ensure_chief_orchestrator_profile_env.sh so the profile has
 #    its own ~/.hermes/profiles/chief-orchestrator/.env (Hermes loads only HERMES_HOME/.env).
 #    Use ./venv/bin/hermes — bare `hermes` is not on PATH unless you add venv/bin.
 # 2. Merge this into ~/.hermes/profiles/chief-orchestrator/config.yaml
@@ -20,11 +20,11 @@
 # - Each user turn can log "Token governance: this turn Tier X → …" when `dynamic_tier_routing`
 #   is enabled, or when the main model is `tier:dynamic`.
 #
-# `scripts/agent-droplet` uses the workstation sticky profile name on the VPS (HERMES_HOME=.../profiles/<name>);
+# `scripts/core/agent-droplet` uses the workstation sticky profile name on the VPS (HERMES_HOME=.../profiles/<name>);
 # if sticky is default/missing it uses chief-orchestrator. Trailing `droplet` on the CLI is not a profile.
 #
 # Org roles (security / directors / HR / project lead): after chief-orchestrator exists, run
-#   ./venv/bin/python scripts/bootstrap_org_agent_profiles.py
+#   ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py
 # then delegate with delegate_task(..., hermes_profile="ag-sec-preflight" | "fd-product" | …).
 
 model:

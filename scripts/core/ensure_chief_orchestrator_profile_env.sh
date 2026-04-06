@@ -10,7 +10,7 @@
 # Otherwise copies, in order: ~/.hermes/.env → profile, then $REPO/.env → profile.
 #
 # Usage (on VPS as hermesuser):
-#   ./scripts/ensure_chief_orchestrator_profile_env.sh
+#   ./scripts/core/ensure_chief_orchestrator_profile_env.sh
 #
 # Env overrides:
 #   HERMES_PROFILE_DIR  — default ~/.hermes/profiles/chief-orchestrator

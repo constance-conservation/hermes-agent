@@ -1,6 +1,6 @@
 # Functional Directors register (REM-007)
 
-> **REM-007 (active pipeline test):** Directors are **ACTIVE** for delegation testing. Hermes profiles: `fd-product`, `fd-engineering`, `fd-operations`, `fd-it-security` (see `scripts/org_agent_profiles_manifest.yaml` + `scripts/bootstrap_org_agent_profiles.py`). Canonical policy slots remain in `policies/core/unified-deployment-and-security.md` Phase 6.
+> **REM-007 (active pipeline test):** Directors are **ACTIVE** for delegation testing. Hermes profiles: `fd-product`, `fd-engineering`, `fd-operations`, `fd-it-security` (see `scripts/core/org_agent_profiles_manifest.yaml` + `scripts/core/bootstrap_org_agent_profiles.py`). Canonical policy slots remain in `policies/core/unified-deployment-and-security.md` Phase 6.
 
 | Role | Hermes profile | Policy template | Prompt template | Status |
 |------|----------------|-----------------|-----------------|--------|

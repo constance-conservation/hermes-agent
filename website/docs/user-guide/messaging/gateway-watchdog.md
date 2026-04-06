@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: "Gateway watchdog"
-description: "Keep the messaging gateway and platform connections healthy with watchdog-check, scripts/gateway-watchdog.sh, doctor --fix, and recovery backoff"
+description: "Keep the messaging gateway and platform connections healthy with watchdog-check, scripts/core/gateway-watchdog.sh, doctor --fix, and recovery backoff"
 ---
 
 # Gateway watchdog (uptime & recovery)
@@ -30,7 +30,7 @@ hermes gateway watchdog-check && echo OK
 
 ## Official shell watchdog
 
-The repo ships `scripts/gateway-watchdog.sh`: a loop that:
+The repo ships `scripts/core/gateway-watchdog.sh`: a loop that:
 
 1. Polls `watchdog-check` on a fixed interval while healthy (via `venv/bin/python -m hermes_cli.main`, with **`-p`** when `HERMES_HOME` is under `profiles/<name>`).
 2. On failure: applies **exponential backoff + jitter**, then prefers **`systemctl --user restart`** on the matching **`hermes-gateway-<name>.service`** unit when that file exists (same layout as `hermes gateway install`); otherwise runs **`hermes gateway run --replace`** in the background.

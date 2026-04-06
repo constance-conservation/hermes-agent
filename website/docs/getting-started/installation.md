@@ -13,7 +13,7 @@ Get Hermes Agent up and running in under two minutes with the one-line installer
 ### Linux / macOS / WSL2
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/core/install.sh | bash
 ```
 
 :::warning Windows

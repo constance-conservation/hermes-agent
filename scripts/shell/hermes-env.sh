@@ -1,4 +1,4 @@
-# Hermes: always use the repo venv + scripts/hermes shim (including `… droplet`).
+# Hermes: always use the repo venv + scripts/core/hermes shim (including `… droplet`).
 #
 # Install (zsh/bash — add to ~/.zshrc or ~/.bashrc):
 #   If the clone is not $HOME/hermes-agent, set the repo root (two lines — avoids zsh export quirks):
@@ -6,23 +6,23 @@
 #   export HERMES_AGENT_REPO
 #   source "$HERMES_AGENT_REPO/scripts/shell/hermes-env.sh"
 #
-# Then `hermes`, `hermes tui droplet`, etc. run via scripts/hermes → venv python -m hermes_cli.main
+# Then `hermes`, `hermes tui droplet`, etc. run via scripts/core/hermes → venv python -m hermes_cli.main
 # (or agent-droplet when the last argument is `droplet`). This avoids a global `hermes` on PATH
 # when you are not in a direnv-enabled repo directory.
 #
 # `droplet` — SSH to the VPS as admin (`SSH_USER`), then `sudo` to `hermesuser` (interactive remote
 # shell as hermesuser). The remote session activates ~/hermes-agent/venv when HERMES_DROPLET_REPO
-# exists (see scripts/droplet_remote_venv.sh; policies Step 15). Needs ~/.env/.env: SSH_USER,
+# exists (see scripts/core/droplet_remote_venv.sh; policies Step 15). Needs ~/.env/.env: SSH_USER,
 # SSH_PORT, SSH_TAILSCALE_IP or SSH_IP.
 #
-# `droplet_direct` — one-hop `ssh hermesuser@…` (scripts/ssh_droplet_hermesuser_direct.sh). Use only
+# `droplet_direct` — one-hop `ssh hermesuser@…` (scripts/core/ssh_droplet_hermesuser_direct.sh). Use only
 # after your pubkey is in hermesuser's ~/.ssh/authorized_keys; otherwise you get Permission denied.
 #
-# direnv users: `.envrc` already PATH_add scripts; you can still source this file so `hermes`
+# direnv users: `.envrc` already PATH_add scripts/core; you can still source this file so `hermes`
 # works from any cwd.
 
 : "${HERMES_AGENT_REPO:=${HOME}/hermes-agent}"
-_HERMES_SHIM="${HERMES_AGENT_REPO}/scripts/hermes"
+_HERMES_SHIM="${HERMES_AGENT_REPO}/scripts/core/hermes"
 
 hermes() {
   if [[ ! -x "${HERMES_AGENT_REPO}/venv/bin/python" ]]; then
@@ -38,7 +38,7 @@ hermes() {
 
 # Remote shell as hermesuser (via admin SSH + sudo — works with typical DO/VPS key-on-root-only setups).
 droplet() {
-  local s="${HERMES_AGENT_REPO}/scripts/ssh_droplet_user.sh"
+  local s="${HERMES_AGENT_REPO}/scripts/core/ssh_droplet_user.sh"
   if [[ ! -f "$s" ]]; then
     echo "droplet: missing $s — set HERMES_AGENT_REPO to your hermes-agent checkout" >&2
     return 127
@@ -48,7 +48,7 @@ droplet() {
 
 # One-hop ssh hermesuser@droplet (requires pubkey in hermesuser authorized_keys).
 droplet_direct() {
-  local s="${HERMES_AGENT_REPO}/scripts/ssh_droplet_hermesuser_direct.sh"
+  local s="${HERMES_AGENT_REPO}/scripts/core/ssh_droplet_hermesuser_direct.sh"
   if [[ ! -f "$s" ]]; then
     echo "droplet_direct: missing $s — set HERMES_AGENT_REPO to your hermes-agent checkout" >&2
     return 127

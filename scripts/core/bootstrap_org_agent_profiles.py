@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Create Hermes profiles for org / REM roles from scripts/org_agent_profiles_manifest.yaml.
+Create Hermes profiles for org / REM roles from scripts/core/org_agent_profiles_manifest.yaml.
 
 Copies config/.env/SOUL from clone_from (default chief-orchestrator), then merges
 toolsets and agent.max_turns and appends a small SOUL marker with role pointers.
 
 Usage (repo root, venv active optional):
-  ./venv/bin/python scripts/bootstrap_org_agent_profiles.py
-  ./venv/bin/python scripts/bootstrap_org_agent_profiles.py --dry-run
-  ./venv/bin/python scripts/bootstrap_org_agent_profiles.py --refresh-config
+  ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py
+  ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py --dry-run
+  ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py --refresh-config
 
 Removing a role: delete the profile with `hermes profile delete <name>` and trim
 the manifest; the chief should stop delegating to that hermes_profile name.
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _load_manifest(path: Path) -> Dict[str, Any]:
@@ -101,7 +101,7 @@ def main() -> None:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=ROOT / "scripts/org_agent_profiles_manifest.yaml",
+        default=ROOT / "scripts/core/org_agent_profiles_manifest.yaml",
         help="Path to manifest YAML",
     )
     parser.add_argument("--dry-run", action="store_true")

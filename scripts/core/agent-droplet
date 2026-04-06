@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Backend for workstation `hermes … droplet` (see scripts/hermes shim + Step 15 in
+# Backend for workstation `hermes … droplet` (see scripts/core/hermes shim + Step 15 in
 # policies/core/unified-deployment-and-security.md). Runs the same CLI on the VPS (venv + HERMES_HOME). All args forwarded.
 #
 # The word "droplet" is only the SSH hop — it is NOT a Hermes profile name. The remote session uses
@@ -10,20 +10,20 @@
 # (env-file SSH_PASSPHRASE / HERMES_DROPLET_ALLOW_ENV_PASSPHRASE is ignored for this entrypoint).
 # Remote sudo: if SSH_SUDO_PASSWORD is set in that same file, ssh_droplet uses sudo -S (no TTY prompt);
 # otherwise sudo -k; sudo -u <runtime> (password on remote TTY). Set AGENT_DROPLET_REQUIRE_SUDO=0
-# to run as SSH_USER without sudo (e.g. headless maintenance). See scripts/ssh_droplet.sh header.
+# to run as SSH_USER without sudo (e.g. headless maintenance). See scripts/core/ssh_droplet.sh header.
 # Optional env: AGENT_DROPLET_RUNTIME_USER, AGENT_DROPLET_RUNTIME_HOME, AGENT_DROPLET_REPO,
 # AGENT_DROPLET_PROFILE (if unset: read workstation ~/.hermes/active_profile; else chief-orchestrator).
 # HERMES_DROPLET_INTERACTIVE=1 lets ssh_droplet pass its TTY check when stdin is not a TTY (IDE).
 # Defaults: runtime user hermesuser, repo ~/hermesuser/hermes-agent.
-# One-time VPS setup: sudo bash scripts/droplet_bootstrap_hermesuser.sh (creates chief-orchestrator there;
+# One-time VPS setup: sudo bash scripts/core/droplet_bootstrap_hermesuser.sh (creates chief-orchestrator there;
 # create matching profiles on the VPS if your workstation sticky name differs).
 #
 # env -u: a parent-exported HERMES_DROPLET_ALLOW_ENV_PASSPHRASE must not re-enable file passphrase here;
 # ssh_droplet still reads the file, but HERMES_DROPLET_WORKSTATION_CLI=1 disables file-based unlock.
-# For headless automation from the repo, prefer scripts/droplet_run.sh (sudo off, per invocation).
+# For headless automation from the repo, prefer scripts/core/droplet_run.sh (sudo off, per invocation).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$ROOT/.." && pwd)"
+REPO="$(cd "$ROOT/../.." && pwd)"
 RUNTIME_USER="${AGENT_DROPLET_RUNTIME_USER:-hermesuser}"
 REPO_Q=$(printf '%q' "${AGENT_DROPLET_REPO:-/home/hermesuser/hermes-agent}")
 
@@ -46,7 +46,7 @@ PROF_Q=$(printf '%q' "$PROF_NAME")
 HH=$(printf '%q' "${AGENT_DROPLET_RUNTIME_HOME:-/home/${RUNTIME_USER}/.hermes/profiles/${PROF_NAME}}")
 # Remote side: always use repo venv for the CLI and export VIRTUAL_ENV/PATH so subprocesses
 # (tools, hooks) resolve python/pip from the same venv — not a stale global hermes.
-cmd="export HERMES_HOME=${HH}; cd ${REPO_Q} && if [[ ! -x ./venv/bin/python ]]; then echo 'agent-droplet: missing ./venv/bin/python. On the droplet: sudo bash scripts/droplet_bootstrap_hermesuser.sh' >&2; exit 127; fi && export VIRTUAL_ENV=\${PWD}/venv && export PATH=\${PWD}/venv/bin:\${PATH} && exec ./venv/bin/python -m hermes_cli.main -p ${PROF_Q}"
+cmd="export HERMES_HOME=${HH}; cd ${REPO_Q} && if [[ ! -x ./venv/bin/python ]]; then echo 'agent-droplet: missing ./venv/bin/python. On the droplet: sudo bash scripts/core/droplet_bootstrap_hermesuser.sh' >&2; exit 127; fi && export VIRTUAL_ENV=\${PWD}/venv && export PATH=\${PWD}/venv/bin:\${PATH} && exec ./venv/bin/python -m hermes_cli.main -p ${PROF_Q}"
 for a in "$@"; do
   cmd+=" $(printf '%q' "$a")"
 done
@@ -57,4 +57,4 @@ case "${AGENT_DROPLET_REQUIRE_SUDO:-1}" in
   0|false|FALSE|no|NO|off|OFF) export HERMES_DROPLET_REQUIRE_SUDO=0 ;;
   *) export HERMES_DROPLET_REQUIRE_SUDO=1 ;;
 esac
-exec env -u HERMES_DROPLET_ALLOW_ENV_PASSPHRASE bash "$REPO/scripts/ssh_droplet.sh" --sudo-user "$RUNTIME_USER" "$cmd"
+exec env -u HERMES_DROPLET_ALLOW_ENV_PASSPHRASE bash "$REPO/scripts/core/ssh_droplet.sh" --sudo-user "$RUNTIME_USER" "$cmd"

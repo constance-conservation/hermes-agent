@@ -2,7 +2,7 @@
 #
 # Install (as the runtime user, e.g. hermesuser):
 #   mkdir -p ~/.hermes/bin
-#   cp /path/to/hermes-agent/scripts/gateway-watchdog.sh ~/.hermes/bin/
+#   cp /path/to/hermes-agent/scripts/core/gateway-watchdog.sh ~/.hermes/bin/
 #   chmod +x ~/.hermes/bin/gateway-watchdog.sh
 #   cp scripts/systemd/hermes-gateway-watchdog.user.service.example \
 #      ~/.config/systemd/user/hermes-gateway-watchdog.service

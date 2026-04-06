@@ -5,8 +5,8 @@ Checks all dependencies, configuration, and bot permissions needed
 for Discord voice mode to work correctly.
 
 Usage:
-    python scripts/discord-voice-doctor.py
-    .venv/bin/python scripts/discord-voice-doctor.py
+    python scripts/archive/discord-voice-doctor.py
+    .venv/bin/python scripts/archive/discord-voice-doctor.py
 """
 
 import os
@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Resolve project root
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent  # scripts/archive -> repo root
 sys.path.insert(0, str(PROJECT_ROOT))
 
 HERMES_HOME = Path(os.getenv("HERMES_HOME", Path.home() / ".hermes"))

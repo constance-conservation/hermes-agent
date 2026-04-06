@@ -13,9 +13,9 @@
 #   - Keep two SSH sessions open over Tailscale while testing
 #
 # Usage:
-#   ./scripts/harden_ssh_management_port_tailscale.sh                    # dry-run
-#   sudo REM001_APPLY=1 ./scripts/harden_ssh_management_port_tailscale.sh  # apply + arm timer
-#   sudo ./scripts/harden_ssh_management_port_tailscale.sh rollback        # immediate revert
+#   ./scripts/core/harden_ssh_management_port_tailscale.sh                    # dry-run
+#   sudo REM001_APPLY=1 ./scripts/core/harden_ssh_management_port_tailscale.sh  # apply + arm timer
+#   sudo ./scripts/core/harden_ssh_management_port_tailscale.sh rollback        # immediate revert
 #
 # Timed safety rollback (default 180s after apply):
 #   - File /tmp/rem001-arm-rollback.pid holds the **sleep(1) PID** (not the subshell).

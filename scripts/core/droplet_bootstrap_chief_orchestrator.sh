@@ -3,7 +3,7 @@
 # Creates ~/.hermes/profiles/chief-orchestrator if missing and runs: hermes profile use chief-orchestrator
 #
 # Usage:
-#   cd ~/hermes-agent && ./scripts/droplet_bootstrap_chief_orchestrator.sh
+#   cd ~/hermes-agent && ./scripts/core/droplet_bootstrap_chief_orchestrator.sh
 #
 # Uses python -m hermes_cli.main so PATH does not need venv/bin/hermes.
 #
@@ -20,6 +20,6 @@ if [[ ! -x "$PY" ]]; then
 fi
 "$PY" -m hermes_cli.main -p default profile create chief-orchestrator --no-alias || true
 "$PY" -m hermes_cli.main -p default profile use chief-orchestrator
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-bash "$ROOT/scripts/ensure_chief_orchestrator_profile_env.sh"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+bash "$ROOT/scripts/core/ensure_chief_orchestrator_profile_env.sh"
 "$PY" -m hermes_cli.main -p default profile show chief-orchestrator

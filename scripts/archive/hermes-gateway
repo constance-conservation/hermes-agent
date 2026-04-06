@@ -7,19 +7,19 @@ NOT tied to the CLI - runs independently.
 
 Usage:
     # Run in foreground (for testing)
-    ./scripts/hermes-gateway
+    ./scripts/archive/hermes-gateway
     
     # Install as systemd service
-    ./scripts/hermes-gateway install
+    ./scripts/archive/hermes-gateway install
     
     # Manage the service
-    ./scripts/hermes-gateway start
-    ./scripts/hermes-gateway stop
-    ./scripts/hermes-gateway restart
-    ./scripts/hermes-gateway status
+    ./scripts/archive/hermes-gateway start
+    ./scripts/archive/hermes-gateway stop
+    ./scripts/archive/hermes-gateway restart
+    ./scripts/archive/hermes-gateway status
     
     # Uninstall
-    ./scripts/hermes-gateway uninstall
+    ./scripts/archive/hermes-gateway uninstall
 """
 
 import argparse
@@ -29,9 +29,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Add parent directory to path
+# Repo root: scripts/archive -> repo
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_DIR = SCRIPT_DIR.parent
+PROJECT_DIR = SCRIPT_DIR.parent.parent
 sys.path.insert(0, str(PROJECT_DIR))
 
 # Load .env file
@@ -312,19 +312,19 @@ def main():
         epilog="""
 Examples:
     # Run in foreground (for testing)
-    ./scripts/hermes-gateway run
+    ./scripts/archive/hermes-gateway run
     
     # Install as system service
-    ./scripts/hermes-gateway install
+    ./scripts/archive/hermes-gateway install
     
     # Manage the service
-    ./scripts/hermes-gateway start
-    ./scripts/hermes-gateway stop
-    ./scripts/hermes-gateway restart
-    ./scripts/hermes-gateway status
+    ./scripts/archive/hermes-gateway start
+    ./scripts/archive/hermes-gateway stop
+    ./scripts/archive/hermes-gateway restart
+    ./scripts/archive/hermes-gateway status
     
     # Uninstall
-    ./scripts/hermes-gateway uninstall
+    ./scripts/archive/hermes-gateway uninstall
 
 Configuration:
     Set environment variables in .env file or system environment:
@@ -363,7 +363,7 @@ Configuration:
             install_launchd()
         else:
             print("Service installation not supported on this platform.")
-            print("Please run manually: ./scripts/hermes-gateway run")
+            print("Please run manually: ./scripts/archive/hermes-gateway run")
             sys.exit(1)
     
     elif args.command == "uninstall":

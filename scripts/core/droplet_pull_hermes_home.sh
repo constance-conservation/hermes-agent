@@ -8,8 +8,8 @@
 # for remote sudo (hermesadmin reads hermesuser home via sudo tar).
 #
 # Usage:
-#   ./scripts/droplet_pull_hermes_home.sh              # backup ~/.hermes then replace
-#   ./scripts/droplet_pull_hermes_home.sh --dry-run    # only show what would run
+#   ./scripts/core/droplet_pull_hermes_home.sh              # backup ~/.hermes then replace
+#   ./scripts/core/droplet_pull_hermes_home.sh --dry-run    # only show what would run
 #
 set -euo pipefail
 

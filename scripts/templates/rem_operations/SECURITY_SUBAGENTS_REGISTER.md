@@ -1,6 +1,6 @@
 # Security sub-agents register (REM-006)
 
-> **Status:** Registry + **in-repo role prompts** + optional **Hermes profiles** (`ag-sec-*` in `scripts/org_agent_profiles_manifest.yaml`). Roles are **delegated subagents** via `delegate_task(..., hermes_profile=…)` unless the operator chooses long-lived sessions.
+> **Status:** Registry + **in-repo role prompts** + optional **Hermes profiles** (`ag-sec-*` in `scripts/core/org_agent_profiles_manifest.yaml`). Roles are **delegated subagents** via `delegate_task(..., hermes_profile=…)` unless the operator chooses long-lived sessions.
 > Canonical phase list: `policies/core/unified-deployment-and-security.md` (Phase 4) and `policies/core/agentic-company-deployment-pack.md` (Phase 3).
 
 **AG-ID numbering:** `AG-005` is reserved for the **Project Lead** (`agentic-company`). Nine security foundation roles use `AG-004` and `AG-006`–`AG-013`.
@@ -19,7 +19,7 @@
 
 ## Instantiation checklist (operator)
 
-1. Run `./venv/bin/python scripts/bootstrap_org_agent_profiles.py` (chief source profile must exist, e.g. `chief-orchestrator`).
+1. Run `./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py` (chief source profile must exist, e.g. `chief-orchestrator`).
 2. Map tool/channel constraints via **profile config** (manifest), env (e.g. allowlists), and `hermes_token_governance.runtime.yaml` per `agent/token_governance_runtime.py`.
 3. Chief delegates with **`hermes_profile`** per `CHIEF_ORCHESTRATION_PLAYBOOK.md`.
 

@@ -18,7 +18,7 @@ Implementation references in the Hermes Agent codebase:
 
 - `gateway/status.py` — `runtime_status_watchdog_healthy()` (health rules)
 - `hermes gateway watchdog-check` — exit 0 when healthy
-- `scripts/gateway-watchdog.sh` — optional external supervisor loop
+- `scripts/core/gateway-watchdog.sh` — optional external supervisor loop
 
 ---
 
