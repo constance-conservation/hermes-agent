@@ -94,14 +94,15 @@ if [[ ! -x "$PY" ]]; then
   exit 1
 fi
 
-# -p <name> when HERMES_HOME is under profiles/<name> (matches agent-droplet / gateway install)
-HERMES_CLI=( "$PY" -m hermes_cli.main )
+# Profile slug when HERMES_HOME is under profiles/<name> (matches agent-droplet / gateway install)
+_WATCHDOG_PN=""
 if [[ "$HERMES_HOME" == "${_PROFILES_ROOT}/"* ]]; then
   _WATCHDOG_PN="${HERMES_HOME#"${_PROFILES_ROOT}/"}"
   _WATCHDOG_PN="${_WATCHDOG_PN%%/*}"
-  if [[ -n "$_WATCHDOG_PN" ]]; then
-    HERMES_CLI+=( -p "$_WATCHDOG_PN" )
-  fi
+fi
+HERMES_CLI=( "$PY" -m hermes_cli.main )
+if [[ -n "$_WATCHDOG_PN" ]]; then
+  HERMES_CLI+=( -p "$_WATCHDOG_PN" )
 fi
 
 hermes_gateway_service_name() {
@@ -134,6 +135,7 @@ RESTART_WAIT="${WATCHDOG_RESTART_WAIT_SECONDS:-20}"
 POST_DOCTOR_WAIT="${WATCHDOG_POST_DOCTOR_WAIT_SECONDS:-25}"
 PREFER_SYSTEMD="${WATCHDOG_PREFER_SYSTEMD:-1}"
 ENFORCE_SINGLE="${WATCHDOG_ENFORCE_SINGLE_GATEWAY:-1}"
+SINGLE_LOCK="${WATCHDOG_SINGLE_INSTANCE_LOCK:-1}"
 
 mkdir -p "$LOG_DIR"
 # Tighten log perms when possible (REM-005 / audit); ignore if not owner.
@@ -202,31 +204,109 @@ except Exception:
 PY
 }
 
+# PIDs for this Unix user matching gateway-like argv (aligned with hermes_cli.gateway.find_gateway_pids).
+# When _WATCHDOG_PN is set, require `-p <name>` in argv so we do not kill another profile's gateway.
+list_gateway_pids_this_instance() {
+  _GW_WATCHDOG_UID="$(id -u)" \
+  _GW_WATCHDOG_PROFILE="${_WATCHDOG_PN:-}" \
+  python3 <<'PY' 2>/dev/null || true
+import os, re, subprocess
+
+uid = int(os.environ["_GW_WATCHDOG_UID"])
+profile = (os.environ.get("_GW_WATCHDOG_PROFILE") or "").strip()
+
+patterns = (
+    "hermes_cli.main gateway",
+    "hermes_cli/main.py gateway",
+    "hermes gateway",
+    "gateway/run.py",
+)
+exclude = re.compile(
+    r"gateway-watchdog\.sh|gateway watchdog-check|\bdoctor\b|--fix",
+    re.I,
+)
+
+
+def profile_matches(args: str) -> bool:
+    if not profile:
+        return True
+    return bool(re.search(rf"(?:^|\s)-p\s+{re.escape(profile)}(?:\s|$)", args))
+
+pids: set[int] = set()
+try:
+    out = subprocess.run(
+        ["ps", "-u", str(uid), "-ww", "-o", "pid=", "-o", "args="],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        args = parts[1]
+        if exclude.search(args):
+            continue
+        if not profile_matches(args):
+            continue
+        if any(p in args for p in patterns):
+            pids.add(pid)
+except Exception:
+    pass
+for p in sorted(pids):
+    print(p)
+PY
+}
+
+pid_is_gateway_for_instance() {
+  local pid="$1"
+  [[ -z "$pid" ]] && return 1
+  local args
+  args="$(ps -p "$pid" -ww -o args= 2>/dev/null || true)"
+  [[ -z "$args" ]] && return 1
+  case "$args" in
+    *gateway-watchdog*|*"gateway watchdog-check"*|*" doctor "*|*doctor\ --fix*) return 1 ;;
+  esac
+  if [[ -n "$_WATCHDOG_PN" ]]; then
+    echo "$args" | grep -qE "(^|[[:space:]])-p[[:space:]]+${_WATCHDOG_PN}([[:space:]]|$)" || return 1
+  fi
+  echo "$args" | grep -qE 'hermes_cli\.main[[:space:]]+gateway|hermes_cli/main\.py[[:space:]]+gateway|[[:space:]]hermes[[:space:]]+gateway|gateway/run\.py' \
+    || return 1
+  return 0
+}
+
 enforce_single_gateway() {
   [[ "$ENFORCE_SINGLE" == "0" ]] && return 0
-  local pids canon keeper pid
-  pids="$(pgrep -f 'python.*hermes_cli\.main.*gateway run' 2>/dev/null || true)"
-  if [[ -z "$pids" ]]; then
-    return 0
-  fi
+  local canon keeper
   local -a plist=()
-  for pid in $pids; do
-    plist+=("$pid")
-  done
-  ((${#plist[@]} <= 1)) && return 0
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && plist+=("$pid")
+  done < <(list_gateway_pids_this_instance)
+
+  ((${#plist[@]} == 0)) && return 0
+  ((${#plist[@]} == 1)) && return 0
 
   canon="$(canonical_gateway_pid)"
   keeper=""
-  if [[ -n "$canon" ]] && ps -p "$canon" -o args= 2>/dev/null | grep -q '[h]ermes_cli.main.*gateway run'; then
+  if [[ -n "$canon" ]] && pid_is_gateway_for_instance "$canon"; then
     keeper="$canon"
   else
     keeper="$(printf '%s\n' "${plist[@]}" | sort -n | tail -1)"
   fi
-  log "enforce_single_gateway: found ${#plist[@]} gateway PIDs; keeping ${keeper}"
+  log "enforce_single_gateway: found ${#plist[@]} gateway PIDs for uid=$(id -u) (profile=${_WATCHDOG_PN:-default}); keeping ${keeper}"
   for pid in "${plist[@]}"; do
     [[ "$pid" == "$keeper" ]] && continue
     if kill "$pid" 2>/dev/null; then
       log "enforce_single_gateway: SIGTERM duplicate pid=$pid"
+    else
+      log "enforce_single_gateway: SIGTERM pid=$pid failed (not our user?)"
     fi
   done
   sleep 2
@@ -237,6 +317,23 @@ enforce_single_gateway() {
       log "enforce_single_gateway: SIGKILL stubborn pid=$pid"
     fi
   done
+}
+
+acquire_watchdog_lock() {
+  [[ "$SINGLE_LOCK" == "0" ]] && return 0
+  if ! command -v flock >/dev/null 2>&1; then
+    log "WATCHDOG_SINGLE_INSTANCE_LOCK requested but flock not installed — continuing without lock"
+    return 0
+  fi
+  local lf="$HERMES_HOME/gateway-watchdog.lock"
+  touch "$lf" 2>/dev/null || true
+  exec 9>>"$lf"
+  if ! flock -n 9; then
+    printf '%s\n' "gateway-watchdog: another instance holds $lf — exit" >&2
+    log "startup aborted: flock on $lf failed (duplicate watchdog?)"
+    exit 1
+  fi
+  log "acquired exclusive lock $lf"
 }
 
 check_health() {
@@ -300,7 +397,8 @@ run_doctor_fix() {
 main() {
   local last_state="booting"
   local delay attempts
-  log "watchdog started HERMES_HOME=${HERMES_HOME} interval=${CHECK_INTERVAL}s backoff<=${MAX_BACKOFF}s jitter<=${JITTER_MAX}s attempts=${MAX_ATTEMPTS}/${ATTEMPT_WINDOW}s cooldown=${COOLDOWN_SECONDS}s prefer_systemd=${PREFER_SYSTEMD} cli=${HERMES_CLI[*]}"
+  acquire_watchdog_lock
+  log "watchdog started HERMES_HOME=${HERMES_HOME} interval=${CHECK_INTERVAL}s backoff<=${MAX_BACKOFF}s jitter<=${JITTER_MAX}s attempts=${MAX_ATTEMPTS}/${ATTEMPT_WINDOW}s cooldown=${COOLDOWN_SECONDS}s prefer_systemd=${PREFER_SYSTEMD} enforce_single=${ENFORCE_SINGLE} single_lock=${SINGLE_LOCK} cli=${HERMES_CLI[*]}"
 
   while true; do
     enforce_single_gateway
@@ -330,6 +428,7 @@ main() {
     sleep "$delay"
 
     restart_gateway
+    enforce_single_gateway
     sleep "$RESTART_WAIT"
     if check_health; then
       log "recovered after gateway restart"
@@ -343,6 +442,7 @@ main() {
     run_doctor_fix
     log "doctor --fix finished; restarting gateway again"
     restart_gateway
+    enforce_single_gateway
     sleep "$POST_DOCTOR_WAIT"
 
     if check_health; then
