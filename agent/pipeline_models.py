@@ -15,7 +15,8 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
     """Return menu rows for ``/models``: ``model``, ``source``, ``provider_kind``.
 
     *provider_kind* is ``primary`` (current profile primary), ``huggingface``, or ``gemini``.
-    Order: primary, then HF inference → router → tier models (deduped), then optional Gemini.
+    Order: primary, then Kimi router → tier models (deduped), then HF inference (only if
+    ``inference.enabled: true``), then optional Gemini.
     """
     if not config or not isinstance(config, dict):
         return []
@@ -49,12 +50,6 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
     if not isinstance(fmr, dict) or not fmr.get("enabled"):
         return out
 
-    inf = fmr.get("inference") or {}
-    if isinstance(inf, dict) and inf.get("enabled") is not False:
-        _im = _strip(inf.get("model"))
-        if _im:
-            _add_hf(_im, "free_model_routing.inference (HF)")
-
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):
         rm = _strip(kr.get("router_model"))
@@ -70,6 +65,12 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
                 label = f"{label}: {desc}"
             for mid in tier.get("models") or []:
                 _add_hf(_strip(mid), label)
+
+    inf = fmr.get("inference") or {}
+    if isinstance(inf, dict) and inf.get("enabled") is True:
+        _im = _strip(inf.get("model"))
+        if _im:
+            _add_hf(_im, "free_model_routing.inference (HF)")
 
     og = fmr.get("optional_gemini") or {}
     if isinstance(og, dict) and og.get("enabled"):

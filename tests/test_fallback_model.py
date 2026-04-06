@@ -359,6 +359,7 @@ class TestFallbackInit:
         agent = _make_agent(fallback_model=None)
         assert agent._fallback_model is not None
         assert agent._fallback_model["provider"] == "huggingface"
+        assert agent._fallback_model.get("hf_router") is True
         assert len(agent._fallback_chain) == 2
         assert agent._fallback_activated is False
 

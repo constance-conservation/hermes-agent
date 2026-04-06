@@ -4835,8 +4835,8 @@ class AIAgent:
         fb_resolve = self._fallback_entry_for_resolve(fb)
         fb_provider = (fb_resolve.get("provider") or "").strip().lower()
         fb_model = (fb_resolve.get("model") or "").strip()
-        # Inference Providers routing (before Kimi ``hf_router``); see ``apply_hf_inference_policy``.
-        if fb_provider == "huggingface" and fb_model:
+        # Inference Providers ``:fastest`` etc. only for plain HF entries — not Kimi ``hf_router`` rows.
+        if fb_provider == "huggingface" and fb_model and not fb.get("hf_router"):
             from agent.hf_fallback_router import apply_hf_inference_policy
 
             fb_model = apply_hf_inference_policy(fb_model, fb.get("hf_inference_policy"))

@@ -1,12 +1,13 @@
 """Build ``fallback_providers`` from ``free_model_routing`` in config.yaml.
 
-Default (v18+): Kimi tier router → optional Gemini. The HF Inference Providers policy
-hop is opt-in via ``inference.enabled: true`` and ``inference.model``.
+Default (v18+): **Kimi tier router first** → optional HF Inference Providers (explicit
+opt-in) → optional Gemini. The Inference Providers hop must set ``inference.enabled: true``
+or it is skipped (legacy YAML with only ``model``/``policy`` no longer runs first).
 
 Order when synthesized:
 
-1. **Inference routing** (optional) — only if ``inference.enabled`` is not false and ``model`` is set.
-2. **Kimi tiered router** — router model picks one id from configured tiers by prompt.
+1. **Kimi tiered router** — router model picks one id from configured tiers by prompt.
+2. **Inference routing** (optional) — only if ``inference.enabled`` is **true** and ``model`` is set.
 3. **Optional Gemini** — last-resort hosted Gemma if enabled (optional_gemini).
 """
 
@@ -81,18 +82,6 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
 
     chain: List[Dict[str, Any]] = []
 
-    inf = fmr.get("inference") or {}
-    if isinstance(inf, dict) and inf.get("enabled") is not False:
-        mid = _strip(inf.get("model"))
-        pol = _strip(inf.get("policy"))
-        if mid:
-            entry: Dict[str, Any] = {"provider": "huggingface", "model": mid}
-            if pol in ("fastest", "cheapest", "preferred"):
-                entry["hf_inference_policy"] = pol
-            elif pol:
-                logger.warning("free_model_routing.inference: unknown policy %r — omitting suffix", pol)
-            chain.append(entry)
-
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):
         router_model = _strip(kr.get("router_model"))
@@ -115,6 +104,18 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
                 "free_model_routing.kimi_router: router_model set but tiers empty — "
                 "configure kimi_router.tiers for tiered routing",
             )
+
+    inf = fmr.get("inference") or {}
+    if isinstance(inf, dict) and inf.get("enabled") is True:
+        mid = _strip(inf.get("model"))
+        pol = _strip(inf.get("policy"))
+        if mid:
+            entry: Dict[str, Any] = {"provider": "huggingface", "model": mid}
+            if pol in ("fastest", "cheapest", "preferred"):
+                entry["hf_inference_policy"] = pol
+            elif pol:
+                logger.warning("free_model_routing.inference: unknown policy %r — omitting suffix", pol)
+            chain.append(entry)
 
     og = fmr.get("optional_gemini") or {}
     if isinstance(og, dict) and og.get("enabled") and _strip(og.get("model")):
