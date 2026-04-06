@@ -336,15 +336,17 @@ def _call_profile_router_llm(
     messages: List[Dict[str, Any]],
     router_cfg: Dict[str, Any],
 ) -> Any:
-    """Run the profile-router JSON classifier via HF router (Kimi tier pick by default).
+    """Run the profile-router JSON classifier via Kimi tier routing by default.
 
     Order (when ``use_free_model_routing`` is true, the default):
 
     1. Optional pinned ``router_provider``/``router_model`` if both are set to
        ``huggingface`` + a hub id (tried first; on failure, continue).
-    2. ``free_model_routing.inference`` — only if ``inference.enabled`` is true and ``model`` is set.
-    3. ``free_model_routing.kimi_router`` — Kimi router model picks one hub id from *tiers*,
-       then that model runs the JSON classification.
+    2. ``free_model_routing.kimi_router`` — Kimi router model picks one hub id from *tiers*,
+       then that model runs the JSON classification (**default path**).
+    3. ``free_model_routing.inference`` — **opt-in only** (``inference.enabled: true`` **and**
+       ``model`` set). HF Inference Providers burn credits; used only after Kimi fails or
+       when Kimi config is absent.
 
     Requires ``HF_TOKEN``, ``HUGGING_FACE_HUB_TOKEN``, or ``HUGGINGFACE_API_KEY``. No Gemini / paid Google path.
     """
@@ -404,50 +406,53 @@ def _call_profile_router_llm(
                 exc,
             )
 
-    inf = fmr.get("inference") if isinstance(fmr.get("inference"), dict) else {}
-    mid = ""
-    if inf.get("enabled") is not False:
-        mid = str(inf.get("model") or "").strip()
-    if mid:
-        pol = str(inf.get("policy") or "").strip()
-        pol_use = pol if pol in ("fastest", "cheapest", "preferred") else None
-        routed_mid = apply_hf_inference_policy(mid, pol_use)
-        try:
-            _set_router_telemetry("hf_inference_policy", routed_mid)
-            logger.info(
-                "profile_router: HF Inference Providers route (policy=%s) model=%s",
-                pol_use or "none",
-                routed_mid,
-            )
-            return call_llm(provider="huggingface", model=routed_mid, **kwargs)
-        except Exception as exc:
-            logger.warning(
-                "profile_router: HF inference route failed, trying Kimi tier pick: %s",
-                exc,
-            )
-
     kr = fmr.get("kimi_router") if isinstance(fmr.get("kimi_router"), dict) else {}
     router_model = str(kr.get("router_model") or "").strip()
     tiers = normalize_kimi_tiers(kr.get("tiers"))
     if router_model and tiers:
-        picked = resolve_hf_routed_model(
-            user_text,
-            api_key=tok,
-            base_url=base,
-            router_model=router_model,
-            tiers=tiers,
-        )
-        _set_router_telemetry("hf_kimi_tier_pick", picked)
-        logger.info(
-            "profile_router: Kimi router model=%s → picked hub id=%s for classification JSON",
-            router_model,
-            picked,
-        )
-        return call_llm(provider="huggingface", model=picked, **kwargs)
+        try:
+            picked = resolve_hf_routed_model(
+                user_text,
+                api_key=tok,
+                base_url=base,
+                router_model=router_model,
+                tiers=tiers,
+            )
+            _set_router_telemetry("hf_kimi_tier_pick", picked)
+            logger.info(
+                "profile_router: Kimi router model=%s → picked hub id=%s for classification JSON",
+                router_model,
+                picked,
+            )
+            return call_llm(provider="huggingface", model=picked, **kwargs)
+        except Exception as exc:
+            logger.warning(
+                "profile_router: Kimi tier pick failed, optional HF Inference Providers hop: %s",
+                exc,
+            )
+
+    inf = fmr.get("inference") if isinstance(fmr.get("inference"), dict) else {}
+    # Explicit opt-in only — do not treat missing ``enabled`` as true (v17 YAML often had model+policy only).
+    if inf.get("enabled") is True:
+        mid = str(inf.get("model") or "").strip()
+        if mid:
+            pol = str(inf.get("policy") or "").strip()
+            pol_use = pol if pol in ("fastest", "cheapest", "preferred") else None
+            routed_mid = apply_hf_inference_policy(mid, pol_use)
+            try:
+                _set_router_telemetry("hf_inference_policy", routed_mid)
+                logger.info(
+                    "profile_router: HF Inference Providers route (policy=%s) model=%s",
+                    pol_use or "none",
+                    routed_mid,
+                )
+                return call_llm(provider="huggingface", model=routed_mid, **kwargs)
+            except Exception as exc:
+                logger.warning("profile_router: HF Inference Providers call failed: %s", exc)
 
     raise RuntimeError(
         "profile_router: set free_model_routing.kimi_router (router_model + tiers), "
-        "or enable inference.enabled + inference.model, "
+        "or set inference.enabled: true plus inference.model for HF Inference Providers, "
         "or agent.profile_router with router_provider=huggingface and router_model=<hub id>.",
     )
 

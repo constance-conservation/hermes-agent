@@ -302,8 +302,8 @@ DEFAULT_CONFIG = {
             "exclude_profiles": [],
             "router_model": "",
             "router_provider": "",
-            # When true (default), profile routing uses Hugging Face Inference + optional
-            # Kimi tier pick from ``free_model_routing`` — not auxiliary OpenRouter/Gemini.
+            # When true (default), profile routing uses ``free_model_routing.kimi_router``
+            # first; HF Inference Providers are opt-in (``free_model_routing.inference.enabled``).
             "use_free_model_routing": True,
         },
         # When enabled, the ``sync_org_automation`` tool may run manifest bootstrap +

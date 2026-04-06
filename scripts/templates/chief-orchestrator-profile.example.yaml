@@ -98,7 +98,7 @@ auxiliary:
     provider: openrouter
     model: tier:D
   # CLI profile routing does not use auxiliary.profile_router — it uses agent.profile_router
-  # + free_model_routing (HF Inference + Kimi tier pick). Leave at defaults or omit.
+  # + free_model_routing (Kimi tier pick first; HF Inference Providers only if inference.enabled: true).
 
 delegation:
   provider: openrouter

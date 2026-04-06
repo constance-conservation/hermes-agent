@@ -176,3 +176,36 @@ def test_classify_keyword_security_skips_llm():
     assert t == "ag-sec-preflight"
     assert conf >= 0.65
     assert "keyword" in reason.lower()
+
+
+def test_call_profile_router_llm_prefers_kimi_when_inference_not_explicitly_enabled(monkeypatch):
+    """Legacy YAML often had inference.model without enabled:true — must not hit Inference Providers."""
+    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+    from agent import profile_router as pr
+
+    fake_fmr = {
+        "enabled": True,
+        "inference": {
+            "model": "MiniMaxAI/MiniMax-M2.5",
+            "policy": "fastest",
+        },
+        "kimi_router": {
+            "router_model": "moonshotai/Kimi-K2-Thinking",
+            "tiers": [
+                {"id": "general", "description": "g", "models": ["some/hub-id"]},
+            ],
+        },
+    }
+
+    with patch("hermes_cli.config.load_config", return_value={"free_model_routing": fake_fmr}), patch(
+        "agent.hf_fallback_router.resolve_hf_routed_model",
+        return_value="kimi-picked-hub-model",
+    ) as mock_resolve, patch("agent.auxiliary_client.call_llm") as mock_llm:
+        mock_llm.return_value = object()
+        pr._call_profile_router_llm(
+            [{"role": "user", "content": "route me"}],
+            {"use_free_model_routing": True},
+        )
+    mock_resolve.assert_called_once()
+    mock_llm.assert_called_once()
+    assert mock_llm.call_args.kwargs.get("model") == "kimi-picked-hub-model"
