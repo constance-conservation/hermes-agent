@@ -63,6 +63,23 @@ def test_resolve_explicit_empty_list():
     assert resolve_fallback_providers(cfg) == []
 
 
+def test_build_chain_kimi_only_when_inference_disabled():
+    cfg = {
+        "free_model_routing": {
+            "enabled": True,
+            "inference": {"enabled": False},
+            "kimi_router": {
+                "router_model": "org/router",
+                "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
+            },
+        },
+    }
+    ch = build_free_fallback_chain(cfg)
+    assert len(ch) == 1
+    assert ch[0]["hf_router"] is True
+    assert ch[0]["model"] == "org/router"
+
+
 def test_resolve_legacy_fallback_model_dict():
     cfg = {
         "fallback_model": {"provider": "zai", "model": "glm-9"},

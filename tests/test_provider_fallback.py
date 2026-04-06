@@ -15,7 +15,11 @@ def _sample_free_routing_config():
         "fallback_providers": None,
         "free_model_routing": {
             "enabled": True,
-            "inference": {"model": "test/inference", "policy": "fastest"},
+            "inference": {
+                "enabled": True,
+                "model": "test/inference",
+                "policy": "fastest",
+            },
             "kimi_router": {
                 "router_model": "test/router",
                 "tiers": [{"id": "t0", "models": ["test/a", "test/b"]}],
@@ -56,7 +60,7 @@ class TestFallbackChainInit:
     @patch("hermes_cli.config.load_config", return_value=_sample_free_routing_config())
     def test_no_fallback(self, _mock_lc):
         agent = _make_agent(fallback_model=None)
-        # Omitted fallback_model: synthesized from free_model_routing (HF inference → Kimi tiers).
+        # Omitted fallback_model: synthesized from free_model_routing (HF inference if enabled → Kimi tiers).
         assert len(agent._fallback_chain) == 2
         assert agent._fallback_chain[0]["provider"] == "huggingface"
         assert agent._fallback_chain[0].get("hf_inference_policy") == "fastest"

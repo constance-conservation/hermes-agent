@@ -50,8 +50,10 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
         return out
 
     inf = fmr.get("inference") or {}
-    if isinstance(inf, dict):
-        _add_hf(_strip(inf.get("model")), "free_model_routing.inference (HF)")
+    if isinstance(inf, dict) and inf.get("enabled") is not False:
+        _im = _strip(inf.get("model"))
+        if _im:
+            _add_hf(_im, "free_model_routing.inference (HF)")
 
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):

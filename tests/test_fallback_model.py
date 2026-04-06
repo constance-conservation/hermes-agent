@@ -343,7 +343,11 @@ class TestFallbackInit:
             "fallback_providers": None,
             "free_model_routing": {
                 "enabled": True,
-                "inference": {"model": "test/inf", "policy": "fastest"},
+                "inference": {
+                    "enabled": True,
+                    "model": "test/inf",
+                    "policy": "fastest",
+                },
                 "kimi_router": {
                     "router_model": "test/router",
                     "tiers": [{"models": ["test/a"]}],

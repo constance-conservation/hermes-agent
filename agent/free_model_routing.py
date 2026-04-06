@@ -1,11 +1,11 @@
 """Build ``fallback_providers`` from ``free_model_routing`` in config.yaml.
 
-Defaults ship in ``hermes_cli.config.DEFAULT_CONFIG`` (v17+); profiles may override
-``inference.model``, ``kimi_router.router_model``, and ``kimi_router.tiers``.
+Default (v18+): Kimi tier router → optional Gemini. The HF Inference Providers policy
+hop is opt-in via ``inference.enabled: true`` and ``inference.model``.
 
 Order when synthesized:
 
-1. **Inference routing** — Hugging Face Inference Providers (``model`` + ``policy`` suffix).
+1. **Inference routing** (optional) — only if ``inference.enabled`` is not false and ``model`` is set.
 2. **Kimi tiered router** — router model picks one id from configured tiers by prompt.
 3. **Optional Gemini** — last-resort hosted Gemma if enabled (optional_gemini).
 """
@@ -82,7 +82,7 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
     chain: List[Dict[str, Any]] = []
 
     inf = fmr.get("inference") or {}
-    if isinstance(inf, dict):
+    if isinstance(inf, dict) and inf.get("enabled") is not False:
         mid = _strip(inf.get("model"))
         pol = _strip(inf.get("policy"))
         if mid:

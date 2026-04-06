@@ -44,3 +44,21 @@ def test_collect_pipeline_models_disabled():
     rows = collect_pipeline_models(cfg)
     assert len(rows) == 1
     assert rows[0]["model"] == "x"
+
+
+def test_collect_pipeline_models_skips_inference_when_disabled():
+    cfg = {
+        "model": {"default": "anthropic/claude-sonnet-4"},
+        "free_model_routing": {
+            "enabled": True,
+            "inference": {"enabled": False, "model": "skip/this"},
+            "kimi_router": {
+                "router_model": "moonshotai/Kimi-K2-Thinking",
+                "tiers": [{"id": "g", "models": ["only-tier-model"]}],
+            },
+        },
+    }
+    rows = collect_pipeline_models(cfg)
+    models = [r["model"] for r in rows]
+    assert "skip/this" not in models
+    assert "only-tier-model" in models

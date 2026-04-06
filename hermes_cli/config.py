@@ -229,9 +229,10 @@ DEFAULT_CONFIG = {
     "fallback_providers": None,
     "free_model_routing": {
         "enabled": True,
+        # Opt-in only: HF Inference Providers (router.huggingface.co policy suffix) burn
+        # included credits quickly. Default chain is Kimi tier router → optional Gemini.
         "inference": {
-            "model": "MiniMaxAI/MiniMax-M2.5",
-            "policy": "fastest",
+            "enabled": False,
         },
         "kimi_router": {
             "router_model": "moonshotai/Kimi-K2-Thinking",
@@ -661,7 +662,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 17,
+    "_config_version": 18,
 }
 
 # =============================================================================
@@ -1595,14 +1596,17 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             dflt = copy.deepcopy(DEFAULT_CONFIG["free_model_routing"])
             changed = False
 
+            # Historical v17 seed (not read from DEFAULT_CONFIG — inference is opt-in now).
+            v17_inference_seed = {"model": "MiniMaxAI/MiniMax-M2.5", "policy": "fastest"}
+
             inf = fmr.get("inference")
             if not isinstance(inf, dict):
                 inf = {}
             if not str(inf.get("model") or "").strip():
-                inf["model"] = dflt["inference"]["model"]
+                inf["model"] = v17_inference_seed["model"]
                 changed = True
             if not str(inf.get("policy") or "").strip():
-                inf["policy"] = dflt["inference"]["policy"]
+                inf["policy"] = v17_inference_seed["policy"]
             fmr["inference"] = inf
 
             kr = fmr.get("kimi_router")
@@ -1641,6 +1645,43 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if not quiet:
                 print(f"  ⚠ v17 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v17 migration: {e}")
+
+    # ── Version 17 → 18: disable HF Inference Providers first hop (credit limits); Kimi-only ──
+    if current_ver < 18:
+        try:
+            path = get_config_path()
+            raw_user: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        raw_user = yaml.safe_load(f) or {}
+                except Exception:
+                    raw_user = {}
+            if not isinstance(raw_user, dict):
+                raw_user = {}
+            fmr = raw_user.get("free_model_routing")
+            if not isinstance(fmr, dict):
+                fmr = {}
+            inf = fmr.get("inference")
+            if not isinstance(inf, dict):
+                inf = {}
+            inf = dict(inf)
+            inf["enabled"] = False
+            # Drop policy-suffix hop so fallbacks start at Kimi tier router.
+            inf.pop("model", None)
+            inf.pop("policy", None)
+            fmr["inference"] = inf
+            merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 18})
+            results["config_added"].append("free_model_routing: inference disabled (v18)")
+            if not quiet:
+                print(
+                    "  ✓ v18: Disabled HF Inference Providers first hop; "
+                    "fallbacks use Kimi tier router → optional Gemini"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v18 free_model_routing migration skipped: {e}")
+            results["warnings"].append(f"v18 migration: {e}")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

@@ -336,13 +336,13 @@ def _call_profile_router_llm(
     messages: List[Dict[str, Any]],
     router_cfg: Dict[str, Any],
 ) -> Any:
-    """Run the profile-router JSON classifier on Hugging Face Inference only.
+    """Run the profile-router JSON classifier via HF router (Kimi tier pick by default).
 
     Order (when ``use_free_model_routing`` is true, the default):
 
     1. Optional pinned ``router_provider``/``router_model`` if both are set to
        ``huggingface`` + a hub id (tried first; on failure, continue).
-    2. ``free_model_routing.inference`` — official policy suffix on ``router.huggingface.co``.
+    2. ``free_model_routing.inference`` — only if ``inference.enabled`` is true and ``model`` is set.
     3. ``free_model_routing.kimi_router`` — Kimi router model picks one hub id from *tiers*,
        then that model runs the JSON classification.
 
@@ -405,7 +405,9 @@ def _call_profile_router_llm(
             )
 
     inf = fmr.get("inference") if isinstance(fmr.get("inference"), dict) else {}
-    mid = str(inf.get("model") or "").strip()
+    mid = ""
+    if inf.get("enabled") is not False:
+        mid = str(inf.get("model") or "").strip()
     if mid:
         pol = str(inf.get("policy") or "").strip()
         pol_use = pol if pol in ("fastest", "cheapest", "preferred") else None
@@ -444,7 +446,8 @@ def _call_profile_router_llm(
         return call_llm(provider="huggingface", model=picked, **kwargs)
 
     raise RuntimeError(
-        "profile_router: set free_model_routing.inference.model and/or kimi_router in config.yaml, "
+        "profile_router: set free_model_routing.kimi_router (router_model + tiers), "
+        "or enable inference.enabled + inference.model, "
         "or agent.profile_router with router_provider=huggingface and router_model=<hub id>.",
     )
 

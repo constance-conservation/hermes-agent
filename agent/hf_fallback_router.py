@@ -80,9 +80,12 @@ def resolve_hf_routed_model(
     tiers_blob = "\n".join(tier_lines)
     sys_msg = (
         "You route the user message to exactly one Hugging Face hub model id. "
-        "Tiers are ordered: lower index = lighter/cheaper tasks; higher index = "
-        "heavier reasoning or coding when the prompt requires it. "
-        "Pick the minimal tier that fits, then the best model id within that tier.\n"
+        "Tiers are ordered: lower index = lighter tasks; higher index = heavier reasoning, "
+        "math, code, or long agentic work when the prompt requires it. "
+        "Pick the minimal tier that fits, then choose the best model id **within that tier** for this specific prompt. "
+        "Do not default to the first model in a tier when another model in the same tier is a better fit. "
+        "When several prompts are similar in depth, vary the chosen model across tiers when multiple options apply "
+        "so routing is not stuck on one hub id.\n"
         f"{tiers_blob}\n"
         "Reply with a single JSON object only, no markdown: "
         '{"tier": <int>, "model": "<hub_model_id>"} '
@@ -105,7 +108,7 @@ def resolve_hf_routed_model(
                 {"role": "user", "content": user_msg},
             ],
             max_tokens=200,
-            temperature=0.2,
+            temperature=0.45,
         )
         content = (resp.choices[0].message.content or "").strip()
     except Exception as exc:
