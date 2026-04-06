@@ -19,10 +19,164 @@ import json
 import logging
 import os
 import re
+import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Last HF / routing model id used for JSON profile classification (for CLI status bar + logs).
+_LAST_ROUTER_MODEL_ID: Optional[str] = None
+_LAST_ROUTER_STAGE: str = ""
+
+
+def clear_profile_router_telemetry() -> None:
+    global _LAST_ROUTER_MODEL_ID, _LAST_ROUTER_STAGE
+    _LAST_ROUTER_MODEL_ID = None
+    _LAST_ROUTER_STAGE = ""
+
+
+def get_profile_router_telemetry() -> Tuple[Optional[str], str]:
+    return _LAST_ROUTER_MODEL_ID, _LAST_ROUTER_STAGE
+
+
+def _set_router_telemetry(stage: str, model_id: Optional[str] = None) -> None:
+    global _LAST_ROUTER_MODEL_ID, _LAST_ROUTER_STAGE
+    _LAST_ROUTER_STAGE = stage
+    if model_id is not None:
+        _LAST_ROUTER_MODEL_ID = model_id
+
+
+class RouterDelegateParentStub:
+    """Minimal ``parent_agent`` for ``delegate_task`` when skipping chief ``AIAgent`` init."""
+
+    __slots__ = (
+        "_delegate_depth",
+        "enabled_toolsets",
+        "model",
+        "provider",
+        "base_url",
+        "api_key",
+        "api_mode",
+        "acp_command",
+        "acp_args",
+        "max_tokens",
+        "reasoning_config",
+        "prefill_messages",
+        "platform",
+        "session_db",
+        "providers_allowed",
+        "providers_ignored",
+        "providers_order",
+        "provider_sort",
+        "tool_progress_callback",
+        "_active_children",
+        "_active_children_lock",
+        "_token_governance_delegation_max",
+        "on_delegate_child_model",
+    )
+
+    def __init__(
+        self,
+        *,
+        enabled_toolsets: List[str],
+        model: str,
+        runtime: Dict[str, Any],
+        platform: str,
+        session_db: Any = None,
+        reasoning_config: Any = None,
+        providers_allowed: Any = None,
+        providers_ignored: Any = None,
+        providers_order: Any = None,
+        provider_sort: Any = None,
+        tool_progress_callback: Any = None,
+        prefill_messages: Any = None,
+        on_delegate_child_model: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        self._delegate_depth = 0
+        self.enabled_toolsets = list(enabled_toolsets or [])
+        self.model = model
+        self.provider = runtime.get("provider")
+        self.base_url = runtime.get("base_url")
+        self.api_key = runtime.get("api_key")
+        self.api_mode = runtime.get("api_mode")
+        self.acp_command = runtime.get("command")
+        self.acp_args = list(runtime.get("args") or [])
+        self.max_tokens = None
+        self.reasoning_config = reasoning_config
+        self.prefill_messages = prefill_messages
+        self.platform = platform
+        self.session_db = session_db
+        self.providers_allowed = providers_allowed
+        self.providers_ignored = providers_ignored
+        self.providers_order = providers_order
+        self.provider_sort = provider_sort
+        self.tool_progress_callback = tool_progress_callback
+        self._active_children: List[Any] = []
+        self._active_children_lock = threading.Lock()
+        self._token_governance_delegation_max = None
+        self.on_delegate_child_model = on_delegate_child_model
+
+
+def build_router_delegate_parent_stub(
+    *,
+    enabled_toolsets: List[str],
+    model: str,
+    runtime: Dict[str, Any],
+    platform: str,
+    session_db: Any = None,
+    reasoning_config: Any = None,
+    providers_allowed: Any = None,
+    providers_ignored: Any = None,
+    providers_order: Any = None,
+    provider_sort: Any = None,
+    tool_progress_callback: Any = None,
+    prefill_messages: Any = None,
+    on_delegate_child_model: Optional[Callable[[str], None]] = None,
+) -> RouterDelegateParentStub:
+    """Build a lightweight parent for profile-router delegation without constructing ``AIAgent``."""
+    return RouterDelegateParentStub(
+        enabled_toolsets=enabled_toolsets,
+        model=model,
+        runtime=runtime if isinstance(runtime, dict) else {},
+        platform=platform,
+        session_db=session_db,
+        reasoning_config=reasoning_config,
+        providers_allowed=providers_allowed,
+        providers_ignored=providers_ignored,
+        providers_order=providers_order,
+        provider_sort=provider_sort,
+        tool_progress_callback=tool_progress_callback,
+        prefill_messages=prefill_messages,
+        on_delegate_child_model=on_delegate_child_model,
+    )
+
+
+def build_router_delegate_parent_stub_for_cli(
+    cli: Any,
+    *,
+    turn_route: Dict[str, Any],
+    on_delegate_child_model: Optional[Callable[[str], None]] = None,
+) -> RouterDelegateParentStub:
+    """Build a stub from ``HermesCLI`` + ``_resolve_turn_agent_config`` output."""
+    rt = turn_route.get("runtime") if isinstance(turn_route, dict) else None
+    if not isinstance(rt, dict):
+        rt = {}
+    return build_router_delegate_parent_stub(
+        enabled_toolsets=list(getattr(cli, "enabled_toolsets", None) or []),
+        model=str(turn_route.get("model") or getattr(cli, "model", "") or ""),
+        runtime=rt,
+        platform="cli",
+        session_db=getattr(cli, "_session_db", None),
+        reasoning_config=getattr(cli, "reasoning_config", None),
+        providers_allowed=getattr(cli, "_providers_only", None),
+        providers_ignored=getattr(cli, "_providers_ignore", None),
+        providers_order=getattr(cli, "_providers_order", None),
+        provider_sort=getattr(cli, "_provider_sort", None),
+        tool_progress_callback=getattr(cli, "_on_tool_progress", None),
+        prefill_messages=getattr(cli, "prefill_messages", None),
+        on_delegate_child_model=on_delegate_child_model,
+    )
 
 
 def _profiles_root() -> Path:
@@ -195,6 +349,8 @@ def _call_profile_router_llm(
 
     if explicit_p == "huggingface" and explicit_m:
         try:
+            _set_router_telemetry("hf_inference_pinned", explicit_m)
+            logger.info("profile_router: HF inference (pinned) model=%s", explicit_m)
             return call_llm(provider="huggingface", model=explicit_m, **kwargs)
         except Exception as exc:
             logger.warning(
@@ -209,6 +365,12 @@ def _call_profile_router_llm(
         pol_use = pol if pol in ("fastest", "cheapest", "preferred") else None
         routed_mid = apply_hf_inference_policy(mid, pol_use)
         try:
+            _set_router_telemetry("hf_inference_policy", routed_mid)
+            logger.info(
+                "profile_router: HF Inference Providers route (policy=%s) model=%s",
+                pol_use or "none",
+                routed_mid,
+            )
             return call_llm(provider="huggingface", model=routed_mid, **kwargs)
         except Exception as exc:
             logger.warning(
@@ -227,6 +389,12 @@ def _call_profile_router_llm(
             router_model=router_model,
             tiers=tiers,
         )
+        _set_router_telemetry("hf_kimi_tier_pick", picked)
+        logger.info(
+            "profile_router: Kimi router model=%s → picked hub id=%s for classification JSON",
+            router_model,
+            picked,
+        )
         return call_llm(provider="huggingface", model=picked, **kwargs)
 
     raise RuntimeError(
@@ -243,6 +411,7 @@ def classify_profile_for_prompt(
     router_cfg: Dict[str, Any],
 ) -> Tuple[Optional[str], float, str]:
     """Call auxiliary LLM; return (target_profile or None, confidence, reason)."""
+    clear_profile_router_telemetry()
     if not candidates:
         return None, 0.0, "no profiles"
     threshold = float(router_cfg.get("confidence_threshold") or 0.72)
@@ -275,6 +444,7 @@ def classify_profile_for_prompt(
         threshold=threshold,
     )
     if kw and kw[0]:
+        _set_router_telemetry("keyword_heuristic", "keyword")
         return kw[0], kw[1], kw[2]
 
     system = (
@@ -348,19 +518,27 @@ def route_and_delegate_if_configured(
     parent_agent: Any,
     agent_config: Dict[str, Any],
     current_profile: str,
+    precomputed: Optional[Tuple[Optional[str], float, str]] = None,
 ) -> Optional[str]:
-    """If routing applies, run delegate_task and return markdown for the user; else None."""
+    """If routing applies, run delegate_task and return markdown for the user; else None.
+
+    Pass *precomputed* from an earlier ``classify_profile_for_prompt`` call to avoid a
+    second classification (and to allow a lightweight ``RouterDelegateParentStub``).
+    """
     router_cfg = agent_config if isinstance(agent_config, dict) else {}
     if not router_cfg.get("enabled"):
         return None
 
-    candidates = list_routable_profile_names()
-    target, conf, reason = classify_profile_for_prompt(
-        user_message,
-        candidates=candidates,
-        current_profile=current_profile,
-        router_cfg=router_cfg,
-    )
+    if precomputed is not None:
+        target, conf, reason = precomputed
+    else:
+        candidates = list_routable_profile_names()
+        target, conf, reason = classify_profile_for_prompt(
+            user_message,
+            candidates=candidates,
+            current_profile=current_profile,
+            router_cfg=router_cfg,
+        )
     if not target:
         return None
 

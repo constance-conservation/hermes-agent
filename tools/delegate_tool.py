@@ -296,6 +296,15 @@ def _run_single_child(
     """
     child_start = time.monotonic()
 
+    if parent_agent is not None and child is not None:
+        _dcb = getattr(parent_agent, "on_delegate_child_model", None)
+        if callable(_dcb):
+            try:
+                _m = getattr(child, "model", None)
+                _dcb(_m if isinstance(_m, str) else str(_m or ""))
+            except Exception:
+                logger.debug("on_delegate_child_model callback failed", exc_info=True)
+
     # Get the progress callback from the child agent
     child_progress_cb = getattr(child, 'tool_progress_callback', None)
 

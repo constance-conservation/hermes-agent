@@ -1389,6 +1389,8 @@ class HermesCLI:
 
         # Status bar visibility (toggled via /statusbar)
         self._status_bar_visible = True
+        # When profile-router / delegation uses a different model than ``self.agent`` (chief).
+        self._status_bar_model_override: Optional[str] = None
 
         # Background task tracking: {task_id: threading.Thread}
         self._background_tasks: Dict[str, threading.Thread] = {}
@@ -1420,7 +1422,10 @@ class HermesCLI:
 
     def _get_status_bar_snapshot(self) -> Dict[str, Any]:
         agent = getattr(self, "agent", None)
-        if agent and getattr(agent, "model", None):
+        _ov = getattr(self, "_status_bar_model_override", None)
+        if isinstance(_ov, str) and _ov.strip():
+            model_name = _ov.strip()
+        elif agent and getattr(agent, "model", None):
             model_name = agent.model
         else:
             model_name = self.model or "unknown"
@@ -6288,7 +6293,100 @@ class HermesCLI:
         if turn_route["signature"] != self._active_agent_route_signature:
             self.agent = None
 
-        # Initialize agent if needed
+        self._status_bar_model_override = None
+        pr_cfg = (self.config.get("agent") or {}).get("profile_router") or {}
+        pr_precomputed = None
+        profile_router_stub_attempted = False
+        if isinstance(message, str) and pr_cfg.get("enabled"):
+            try:
+                from agent.profile_router import (
+                    classify_profile_for_prompt,
+                    get_profile_router_telemetry,
+                    list_routable_profile_names,
+                )
+                from hermes_cli.profiles import get_active_profile_name
+
+                pr_precomputed = classify_profile_for_prompt(
+                    message,
+                    candidates=list_routable_profile_names(),
+                    current_profile=get_active_profile_name(),
+                    router_cfg=pr_cfg,
+                )
+                _mid, _st = get_profile_router_telemetry()
+                if _mid:
+                    self._status_bar_model_override = f"route:{_mid.split('/')[-1]}"
+                elif _st == "keyword_heuristic":
+                    self._status_bar_model_override = "route:keyword"
+                self._invalidate(min_interval=0.0)
+            except Exception as exc:
+                logging.debug("profile_router early classify: %s", exc)
+                pr_precomputed = None
+
+        routed_resp = None
+        if isinstance(message, str) and pr_precomputed and pr_precomputed[0]:
+            profile_router_stub_attempted = True
+            try:
+                from agent.profile_router import (
+                    build_router_delegate_parent_stub_for_cli,
+                    route_and_delegate_if_configured,
+                )
+                from hermes_cli.profiles import get_active_profile_name
+
+                def _child_model(m: str) -> None:
+                    short = (m.split("/")[-1] if "/" in m else m) if m else ""
+                    self._status_bar_model_override = (
+                        f"delegate:{short}" if short else "delegate"
+                    )
+                    self._invalidate(min_interval=0.0)
+
+                stub = build_router_delegate_parent_stub_for_cli(
+                    self,
+                    turn_route=turn_route,
+                    on_delegate_child_model=_child_model,
+                )
+                routed_resp = route_and_delegate_if_configured(
+                    user_message=message,
+                    parent_agent=stub,
+                    agent_config=pr_cfg,
+                    current_profile=get_active_profile_name(),
+                    precomputed=pr_precomputed,
+                )
+            except Exception as exc:
+                logging.debug("profile_router stub delegate: %s", exc)
+                routed_resp = None
+
+        if routed_resp is not None:
+            self.conversation_history.append({"role": "user", "content": message})
+            self.conversation_history.append({"role": "assistant", "content": routed_resp})
+            ChatConsole().print(f"[{_accent_hex()}]{'─' * 40}[/]")
+            print(flush=True)
+            try:
+                from hermes_cli.skin_engine import get_active_skin
+                _skin = get_active_skin()
+                label = _skin.get_branding("response_label", "⚕ Hermes")
+                _resp_color = _skin.get_color("response_border", "#CD7F32")
+                _resp_text = _skin.get_color("banner_text", "#FFF8DC")
+            except Exception:
+                label = "⚕ Hermes"
+                _resp_color = "#CD7F32"
+                _resp_text = "#FFF8DC"
+            _cc_route = ChatConsole()
+            _cc_route.print(Panel(
+                _rich_text_from_ansi(routed_resp),
+                title=f"[{_resp_color} bold]{label}[/]",
+                title_align="left",
+                border_style=_resp_color,
+                style=_resp_text,
+                box=rich_box.HORIZONTALS,
+                padding=(1, 2),
+            ))
+            if self.bell_on_complete:
+                sys.stdout.write("\a")
+                sys.stdout.flush()
+            self._invalidate(min_interval=0.0)
+            return routed_resp
+
+        # Initialize agent if needed (chief path, or stub delegate failed)
         if self.agent is None:
             _cprint(f"{_DIM}Initializing agent...{_RST}")
         if not self._init_agent(
@@ -6297,7 +6395,9 @@ class HermesCLI:
             route_label=turn_route["label"],
         ):
             return None
-        
+
+        self._status_bar_model_override = None
+
         # Pre-process images through the vision tool (Gemini Flash) so the
         # main model receives text descriptions instead of raw base64 image
         # content — works with any model, not just vision-capable ones.
@@ -6336,22 +6436,26 @@ class HermesCLI:
             message = _sanitize_surrogates(message)
 
         routed_resp = None
-        if isinstance(message, str) and self.agent is not None:
-            pr_cfg = (self.config.get("agent") or {}).get("profile_router") or {}
-            if pr_cfg.get("enabled"):
-                try:
-                    from agent.profile_router import route_and_delegate_if_configured
-                    from hermes_cli.profiles import get_active_profile_name
+        if (
+            isinstance(message, str)
+            and self.agent is not None
+            and pr_cfg.get("enabled")
+            and not profile_router_stub_attempted
+        ):
+            try:
+                from agent.profile_router import route_and_delegate_if_configured
+                from hermes_cli.profiles import get_active_profile_name
 
-                    routed_resp = route_and_delegate_if_configured(
-                        user_message=message,
-                        parent_agent=self.agent,
-                        agent_config=pr_cfg,
-                        current_profile=get_active_profile_name(),
-                    )
-                except Exception as exc:
-                    logging.debug("profile_router skipped: %s", exc)
-                    routed_resp = None
+                routed_resp = route_and_delegate_if_configured(
+                    user_message=message,
+                    parent_agent=self.agent,
+                    agent_config=pr_cfg,
+                    current_profile=get_active_profile_name(),
+                    precomputed=pr_precomputed,
+                )
+            except Exception as exc:
+                logging.debug("profile_router skipped: %s", exc)
+                routed_resp = None
 
         if routed_resp is not None:
             self.conversation_history.append({"role": "user", "content": message})
@@ -6381,6 +6485,7 @@ class HermesCLI:
             if self.bell_on_complete:
                 sys.stdout.write("\a")
                 sys.stdout.flush()
+            self._invalidate(min_interval=0.0)
             return routed_resp
 
         # Add user message to history

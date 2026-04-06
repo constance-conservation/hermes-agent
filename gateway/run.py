@@ -5759,6 +5759,7 @@ class GatewayRunner:
             # Pass session_key to process registry via env var so background
             # processes can be mapped back to this gateway session
             os.environ["HERMES_SESSION_KEY"] = session_key or ""
+            profile_router_stub_attempted = False
 
             # Read from env var or use default (same as CLI)
             max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
@@ -5796,6 +5797,22 @@ class GatewayRunner:
                 load_dotenv(_env_path, override=True, encoding="latin-1")
             except Exception:
                 pass
+
+            pr_precomputed = None
+            _pr_cfg_early = (user_config.get("agent") or {}).get("profile_router") or {}
+            if isinstance(message, str) and _pr_cfg_early.get("enabled"):
+                try:
+                    from agent.profile_router import classify_profile_for_prompt, list_routable_profile_names
+                    from hermes_cli.profiles import get_active_profile_name
+
+                    pr_precomputed = classify_profile_for_prompt(
+                        message,
+                        candidates=list_routable_profile_names(),
+                        current_profile=get_active_profile_name(),
+                        router_cfg=_pr_cfg_early,
+                    )
+                except Exception as _pr_early_exc:
+                    logger.debug("profile_router early classify: %s", _pr_early_exc)
 
             model = _resolve_gateway_model(user_config)
 
@@ -5863,6 +5880,99 @@ class GatewayRunner:
                     logger.debug("Could not set up stream consumer: %s", _sc_err)
 
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
+
+            # Convert history to agent format (needed for profile-router delegate return and
+            # run_conversation; does not depend on AIAgent).
+            agent_history = []
+            for msg in history:
+                role = msg.get("role")
+                if not role:
+                    continue
+
+                if role in ("session_meta",):
+                    continue
+
+                if role == "system":
+                    continue
+
+                has_tool_calls = "tool_calls" in msg
+                has_tool_call_id = "tool_call_id" in msg
+                is_tool_message = role == "tool"
+
+                if has_tool_calls or has_tool_call_id or is_tool_message:
+                    clean_msg = {k: v for k, v in msg.items() if k != "timestamp"}
+                    agent_history.append(clean_msg)
+                else:
+                    content = msg.get("content")
+                    if content:
+                        if msg.get("mirror"):
+                            mirror_src = msg.get("mirror_source", "another session")
+                            content = f"[Delivered from {mirror_src}] {content}"
+                        entry = {"role": role, "content": content}
+                        if role == "assistant":
+                            for _rkey in ("reasoning", "reasoning_details",
+                                          "codex_reasoning_items"):
+                                _rval = msg.get(_rkey)
+                                if _rval:
+                                    entry[_rkey] = _rval
+                        agent_history.append(entry)
+
+            routed_early = None
+            _pr_cfg = (user_config.get("agent") or {}).get("profile_router") or {}
+            if (
+                isinstance(message, str)
+                and _pr_cfg.get("enabled")
+                and pr_precomputed
+                and pr_precomputed[0]
+            ):
+                profile_router_stub_attempted = True
+                try:
+                    from agent.profile_router import (
+                        build_router_delegate_parent_stub,
+                        route_and_delegate_if_configured,
+                    )
+                    from hermes_cli.profiles import get_active_profile_name
+
+                    _prov = self._provider_routing
+                    stub = build_router_delegate_parent_stub(
+                        enabled_toolsets=enabled_toolsets,
+                        model=turn_route["model"],
+                        runtime=turn_route["runtime"],
+                        platform=platform_key,
+                        session_db=self._session_db,
+                        reasoning_config=reasoning_config,
+                        providers_allowed=_prov.get("only"),
+                        providers_ignored=_prov.get("ignore"),
+                        providers_order=_prov.get("order"),
+                        provider_sort=_prov.get("sort"),
+                        tool_progress_callback=progress_callback if tool_progress_enabled else None,
+                        prefill_messages=self._prefill_messages or None,
+                    )
+                    routed_early = route_and_delegate_if_configured(
+                        user_message=message,
+                        parent_agent=stub,
+                        agent_config=_pr_cfg,
+                        current_profile=get_active_profile_name(),
+                        precomputed=pr_precomputed,
+                    )
+                except Exception as _stub_exc:
+                    logger.debug("profile_router gateway stub delegate: %s", _stub_exc)
+                    routed_early = None
+                if routed_early is not None:
+                    result_holder[0] = {
+                        "final_response": routed_early,
+                        "messages": agent_history
+                        + [
+                            {"role": "user", "content": message},
+                            {"role": "assistant", "content": routed_early},
+                        ],
+                        "api_calls": 0,
+                        "completed": True,
+                        "failed": False,
+                    }
+                    if _stream_consumer is not None:
+                        _stream_consumer.finish()
+                    return result_holder[0]
 
             # Check agent cache — reuse the AIAgent from the previous message
             # in this session to preserve the frozen system prompt and tool
@@ -5944,66 +6054,13 @@ class GatewayRunner:
             agent_holder[0] = agent
             # Capture the full tool definitions for transcript logging
             tools_holder[0] = agent.tools if hasattr(agent, 'tools') else None
-            
-            # Convert history to agent format.
-            # Two cases:
-            #   1. Normal path (from transcript): simple {role, content, timestamp} dicts
-            #      - Strip timestamps, keep role+content
-            #   2. Interrupt path (from agent result["messages"]): full agent messages
-            #      that may include tool_calls, tool_call_id, reasoning, etc.
-            #      - These must be passed through intact so the API sees valid
-            #        assistant→tool sequences (dropping tool_calls causes 500 errors)
-            agent_history = []
-            for msg in history:
-                role = msg.get("role")
-                if not role:
-                    continue
-                
-                # Skip metadata entries (tool definitions, session info)
-                # -- these are for transcript logging, not for the LLM
-                if role in ("session_meta",):
-                    continue
-                
-                # Skip system messages -- the agent rebuilds its own system prompt
-                if role == "system":
-                    continue
-                
-                # Rich agent messages (tool_calls, tool results) must be passed
-                # through intact so the API sees valid assistant→tool sequences
-                has_tool_calls = "tool_calls" in msg
-                has_tool_call_id = "tool_call_id" in msg
-                is_tool_message = role == "tool"
-                
-                if has_tool_calls or has_tool_call_id or is_tool_message:
-                    clean_msg = {k: v for k, v in msg.items() if k != "timestamp"}
-                    agent_history.append(clean_msg)
-                else:
-                    # Simple text message - just need role and content
-                    content = msg.get("content")
-                    if content:
-                        # Tag cross-platform mirror messages so the agent knows their origin
-                        if msg.get("mirror"):
-                            mirror_src = msg.get("mirror_source", "another session")
-                            content = f"[Delivered from {mirror_src}] {content}"
-                        entry = {"role": role, "content": content}
-                        # Preserve reasoning fields on assistant messages so
-                        # multi-turn reasoning context survives session reload.
-                        # The agent's _build_api_kwargs converts these to the
-                        # provider-specific format (reasoning_content, etc.).
-                        if role == "assistant":
-                            for _rkey in ("reasoning", "reasoning_details",
-                                          "codex_reasoning_items"):
-                                _rval = msg.get(_rkey)
-                                if _rval:
-                                    entry[_rkey] = _rval
-                        agent_history.append(entry)
-            
+
             # CLI profile router parity: optional delegate to another Hermes profile before
             # the main loop (same config as agent.profile_router).
             routed_resp = None
-            if isinstance(message, str):
-                _pr_cfg = (user_config.get("agent") or {}).get("profile_router") or {}
-                if _pr_cfg.get("enabled"):
+            if isinstance(message, str) and not profile_router_stub_attempted:
+                _pr_cfg2 = (user_config.get("agent") or {}).get("profile_router") or {}
+                if _pr_cfg2.get("enabled"):
                     try:
                         from agent.profile_router import route_and_delegate_if_configured
                         from hermes_cli.profiles import get_active_profile_name
@@ -6011,8 +6068,9 @@ class GatewayRunner:
                         routed_resp = route_and_delegate_if_configured(
                             user_message=message,
                             parent_agent=agent,
-                            agent_config=_pr_cfg,
+                            agent_config=_pr_cfg2,
                             current_profile=get_active_profile_name(),
+                            precomputed=pr_precomputed,
                         )
                     except Exception as _pr_exc:
                         logger.debug("profile_router skipped: %s", _pr_exc)

@@ -91,6 +91,30 @@ def test_classify_returns_error_when_profile_router_llm_raises(_mock_extract, _m
 @patch("agent.profile_router.list_routable_profile_names", return_value=["worker"])
 @patch("agent.profile_router._call_profile_router_llm")
 @patch("agent.auxiliary_client.extract_content_or_reasoning")
+def test_route_and_delegate_uses_precomputed_skips_classify(mock_extract, mock_pr_llm, _lr):
+    from agent.profile_router import classify_profile_for_prompt, route_and_delegate_if_configured
+
+    mock_pr_llm.return_value = object()
+    mock_extract.return_value = '{"profile": "worker", "confidence": 0.99, "reason": "ok"}'
+
+    parent = MagicMock()
+    with patch("tools.delegate_tool.delegate_task") as dt:
+        dt.return_value = '{"results": [{"summary": "done"}], "total_duration_seconds": 1}'
+        out = route_and_delegate_if_configured(
+            user_message="x",
+            parent_agent=parent,
+            agent_config={"enabled": True, "confidence_threshold": 0.5, "min_message_chars": 3},
+            current_profile="chief-orchestrator",
+            precomputed=("worker", 0.99, "ok"),
+        )
+        assert out is not None
+        dt.assert_called_once()
+    mock_pr_llm.assert_not_called()
+
+
+@patch("agent.profile_router.list_routable_profile_names", return_value=["worker"])
+@patch("agent.profile_router._call_profile_router_llm")
+@patch("agent.auxiliary_client.extract_content_or_reasoning")
 def test_route_and_delegate_calls_delegate(mock_extract, mock_pr_llm, _lr):
     from agent.profile_router import route_and_delegate_if_configured
 
