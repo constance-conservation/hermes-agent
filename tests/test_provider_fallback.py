@@ -10,6 +10,20 @@ from unittest.mock import MagicMock, patch
 from run_agent import AIAgent
 
 
+def _sample_free_routing_config():
+    return {
+        "fallback_providers": None,
+        "free_model_routing": {
+            "enabled": True,
+            "inference": {"model": "test/inference", "policy": "fastest"},
+            "kimi_router": {
+                "router_model": "test/router",
+                "tiers": [{"id": "t0", "models": ["test/a", "test/b"]}],
+            },
+        },
+    }
+
+
 def _make_agent(fallback_model=None):
     """Create a minimal AIAgent with optional fallback config."""
     with (
@@ -39,11 +53,17 @@ def _mock_client(base_url="https://openrouter.ai/api/v1", api_key="fb-key"):
 
 
 class TestFallbackChainInit:
-    def test_no_fallback(self):
+    @patch("hermes_cli.config.load_config", return_value=_sample_free_routing_config())
+    def test_no_fallback(self, _mock_lc):
         agent = _make_agent(fallback_model=None)
-        assert agent._fallback_chain == []
+        # Omitted fallback_model: synthesized from free_model_routing (HF inference → Kimi tiers).
+        assert len(agent._fallback_chain) == 2
+        assert agent._fallback_chain[0]["provider"] == "huggingface"
+        assert agent._fallback_chain[0].get("hf_inference_policy") == "fastest"
+        assert agent._fallback_chain[1]["provider"] == "huggingface"
+        assert agent._fallback_chain[1].get("hf_router") is True
         assert agent._fallback_index == 0
-        assert agent._fallback_model is None
+        assert agent._fallback_model == agent._fallback_chain[0]
 
     def test_single_dict_backwards_compat(self):
         fb = {"provider": "openai", "model": "gpt-4o"}
@@ -86,7 +106,7 @@ class TestFallbackChainInit:
 
 class TestFallbackChainAdvancement:
     def test_exhausted_returns_false(self):
-        agent = _make_agent(fallback_model=None)
+        agent = _make_agent(fallback_model=[])
         assert agent._try_activate_fallback() is False
 
     def test_advances_index(self):

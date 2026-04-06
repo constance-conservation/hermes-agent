@@ -51,6 +51,8 @@ def test_apply_downgrades_model_and_caps_iterations(gov_env):
             {
                 "enabled": True,
                 "default_model": "cheap/model",
+                # Override builtin Tier B so blocklist replacement matches test expectation.
+                "tier_models": {"B": "cheap/model"},
                 "blocked_model_substrings": ["opus"],
                 "max_agent_turns": 12,
                 "delegation_max_iterations": 7,
@@ -140,6 +142,36 @@ def test_tier_sentinel_resolves_on_agent(gov_env):
     a = _A()
     apply_token_governance_runtime(a)
     assert a.model == "google/gemini-2.5-flash"
+
+
+def test_resolve_tier_strings_without_runtime_file_uses_builtin_tiers(gov_env, monkeypatch):
+    """When governance YAML is absent, tier:X still resolves via BUILTIN_TIER_MODELS."""
+    monkeypatch.delenv("HERMES_TOKEN_GOVERNANCE_DISABLE", raising=False)
+    assert load_runtime_config() is None
+    out = resolve_tier_strings_in_config({"model": {"default": "tier:D", "provider": "openrouter"}})
+    assert out["model"]["default"] == "google/gemini-2.5-flash"
+
+
+def test_apply_runtime_resolves_tier_when_governance_disabled(gov_env, monkeypatch):
+    """apply_token_governance_runtime must not return before resolving tier:X when YAML missing."""
+    monkeypatch.delenv("HERMES_TOKEN_GOVERNANCE_DISABLE", raising=False)
+    assert load_runtime_config() is None
+
+    class _A:
+        def __init__(self):
+            self.model = "tier:D"
+            self.max_iterations = 90
+            self.skip_context_files = False
+            self.api_mode = "chat_completions"
+            self._base_url_lower = "https://openrouter.ai/api/v1"
+
+        def _is_openrouter_url(self):
+            return True
+
+    a = _A()
+    apply_token_governance_runtime(a)
+    assert a.model == "google/gemini-2.5-flash"
+    assert getattr(a, "_token_governance_cfg", None) is None
 
 
 def test_resolve_tier_strings_in_config(gov_env):

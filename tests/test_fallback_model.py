@@ -59,7 +59,9 @@ def _mock_resolve(base_url="https://openrouter.ai/api/v1", api_key="test-key"):
 
 class TestTryActivateFallback:
     def test_returns_false_when_not_configured(self):
-        agent = _make_agent(fallback_model=None)
+        # Explicit opt-out of synthesized free_model_routing (DEFAULT_CONFIG may enable it).
+        with patch("hermes_cli.config.load_config", return_value={"fallback_providers": []}):
+            agent = _make_agent(fallback_model=None)
         assert agent._try_activate_fallback() is False
         assert agent._fallback_activated is False
 
@@ -335,9 +337,25 @@ class TestFallbackInit:
         assert agent._fallback_model["provider"] == "openrouter"
         assert agent._fallback_activated is False
 
-    def test_fallback_none_when_not_configured(self):
+    @patch(
+        "hermes_cli.config.load_config",
+        return_value={
+            "fallback_providers": None,
+            "free_model_routing": {
+                "enabled": True,
+                "inference": {"model": "test/inf", "policy": "fastest"},
+                "kimi_router": {
+                    "router_model": "test/router",
+                    "tiers": [{"models": ["test/a"]}],
+                },
+            },
+        },
+    )
+    def test_fallback_defaults_when_not_configured(self, _mock_lc):
         agent = _make_agent(fallback_model=None)
-        assert agent._fallback_model is None
+        assert agent._fallback_model is not None
+        assert agent._fallback_model["provider"] == "huggingface"
+        assert len(agent._fallback_chain) == 2
         assert agent._fallback_activated is False
 
     def test_fallback_none_for_non_dict(self):

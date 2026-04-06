@@ -14,6 +14,19 @@ from typing import Any, Dict, Optional
 TIER_SENTINEL_RE = re.compile(r"^tier:([A-Fa-f])$")
 TIER_DYNAMIC_SENTINEL = "tier:dynamic"
 
+# When ``workspace/operations/hermes_token_governance.runtime.yaml`` is missing or
+# ``tier_models`` omits a letter, OpenRouter must never receive a literal ``tier:X``.
+# User YAML overrides these defaults per key; align with
+# ``scripts/templates/hermes_token_governance.runtime.example.yaml``.
+BUILTIN_TIER_MODELS: Dict[str, str] = {
+    "A": "google/gemini-2.5-flash",
+    "B": "google/gemini-2.5-flash-lite",
+    "C": "deepseek/deepseek-r1",
+    "D": "google/gemini-2.5-flash",
+    "E": "google/gemini-2.5-pro",
+    "F": "google/gemini-3-pro-preview",
+}
+
 
 def is_tier_dynamic(model: Optional[str]) -> bool:
     """True when config should pick a tier per prompt from ``tier_models`` + heuristics."""
@@ -65,9 +78,7 @@ def resolve_tier_dynamic_model(
         cfg = load_runtime_config()
     if not cfg or not cfg.get("enabled", False):
         return None
-    tm = normalize_tier_models(cfg.get("tier_models"))
-    if not tm:
-        return None
+    tm = effective_tier_models(cfg.get("tier_models"))
     tier = select_tier_for_message(user_text or "", cfg)
     return tm.get(tier)
 
@@ -84,23 +95,32 @@ def normalize_tier_models(raw: Any) -> Dict[str, str]:
     return out
 
 
+def effective_tier_models(raw: Any) -> Dict[str, str]:
+    """Merge governance ``tier_models`` with :data:`BUILTIN_TIER_MODELS` (user wins)."""
+    merged = dict(BUILTIN_TIER_MODELS)
+    merged.update(normalize_tier_models(raw))
+    return merged
+
+
 def resolve_tier_placeholder(
     model: Optional[str],
-    tier_models: Dict[str, str],
+    tier_models: Optional[Dict[str, str]],
     *,
     fallback_tier: str = "D",
 ) -> str:
-    """If *model* is ``tier:X``, return ``tier_models[X]``; else return *model*."""
+    """If *model* is ``tier:X``, return a concrete slug; else return *model*."""
+    merged = effective_tier_models(tier_models or {})
     if not model:
-        return tier_models.get(fallback_tier.upper(), "") or ""
+        return merged.get(fallback_tier.upper(), "") or merged.get("D", "")
     m = TIER_SENTINEL_RE.match(str(model).strip())
     if not m:
         return str(model).strip()
     tier = m.group(1).upper()
-    resolved = tier_models.get(tier)
-    if resolved:
-        return resolved
-    return tier_models.get(fallback_tier.upper(), "") or str(model).strip()
+    fb = fallback_tier.upper() if len(str(fallback_tier).strip()) == 1 else "D"
+    if fb not in "ABCDEF":
+        fb = "D"
+    resolved = merged.get(tier) or merged.get(fb) or merged.get("D")
+    return resolved or merged["D"]
 
 
 def _chief_default_letter(cfg: Dict[str, Any]) -> str:

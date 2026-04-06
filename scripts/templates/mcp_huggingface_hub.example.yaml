@@ -1,0 +1,18 @@
+# Optional: Hugging Face Hub MCP (models, datasets, Spaces, docs — NOT the Hugging Chat web UI).
+# Merge the ``mcp_servers`` block into ~/.hermes/config.yaml (or a profile's config).
+#
+# Official setup: https://huggingface.co/docs/hub/agents-mcp
+# Settings UI (snippets per client): https://huggingface.co/settings/mcp
+#
+# Hermes loads MCP from config via tools/mcp_tool.py (HTTP transport: url + headers).
+# Use a fine-grained token with "Make calls to Inference Providers" / MCP as required by HF.
+#
+# If your config uses ${HF_TOKEN}, ensure hermes_cli.config load_config expands it (merge into profile .env + top-level .env).
+
+mcp_servers:
+  huggingface_hub:
+    url: "https://huggingface.co/mcp"
+    headers:
+      Authorization: "Bearer ${HF_TOKEN}"
+    timeout: 120
+    connect_timeout: 60

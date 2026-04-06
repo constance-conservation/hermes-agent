@@ -99,18 +99,38 @@ delegation:
   provider: openrouter
   model: tier:dynamic
 
-# Rate-limit fallback: hosted Gemma 4 on the Gemini API (not OpenRouter). Uses GEMINI_API_KEY
-# from this profile’s .env (same key as AI Studio). Official model id: gemma-4-31b-it
-# (see https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api ).
-# only_rate_limit: switch to fallback only on 429 / quota-style errors (not auth or payload errors).
-# restore_health_check: each new turn probes the primary with health_check_message (default "ping");
-# if the primary still rate-limits, stay on Gemma until the probe succeeds.
-fallback_model:
-  provider: gemini
-  model: gemma-4-31b-it
-  only_rate_limit: true
-  restore_health_check: true
-  health_check_message: "ping"
+# Free-model pipeline when paid/OpenRouter paths fail (do not set legacy ``fallback_model`` here —
+# it overrides this entire chain). Order: HF Inference Providers → Kimi tiered router → optional Gemini.
+# MiniMax-M2.5: https://huggingface.co/MiniMaxAI/MiniMax-M2.5 (HF_TOKEN / Hugging Face Inference Providers).
+# Gemma on Gemini API: https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api
+free_model_routing:
+  enabled: true
+  inference:
+    model: MiniMaxAI/MiniMax-M2.5
+    policy: fastest
+  kimi_router:
+    router_model: moonshotai/Kimi-K2-Thinking
+    tiers:
+      - id: general
+        description: "General and multimodal"
+        models:
+          - MiniMaxAI/MiniMax-M2.5
+          - google/gemma-3-27b-it
+      - id: reasoning
+        description: "Heavy reasoning, math, and code"
+        models:
+          - deepseek-ai/DeepSeek-R1
+          - openai/gpt-oss-120b
+          - Qwen/QwQ-32B
+      - id: router_thinking
+        description: "Long CoT and agentic tasks"
+        models:
+          - moonshotai/Kimi-K2-Thinking
+  optional_gemini:
+    enabled: true
+    model: gemma-4-31b-it
+    only_rate_limit: true
+    restore_health_check: true
 
 # Gateway watchdog (`hermes gateway watchdog-check`, scripts/core/gateway-watchdog.sh):
 # when true, every configured messaging platform (Slack, Telegram, WhatsApp, …) must be

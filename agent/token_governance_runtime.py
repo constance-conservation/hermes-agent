@@ -60,22 +60,19 @@ def load_runtime_config() -> Optional[Dict[str, Any]]:
 def resolve_tier_strings_in_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Replace ``tier:X`` string values in *config* using runtime ``tier_models``."""
     cfg = load_runtime_config()
-    if not cfg:
-        return config
     from agent.tier_model_routing import (
-        normalize_tier_models,
+        effective_tier_models,
         resolve_tier_placeholder,
         TIER_SENTINEL_RE,
         is_tier_dynamic,
     )
 
-    tier_models = normalize_tier_models(cfg.get("tier_models"))
-    if not tier_models:
-        return config
-
-    fb = str(cfg.get("chief_default_tier") or "D").strip().upper()
-    if len(fb) != 1 or fb not in "ABCDEF":
-        fb = "D"
+    tier_models = effective_tier_models((cfg or {}).get("tier_models"))
+    fb = "D"
+    if cfg:
+        fb = str(cfg.get("chief_default_tier") or "D").strip().upper()
+        if len(fb) != 1 or fb not in "ABCDEF":
+            fb = "D"
 
     out = copy.deepcopy(config)
 
@@ -101,23 +98,38 @@ def resolve_tier_strings_in_config(config: Dict[str, Any]) -> Dict[str, Any]:
 def apply_token_governance_runtime(agent: Any) -> None:
     """Apply governance caps to a freshly constructed ``AIAgent`` (mutates in place)."""
     cfg = load_runtime_config()
-    if not cfg:
-        return
-
-    agent._token_governance_cfg = cfg
 
     from agent.tier_model_routing import (
-        normalize_tier_models,
+        effective_tier_models,
         resolve_tier_placeholder,
         TIER_SENTINEL_RE,
         is_tier_dynamic,
         infer_tier_letter_for_model,
     )
 
-    tier_models = normalize_tier_models(cfg.get("tier_models"))
-    chief_tier = str(cfg.get("chief_default_tier") or cfg.get("default_tier") or "D").strip().upper()
-    if len(chief_tier) != 1 or chief_tier not in "ABCDEF":
-        chief_tier = "D"
+    tier_models = effective_tier_models((cfg or {}).get("tier_models"))
+    chief_tier = "D"
+    if cfg:
+        chief_tier = str(cfg.get("chief_default_tier") or cfg.get("default_tier") or "D").strip().upper()
+        if len(chief_tier) != 1 or chief_tier not in "ABCDEF":
+            chief_tier = "D"
+
+    if not cfg:
+        agent._token_governance_cfg = None
+        # Still resolve ``tier:X`` so providers never see a literal sentinel when
+        # governance YAML is missing or disabled.
+        if agent.model and TIER_SENTINEL_RE.match(str(agent.model).strip()):
+            agent.model = resolve_tier_placeholder(agent.model, tier_models, fallback_tier=chief_tier)
+        try:
+            is_openrouter = agent._is_openrouter_url()
+            is_claude = "claude" in (agent.model or "").lower()
+            is_native_anthropic = agent.api_mode == "anthropic_messages"
+            agent._use_prompt_caching = (is_openrouter and is_claude) or is_native_anthropic
+        except Exception:
+            logger.debug("token governance: could not refresh prompt caching flags", exc_info=True)
+        return
+
+    agent._token_governance_cfg = cfg
 
     # Resolve tier: sentinel on agent.model before blocklist logic (fixed letter → slug).
     # tier:dynamic is left as-is until apply_per_turn_tier_model (per user message).
@@ -249,16 +261,16 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
         resolve_consultant_tier,
     )
     from agent.tier_model_routing import (
-        normalize_tier_models,
+        effective_tier_models,
         should_apply_per_turn_routing,
         select_tier_for_message,
         is_tier_dynamic,
     )
 
     cfg = getattr(agent, "_token_governance_cfg", None) or load_runtime_config()
-    tier_models = normalize_tier_models((cfg or {}).get("tier_models")) if cfg else {}
-    if not tier_models:
+    if not cfg:
         return
+    tier_models = effective_tier_models(cfg.get("tier_models"))
     cr_on = consultant_routing_enabled(cfg)
     # tier:dynamic, dynamic_tier_routing, or consultant_routing alone can trigger per-turn picks.
     if (

@@ -226,7 +226,49 @@ DEFAULT_CONFIG = {
     # Default inference model when config.yaml omits model.default (Google AI Studio
     # free tier). Provider is left unset so ``resolve_provider(auto)`` picks from API keys.
     "model": {"default": "gemini-2.5-flash"},
-    "fallback_providers": [],
+    "fallback_providers": None,
+    "free_model_routing": {
+        "enabled": True,
+        "inference": {
+            "model": "MiniMaxAI/MiniMax-M2.5",
+            "policy": "fastest",
+        },
+        "kimi_router": {
+            "router_model": "moonshotai/Kimi-K2-Thinking",
+            "tiers": [
+                {
+                    "id": "general",
+                    "description": "General and multimodal",
+                    "models": [
+                        "MiniMaxAI/MiniMax-M2.5",
+                        "google/gemma-3-27b-it",
+                    ],
+                },
+                {
+                    "id": "reasoning",
+                    "description": "Heavy reasoning, math, and code",
+                    "models": [
+                        "deepseek-ai/DeepSeek-R1",
+                        "openai/gpt-oss-120b",
+                        "Qwen/QwQ-32B",
+                    ],
+                },
+                {
+                    "id": "router_thinking",
+                    "description": "Long CoT and agentic tasks",
+                    "models": [
+                        "moonshotai/Kimi-K2-Thinking",
+                    ],
+                },
+            ],
+        },
+        "optional_gemini": {
+            "enabled": True,
+            "model": "gemma-4-31b-it",
+            "only_rate_limit": True,
+            "restore_health_check": True,
+        },
+    },
     "credential_pool_strategies": {},
     "toolsets": ["hermes-cli"],
     "agent": {
@@ -616,7 +658,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 16,
+    "_config_version": 17,
 }
 
 # =============================================================================
@@ -1520,6 +1562,74 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     )
         except Exception:
             pass
+
+    # ── Version 16 → 17: seed free_model_routing hub ids (three-layer free failsafe) ──
+    if current_ver < 17:
+        try:
+            import copy
+
+            path = get_config_path()
+            raw_user: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        raw_user = yaml.safe_load(f) or {}
+                except Exception:
+                    raw_user = {}
+            if not isinstance(raw_user, dict):
+                raw_user = {}
+            fmr = raw_user.get("free_model_routing")
+            if not isinstance(fmr, dict):
+                fmr = {}
+            dflt = copy.deepcopy(DEFAULT_CONFIG["free_model_routing"])
+            changed = False
+
+            inf = fmr.get("inference")
+            if not isinstance(inf, dict):
+                inf = {}
+            if not str(inf.get("model") or "").strip():
+                inf["model"] = dflt["inference"]["model"]
+                changed = True
+            if not str(inf.get("policy") or "").strip():
+                inf["policy"] = dflt["inference"]["policy"]
+            fmr["inference"] = inf
+
+            kr = fmr.get("kimi_router")
+            if not isinstance(kr, dict):
+                kr = {}
+            if not str(kr.get("router_model") or "").strip():
+                kr["router_model"] = dflt["kimi_router"]["router_model"]
+                changed = True
+            if not kr.get("tiers"):
+                kr["tiers"] = copy.deepcopy(dflt["kimi_router"]["tiers"])
+                changed = True
+            fmr["kimi_router"] = kr
+
+            og = fmr.get("optional_gemini")
+            if not isinstance(og, dict):
+                og = {}
+            if not str(og.get("model") or "").strip() and not og.get("enabled"):
+                fmr["optional_gemini"] = copy.deepcopy(dflt["optional_gemini"])
+                changed = True
+            elif not str(og.get("model") or "").strip() and og.get("enabled"):
+                og["model"] = dflt["optional_gemini"]["model"]
+                fmr["optional_gemini"] = og
+                changed = True
+            else:
+                fmr["optional_gemini"] = og
+
+            if "enabled" not in fmr:
+                fmr["enabled"] = True
+            merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 17})
+            results["config_added"].append("free_model_routing (v17 defaults)")
+            if not quiet:
+                print(
+                    "  ✓ v17: Seeded free_model_routing (HF inference → Kimi router tiers → optional Gemini)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v17 free_model_routing migration skipped: {e}")
+            results["warnings"].append(f"v17 migration: {e}")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

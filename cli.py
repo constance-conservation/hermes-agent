@@ -239,6 +239,19 @@ def load_cli_config() -> Dict[str, Any]:
             "base_url": "",    # Direct OpenAI-compatible endpoint for subagents
             "api_key": "",     # API key for delegation.base_url (falls back to OPENAI_API_KEY)
         },
+        # Omitted → synthesized from ``free_model_routing`` (no hardcoded hub ids here).
+        "fallback_providers": None,
+        "free_model_routing": {
+            "enabled": True,
+            "inference": {"model": "", "policy": "fastest"},
+            "kimi_router": {"router_model": "", "tiers": []},
+            "optional_gemini": {
+                "enabled": False,
+                "model": "",
+                "only_rate_limit": True,
+                "restore_health_check": True,
+            },
+        },
     }
     
     # Track whether the config file explicitly set terminal config.
@@ -1289,17 +1302,20 @@ class HermesCLI:
         self._provider_require_params = pr.get("require_parameters", False)
         self._provider_data_collection = pr.get("data_collection")
         
-        # Fallback provider chain — tried in order when primary fails after retries.
-        # Supports new list format (fallback_providers) and legacy single-dict (fallback_model).
-        fb = CLI_CONFIG.get("fallback_providers") or CLI_CONFIG.get("fallback_model") or []
-        # Normalize legacy single-dict to a one-element list
-        if isinstance(fb, dict):
-            fb = [fb] if fb.get("provider") and fb.get("model") else []
+        # Fallback chain: explicit fallback_providers / fallback_model, else free_model_routing.
+        try:
+            from agent.free_model_routing import resolve_fallback_providers
+
+            fb = resolve_fallback_providers(CLI_CONFIG)
+        except Exception:
+            fb = []
         self._fallback_model = fb
 
         # Optional cheap-vs-strong routing for simple turns
         self._smart_model_routing = CLI_CONFIG.get("smart_model_routing", {}) or {}
         self._active_agent_route_signature = None
+        # One-shot model from /models (next user turn only).
+        self._pipeline_model_once: Optional[Dict[str, Any]] = None
 
         # Agent will be initialized on first use
         self.agent: Optional[AIAgent] = None
@@ -2135,7 +2151,7 @@ class HermesCLI:
         """Resolve model/runtime overrides for a single user turn."""
         from agent.smart_model_routing import resolve_turn_route
 
-        return resolve_turn_route(
+        base = resolve_turn_route(
             user_message,
             self._smart_model_routing,
             {
@@ -2149,6 +2165,94 @@ class HermesCLI:
                 "credential_pool": getattr(self, "_credential_pool", None),
             },
         )
+        once = getattr(self, "_pipeline_model_once", None)
+        if once:
+            return self._route_for_pipeline_model_once(base, once)
+        return base
+
+    def _route_for_pipeline_model_once(self, base: dict, choice: dict) -> dict:
+        """Apply ``/models`` one-shot selection; restores the choice if routing fails."""
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        model = str(choice.get("model") or "").strip()
+        pk = str(choice.get("provider_kind") or "primary").strip().lower()
+        if not model:
+            self._pipeline_model_once = None
+            return base
+
+        def _rt_from_resolved(rt: dict) -> dict:
+            return {
+                "api_key": rt.get("api_key"),
+                "base_url": rt.get("base_url"),
+                "provider": rt.get("provider"),
+                "api_mode": rt.get("api_mode"),
+                "command": rt.get("command"),
+                "args": list(rt.get("args") or []),
+                "credential_pool": None,
+            }
+
+        try:
+            if pk == "primary":
+                self._pipeline_model_once = None
+                return {
+                    "model": model,
+                    "runtime": {
+                        "api_key": self.api_key,
+                        "base_url": self.base_url,
+                        "provider": self.provider,
+                        "api_mode": self.api_mode,
+                        "command": self.acp_command,
+                        "args": list(self.acp_args or []),
+                        "credential_pool": getattr(self, "_credential_pool", None),
+                    },
+                    "label": f"/models → {model}",
+                    "signature": (
+                        model,
+                        self.provider,
+                        self.base_url,
+                        self.api_mode,
+                        self.acp_command,
+                        tuple(self.acp_args or ()),
+                    ),
+                }
+            if pk == "huggingface":
+                rt = resolve_runtime_provider(requested="huggingface")
+                self._pipeline_model_once = None
+                return {
+                    "model": model,
+                    "runtime": _rt_from_resolved(rt),
+                    "label": f"/models → {model} (HF)",
+                    "signature": (
+                        model,
+                        rt.get("provider"),
+                        rt.get("base_url"),
+                        rt.get("api_mode"),
+                        rt.get("command"),
+                        tuple(rt.get("args") or ()),
+                    ),
+                }
+            if pk == "gemini":
+                rt = resolve_runtime_provider(requested="gemini")
+                self._pipeline_model_once = None
+                return {
+                    "model": model,
+                    "runtime": _rt_from_resolved(rt),
+                    "label": f"/models → {model} (Gemini)",
+                    "signature": (
+                        model,
+                        rt.get("provider"),
+                        rt.get("base_url"),
+                        rt.get("api_mode"),
+                        rt.get("command"),
+                        tuple(rt.get("args") or ()),
+                    ),
+                }
+            self._pipeline_model_once = None
+            return base
+        except Exception as exc:
+            logging.warning("pipeline model route failed, using base route: %s", exc)
+            self._pipeline_model_once = choice
+        return base
 
     def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, route_label: str = None) -> bool:
         """
@@ -3240,11 +3344,15 @@ class HermesCLI:
         self._provider_require_params = pr.get("require_parameters", False)
         self._provider_data_collection = pr.get("data_collection")
 
-        fb = CLI_CONFIG.get("fallback_providers") or CLI_CONFIG.get("fallback_model") or []
-        if isinstance(fb, dict):
-            fb = [fb] if fb.get("provider") and fb.get("model") else []
+        try:
+            from agent.free_model_routing import resolve_fallback_providers
+
+            fb = resolve_fallback_providers(CLI_CONFIG)
+        except Exception:
+            fb = []
         self._fallback_model = fb
         self._smart_model_routing = CLI_CONFIG.get("smart_model_routing", {}) or {}
+        self._pipeline_model_once = None
 
         self._history_file = _hermes_home / ".hermes_history"
 
@@ -3409,6 +3517,7 @@ class HermesCLI:
         self.conversation_history = []
         self._pending_title = None
         self._resumed = False
+        self._pipeline_model_once = None
 
         if self.agent:
             self.agent.session_id = self.session_id
@@ -4315,6 +4424,8 @@ class HermesCLI:
                     _cprint(f"  Queued: {payload[:80]}{'...' if len(payload) > 80 else ''}")
         elif canonical == "skin":
             self._handle_skin_command(cmd_original)
+        elif canonical == "models":
+            self._handle_models_command(cmd_original)
         elif canonical == "voice":
             self._handle_voice_command(cmd_original)
         else:
@@ -5648,6 +5759,53 @@ class HermesCLI:
             _cprint(f"{_DIM}TTS playback failed: {e}{_RST}")
         finally:
             self._voice_tts_done.set()
+
+    def _handle_models_command(self, command: str) -> None:
+        """Handle /models — pick a model from the free-model pipeline for the next prompt only."""
+        parts = command.strip().split(maxsplit=1)
+        rest = parts[1].strip() if len(parts) > 1 else ""
+
+        if rest.lower() in ("clear", "none", "reset"):
+            self._pipeline_model_once = None
+            _cprint("  Cleared one-shot model selection (next prompt uses normal routing).")
+            return
+
+        try:
+            from agent.pipeline_models import collect_pipeline_models
+            from hermes_cli.tools_config import _prompt_choice
+        except Exception as e:
+            _cprint(f"  /models unavailable: {e}")
+            return
+
+        entries = collect_pipeline_models(self.config)
+        if not entries:
+            _cprint("  No pipeline models configured. Set free_model_routing in config.yaml.")
+            return
+
+        if rest.lower() == "list":
+            for i, e in enumerate(entries, start=1):
+                _cprint(f"  {i}. {e['model']} — {e['source']}")
+            _cprint("  Use /models <n> or /models for interactive picker.")
+            return
+
+        if rest.isdigit():
+            idx = int(rest) - 1
+            if 0 <= idx < len(entries):
+                self._pipeline_model_once = dict(entries[idx])
+                e = entries[idx]
+                _cprint(f"  Next prompt: {e['model']} ({e['source']})")
+            else:
+                _cprint(f"  Invalid index. Use 1–{len(entries)} or /models list.")
+            return
+
+        labels = [f"{e['model']} — {e['source']}" for e in entries]
+        idx = _prompt_choice("Select model for next prompt (↑/↓, Enter):", labels, 0)
+        if idx >= len(entries):
+            _cprint("  Cancelled.")
+            return
+        self._pipeline_model_once = dict(entries[idx])
+        e = entries[idx]
+        _cprint(f"  Next prompt: {e['model']} ({e['source']})")
 
     def _handle_voice_command(self, command: str):
         """Handle /voice [on|off|tts|status] command."""
