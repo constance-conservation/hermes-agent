@@ -40,8 +40,13 @@ agent:
   profile_router:
     enabled: true
     confidence_threshold: 0.65
+    min_message_chars: 12
     only_when_current_profiles:
       - chief-orchestrator
+    # Router LLM (classification JSON). Use Gemini so OpenRouter quota exhaustion
+    # does not block delegation; optional overrides of auxiliary.profile_router.
+    router_provider: gemini
+    router_model: gemini-2.5-flash
   org_automation:
     enabled: true
 

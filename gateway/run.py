@@ -5998,6 +5998,42 @@ class GatewayRunner:
                                     entry[_rkey] = _rval
                         agent_history.append(entry)
             
+            # CLI profile router parity: optional delegate to another Hermes profile before
+            # the main loop (same config as agent.profile_router).
+            routed_resp = None
+            if isinstance(message, str):
+                _pr_cfg = (user_config.get("agent") or {}).get("profile_router") or {}
+                if _pr_cfg.get("enabled"):
+                    try:
+                        from agent.profile_router import route_and_delegate_if_configured
+                        from hermes_cli.profiles import get_active_profile_name
+
+                        routed_resp = route_and_delegate_if_configured(
+                            user_message=message,
+                            parent_agent=agent,
+                            agent_config=_pr_cfg,
+                            current_profile=get_active_profile_name(),
+                        )
+                    except Exception as _pr_exc:
+                        logger.debug("profile_router skipped: %s", _pr_exc)
+                        routed_resp = None
+
+            if routed_resp is not None:
+                result_holder[0] = {
+                    "final_response": routed_resp,
+                    "messages": agent_history
+                    + [
+                        {"role": "user", "content": message},
+                        {"role": "assistant", "content": routed_resp},
+                    ],
+                    "api_calls": 0,
+                    "completed": True,
+                    "failed": False,
+                }
+                if _stream_consumer is not None:
+                    _stream_consumer.finish()
+                return result_holder[0]
+
             # Collect MEDIA paths already in history so we can exclude them
             # from the current turn's extraction. This is compression-safe:
             # even if the message list shrinks, we know which paths are old.
