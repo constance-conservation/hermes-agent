@@ -76,6 +76,45 @@ def test_resolve_explicit_fallback_providers_wins():
     assert resolve_fallback_providers(cfg) == [{"provider": "openai", "model": "gpt-4o"}]
 
 
+def test_resolve_explicit_plain_hf_yields_to_kimi_synthesis():
+    """Legacy config pinned MiniMax via huggingface without hf_router — must not skip Kimi."""
+    cfg = {
+        "fallback_providers": [
+            {"provider": "huggingface", "model": "MiniMaxAI/MiniMax-M2.5", "hf_inference_policy": "fastest"},
+        ],
+        "free_model_routing": {
+            "enabled": True,
+            "inference": {"enabled": False},
+            "kimi_router": {
+                "router_model": "moonshotai/Kimi-K2-Thinking",
+                "tiers": [{"id": "g", "models": ["some/hub-a"]}],
+            },
+        },
+    }
+    out = resolve_fallback_providers(cfg)
+    assert len(out) == 1
+    assert out[0].get("hf_router") is True
+    assert out[0]["model"] == "moonshotai/Kimi-K2-Thinking"
+
+
+def test_resolve_legacy_fallback_model_plain_hf_yields_to_kimi():
+    cfg = {
+        "fallback_model": {
+            "provider": "huggingface",
+            "model": "MiniMaxAI/MiniMax-M2.5",
+        },
+        "free_model_routing": {
+            "enabled": True,
+            "kimi_router": {
+                "router_model": "moonshotai/Kimi-K2-Thinking",
+                "tiers": [{"id": "g", "models": ["some/hub-a"]}],
+            },
+        },
+    }
+    out = resolve_fallback_providers(cfg)
+    assert out[0].get("hf_router") is True
+
+
 def test_resolve_explicit_empty_list():
     cfg = {"fallback_providers": [], "free_model_routing": {"enabled": True, "inference": {"model": "x/x"}}}
     assert resolve_fallback_providers(cfg) == []

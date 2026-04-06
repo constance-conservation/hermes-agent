@@ -131,22 +131,43 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
     return chain
 
 
+def _prefer_synth_over_plain_hf_first(synth: List[Dict[str, Any]], first_fb: Dict[str, Any]) -> bool:
+    """True when *synth* starts with Kimi ``hf_router`` but *first_fb* is plain HF (Inference API style)."""
+    if not synth or not isinstance(first_fb, dict):
+        return False
+    if not synth[0].get("hf_router"):
+        return False
+    prov = str(first_fb.get("provider") or "").strip().lower()
+    return prov == "huggingface" and not first_fb.get("hf_router")
+
+
 def resolve_fallback_providers(config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Resolve ``fallback_providers`` with ``free_model_routing`` when appropriate.
 
-    - If ``fallback_providers`` is a non-empty list → use as-is (full override).
     - If ``fallback_providers`` is ``[]`` → no fallback (explicit opt-out).
-    - Legacy ``fallback_model`` single dict → one-element list.
+    - If ``fallback_providers`` is a non-empty list → use as-is **unless** the first entry is a
+      plain ``huggingface`` hub id (no ``hf_router``) while ``free_model_routing`` synthesizes
+      a Kimi tier router first — then use the synthesized chain (fixes legacy YAML that pinned
+      Inference Providers before Kimi).
+    - Legacy ``fallback_model`` single dict → same Kimi-vs-plain-HF rule, else one-element list.
     - If ``fallback_providers`` is missing or ``None`` → build from ``free_model_routing``.
     """
     if not config or not isinstance(config, dict):
         return []
+    synth = build_free_fallback_chain(config)
     fp = config.get("fallback_providers")
-    if isinstance(fp, list) and len(fp) > 0:
-        return [x for x in fp if isinstance(x, dict) and x.get("provider") and x.get("model")]
     if fp == []:
         return []
+    if isinstance(fp, list) and len(fp) > 0:
+        cleaned = [x for x in fp if isinstance(x, dict) and x.get("provider") and x.get("model")]
+        if not cleaned:
+            return synth
+        if _prefer_synth_over_plain_hf_first(synth, cleaned[0]):
+            return synth
+        return cleaned
     fm = config.get("fallback_model")
     if isinstance(fm, dict) and fm.get("provider") and fm.get("model"):
+        if _prefer_synth_over_plain_hf_first(synth, fm):
+            return synth
         return [fm]
-    return build_free_fallback_chain(config)
+    return synth
