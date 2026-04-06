@@ -1265,6 +1265,22 @@ class TestConcurrentToolExecution:
             )
             assert result == "result"
 
+    def test_sequential_path_routes_mem0_to_memory_manager_not_registry(self, agent):
+        """mem0_* tools must not hit registry.dispatch (would return Unknown tool)."""
+        mm = MagicMock()
+        mm.has_tool = MagicMock(return_value=True)
+        mm.handle_tool_call = MagicMock(return_value='{"result":"from-memory-plugin"}')
+        agent._memory_manager = mm
+        tc = _mock_tool_call(name="mem0_profile", arguments="{}", call_id="c-mem0")
+        mock_msg = _mock_assistant_msg(content="", tool_calls=[tc])
+        messages = []
+        with patch("run_agent.handle_function_call") as mock_hfc:
+            agent._execute_tool_calls_sequential(mock_msg, messages, "task-1")
+        mock_hfc.assert_not_called()
+        mm.handle_tool_call.assert_called_once_with("mem0_profile", {})
+        assert len(messages) == 1
+        assert messages[0]["content"] == '{"result":"from-memory-plugin"}'
+
     def test_sequential_tool_callbacks_fire_in_order(self, agent):
         tool_call = _mock_tool_call(name="web_search", arguments='{"query":"hello"}', call_id="c1")
         mock_msg = _mock_assistant_msg(content="", tool_calls=[tool_call])
