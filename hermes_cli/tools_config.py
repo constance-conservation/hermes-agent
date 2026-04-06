@@ -754,6 +754,12 @@ def prompt_choice_tui_safe(
     :class:`~prompt_toolkit.application.Application`, run the curses menu in a
     real terminal via :func:`prompt_toolkit.application.run_in_terminal` so the
     TUI does not glitch (``/models``, ``/profile menu``, etc.).
+
+    Slash commands are handled on the CLI ``process_loop`` worker thread, not on
+    the prompt_toolkit asyncio thread. Calling ``run_in_terminal`` there without
+    scheduling onto ``pt_app.loop`` raises *no current event loop* and leaves the
+    returned awaitable un-awaited (prompt_toolkit 3.x). When off the app's loop
+    thread, we marshal the coroutine with :func:`asyncio.run_coroutine_threadsafe`.
     """
     if pt_app is None:
         return _prompt_choice(question, choices, default)
@@ -762,13 +768,31 @@ def prompt_choice_tui_safe(
     except ImportError:
         return _prompt_choice(question, choices, default)
 
-    result = [default]
+    import asyncio
+    import threading
 
-    def _body():
-        result[0] = _prompt_choice(question, choices, default)
+    loop = getattr(pt_app, "loop", None)
+    loop_thread = getattr(pt_app, "_loop_thread", None)
 
-    run_in_terminal(_body)
-    return result[0]
+    async def _run_menu_on_loop() -> int:
+        def _body() -> int:
+            return _prompt_choice(question, choices, default)
+
+        # Returns Task/Future; must be awaited (prompt_toolkit 3+).
+        return await run_in_terminal(_body)
+
+    # Same thread as the running PT app: avoid deadlock waiting on ourselves.
+    if (
+        loop
+        and not loop.is_closed()
+        and loop_thread is not None
+        and threading.current_thread() is not loop_thread
+    ):
+        fut = asyncio.run_coroutine_threadsafe(_run_menu_on_loop(), loop)
+        return fut.result(timeout=600)
+
+    # No loop yet, tests, or unknown threading: plain menu (may glitch under PT).
+    return _prompt_choice(question, choices, default)
 
 # ─── Token Estimation ────────────────────────────────────────────────────────
 

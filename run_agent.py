@@ -4878,8 +4878,9 @@ class AIAgent:
                     fb_provider)
                 if fb_provider == "huggingface":
                     self._emit_status(
-                        "⚠️ Hugging Face fallback skipped — set HF_TOKEN (e.g. in ~/.hermes/.env; "
-                        "profile runtimes inherit that file). Trying next fallback…",
+                        "⚠️ Hugging Face fallback skipped — no API client "
+                        "(set HF_TOKEN or HUGGING_FACE_HUB_TOKEN in ~/.hermes/.env; "
+                        "profiles load the parent file first). Trying next fallback…",
                         "fallback",
                     )
                 return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain

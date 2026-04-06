@@ -258,7 +258,13 @@ def _has_any_provider_configured() -> bool:
     # tool credentials (Claude Code, Codex CLI) that shouldn't silently skip
     # the setup wizard on a fresh install.
     from hermes_cli.config import DEFAULT_CONFIG
-    _DEFAULT_MODEL = DEFAULT_CONFIG.get("model", "")
+    _raw_default_model = DEFAULT_CONFIG.get("model", "")
+    if isinstance(_raw_default_model, dict):
+        _DEFAULT_MODEL = (_raw_default_model.get("default") or "").strip()
+    elif isinstance(_raw_default_model, str):
+        _DEFAULT_MODEL = _raw_default_model.strip()
+    else:
+        _DEFAULT_MODEL = ""
     cfg = load_config()
     model_cfg = cfg.get("model")
     if isinstance(model_cfg, dict):
@@ -267,7 +273,7 @@ def _has_any_provider_configured() -> bool:
         _model_name = model_cfg.strip()
     else:
         _model_name = ""
-    _has_hermes_config = _model_name and _model_name != _DEFAULT_MODEL
+    _has_hermes_config = bool(_model_name) and _model_name != _DEFAULT_MODEL
 
     # Check env vars (may be set by .env or shell).
     # OPENAI_BASE_URL alone counts — local models (vLLM, llama.cpp, etc.)
