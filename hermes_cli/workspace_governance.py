@@ -44,7 +44,7 @@ def cmd_workspace_governance_init(_args) -> None:
             sys.exit(1)
         shutil.copyfile(src, dest)
         print(f"Created {dest}")
-    print(f"\nHERMES_HOME: {display_hermes_home()}/workspace/operations/")
+    print(f"\nOperations directory: {display_hermes_home()}/workspace/operations/")
     print("Edit the .yaml files, then restart gateway / open a new CLI session.")
 
 
