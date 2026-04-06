@@ -252,6 +252,9 @@ def apply_token_governance_runtime(agent: Any) -> None:
 
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
+    # `/models` pipeline selection: honor user pick for this turn (see run_agent.AIAgent).
+    if getattr(agent, "_skip_per_turn_tier_routing", False):
+        return
     # Stay on the active provider/model while provider fallback is pinned (e.g. rate limits).
     if getattr(agent, "_fallback_activated", False):
         return

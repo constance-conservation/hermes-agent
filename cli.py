@@ -2183,7 +2183,7 @@ class HermesCLI:
         pk = str(choice.get("provider_kind") or "primary").strip().lower()
         if not model:
             self._pipeline_model_once = None
-            return base
+            return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
 
         def _rt_from_resolved(rt: dict) -> dict:
             return {
@@ -2211,6 +2211,7 @@ class HermesCLI:
                         "credential_pool": getattr(self, "_credential_pool", None),
                     },
                     "label": f"/models → {model}",
+                    "skip_per_turn_tier_routing": True,
                     "signature": (
                         model,
                         self.provider,
@@ -2227,6 +2228,7 @@ class HermesCLI:
                     "model": model,
                     "runtime": _rt_from_resolved(rt),
                     "label": f"/models → {model} (HF)",
+                    "skip_per_turn_tier_routing": True,
                     "signature": (
                         model,
                         rt.get("provider"),
@@ -2243,6 +2245,7 @@ class HermesCLI:
                     "model": model,
                     "runtime": _rt_from_resolved(rt),
                     "label": f"/models → {model} (Gemini)",
+                    "skip_per_turn_tier_routing": True,
                     "signature": (
                         model,
                         rt.get("provider"),
@@ -2253,13 +2256,20 @@ class HermesCLI:
                     ),
                 }
             self._pipeline_model_once = None
-            return base
+            return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
         except Exception as exc:
             logging.warning("pipeline model route failed, using base route: %s", exc)
             self._pipeline_model_once = choice
-        return base
+        return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
 
-    def _init_agent(self, *, model_override: str = None, runtime_override: dict = None, route_label: str = None) -> bool:
+    def _init_agent(
+        self,
+        *,
+        model_override: str = None,
+        runtime_override: dict = None,
+        route_label: str = None,
+        skip_per_turn_tier_routing: bool = False,
+    ) -> bool:
         """
         Initialize the agent on first use.
         When resuming a session, restores conversation history from SQLite.
@@ -2338,6 +2348,7 @@ class HermesCLI:
                 acp_command=runtime.get("command"),
                 acp_args=runtime.get("args"),
                 credential_pool=runtime.get("credential_pool"),
+                skip_per_turn_tier_routing=skip_per_turn_tier_routing,
                 max_iterations=self.max_turns,
                 enabled_toolsets=self.enabled_toolsets,
                 verbose_logging=self.verbose,
@@ -6403,6 +6414,7 @@ class HermesCLI:
             model_override=turn_route["model"],
             runtime_override=turn_route["runtime"],
             route_label=turn_route["label"],
+            skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
         ):
             return None
 
@@ -8603,6 +8615,7 @@ def main(
                     model_override=turn_route["model"],
                     runtime_override=turn_route["runtime"],
                     route_label=turn_route["label"],
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 ):
                     cli.agent.quiet_mode = True
                     result = cli.agent.run_conversation(

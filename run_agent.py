@@ -477,6 +477,7 @@ class AIAgent:
         platform: str = None,
         skip_context_files: bool = False,
         skip_memory: bool = False,
+        skip_per_turn_tier_routing: bool = False,
         session_db=None,
         iteration_budget: "IterationBudget" = None,
         fallback_model: Dict[str, Any] = None,
@@ -528,6 +529,8 @@ class AIAgent:
         _install_safe_stdio()
 
         self.model = model
+        # CLI /models one-shot: skip dynamic tier pick for this user turn only (cleared in run_conversation).
+        self._skip_per_turn_tier_routing = bool(skip_per_turn_tier_routing)
         self.max_iterations = max_iterations
         # Shared iteration budget — parent creates, children inherit.
         # Consumed by every LLM turn across parent + all subagents.
@@ -6893,6 +6896,8 @@ class AIAgent:
             apply_per_turn_tier_model(self, user_message)
         except Exception:
             logger.debug("apply_per_turn_tier_model failed", exc_info=True)
+        finally:
+            self._skip_per_turn_tier_routing = False
 
         # Optional HR / org profile consultation (same governance runtime YAML)
         try:

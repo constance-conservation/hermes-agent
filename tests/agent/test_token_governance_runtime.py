@@ -294,3 +294,34 @@ def test_per_turn_skipped_when_fallback_active(gov_env):
     a._token_governance_cfg = load_runtime_config()
     apply_per_turn_tier_model(a, "summarize the following paragraph in three bullets")
     assert a.model == "gemma-4-31b-it"
+
+
+def test_per_turn_skipped_when_pipeline_model_once(gov_env):
+    """Manual /models selection: do not override model for this turn."""
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "enabled": True,
+                "dynamic_tier_routing": True,
+                "tier_models": {"B": "cheap-b", "D": "main-d"},
+                "default_routing_tier": "D",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _A:
+        def __init__(self):
+            self.model = "user-picked-model"
+            self.api_mode = "chat_completions"
+            self._base_url_lower = "openrouter"
+            self._skip_per_turn_tier_routing = True
+
+        def _is_openrouter_url(self):
+            return True
+
+    a = _A()
+    a._token_governance_cfg = load_runtime_config()
+    apply_per_turn_tier_model(a, "summarize the following paragraph in three bullets")
+    assert a.model == "user-picked-model"
