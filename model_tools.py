@@ -9,7 +9,7 @@ the public API that run_agent.py, cli.py, batch_runner.py, and the RL
 environments consume.
 
 Public API (signatures preserved from the original 2,400-line version):
-    get_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode) -> list
+    get_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode, ...) -> list
     handle_function_call(function_name, function_args, task_id, user_task) -> str
     TOOL_TO_TOOLSET_MAP: dict          (for batch_runner.py)
     TOOLSET_REQUIREMENTS: dict         (for cli.py, doctor.py)
@@ -235,6 +235,8 @@ def get_tool_definitions(
     enabled_toolsets: List[str] = None,
     disabled_toolsets: List[str] = None,
     quiet_mode: bool = False,
+    blocked_toolsets_for_role: Optional[List[str]] = None,
+    blocked_tools_for_role: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get tool definitions for model API calls with toolset-based filtering.
@@ -245,12 +247,16 @@ def get_tool_definitions(
         enabled_toolsets: Only include tools from these toolsets.
         disabled_toolsets: Exclude tools from these toolsets (if enabled_toolsets is None).
         quiet_mode: Suppress status prints.
+        blocked_toolsets_for_role: Toolset names to omit after availability checks (empty if None).
+        blocked_tools_for_role: Tool names to omit after availability checks (empty if None).
 
     Returns:
         Filtered list of OpenAI-format tool definitions.
     """
     # Determine which tool names the caller wants
     tools_to_include: set = set()
+    _blocked_toolsets = tuple(blocked_toolsets_for_role or ())
+    _blocked_tools = frozenset(blocked_tools_for_role or ())
 
     if enabled_toolsets is not None:
         for toolset_name in enabled_toolsets:
@@ -300,6 +306,25 @@ def get_tool_definitions(
 
     # Ask the registry for schemas (only returns tools whose check_fn passes)
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+
+    # Optional role-based restrictions (callers omit both to keep prior behavior).
+    final_filtered_tools = []
+    for tool_def in filtered_tools:
+        tool_name = tool_def["function"]["name"]
+        toolset_name = registry.get_toolset_for_tool(tool_name)
+
+        if toolset_name and toolset_name in _blocked_toolsets:
+            if not quiet_mode:
+                print(
+                    f"🚫 Tool {tool_name} (toolset {toolset_name}) blocked by role restriction."
+                )
+            continue
+        if tool_name in _blocked_tools:
+            if not quiet_mode:
+                print(f"🚫 Tool {tool_name} blocked by role restriction.")
+            continue
+        final_filtered_tools.append(tool_def)
+    filtered_tools = final_filtered_tools
 
     # The set of tool names that actually passed check_fn filtering.
     # Use this (not tools_to_include) for any downstream schema that references

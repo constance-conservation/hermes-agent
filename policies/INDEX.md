@@ -32,6 +32,7 @@ Paths are relative to the repository root.
 - `policies/core/governance/role-prompts/minimal-default-deployment-order.md`
 - `policies/core/governance/role-prompts/org-mapper-hr-controller.md`
 - `policies/core/governance/role-prompts/project-lead-template.md`
+- `policies/core/governance/role-prompts/security-foundation-agents-role-prompts.md`
 - `policies/core/governance/role-prompts/supervisor-template.md`
 - `policies/core/governance/role-prompts/task-state-evidence-enforcer.md`
 - `policies/core/governance/role-prompts/worker-specialist-template.md`
