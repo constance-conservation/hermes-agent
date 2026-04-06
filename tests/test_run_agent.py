@@ -3306,6 +3306,89 @@ class TestFallbackSetsOAuthFlag:
         assert agent._is_anthropic_oauth is False
 
 
+class TestMem0AutoProviderActivation:
+    """Mem0 registers mem0_* tools when credentials exist but provider is unset."""
+
+    def test_mem0_tools_when_env_key_and_empty_provider(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("MEM0_API_KEY", "sk-mem0-auto-test")
+
+        fake_cfg = {
+            "memory": {
+                "provider": "",
+                "memory_enabled": False,
+                "user_profile_enabled": False,
+            }
+        }
+        with (
+            patch(
+                "run_agent.get_tool_definitions",
+                return_value=_make_tool_defs("web_search"),
+            ),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+            patch("hermes_cli.config.load_config", return_value=fake_cfg),
+            patch("hermes_cli.config.save_config"),
+            patch(
+                "plugins.memory.honcho.client.HonchoClientConfig.from_global_config",
+                return_value=SimpleNamespace(enabled=False, api_key="", base_url=""),
+            ),
+        ):
+            a = AIAgent(
+                api_key="test-key-1234567890",
+                model="anthropic/claude-3-haiku",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=False,
+            )
+
+        assert a._memory_manager is not None
+        assert "mem0_profile" in a.valid_tool_names
+        assert "mem0_search" in a.valid_tool_names
+        assert "mem0_conclude" in a.valid_tool_names
+
+    def test_no_mem0_auto_without_credentials(self, tmp_path, monkeypatch):
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.delenv("MEM0_API_KEY", raising=False)
+
+        fake_cfg = {
+            "memory": {
+                "provider": "",
+                "memory_enabled": False,
+                "user_profile_enabled": False,
+            }
+        }
+        with (
+            patch(
+                "run_agent.get_tool_definitions",
+                return_value=_make_tool_defs("web_search"),
+            ),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+            patch("hermes_cli.config.load_config", return_value=fake_cfg),
+            patch(
+                "plugins.memory.honcho.client.HonchoClientConfig.from_global_config",
+                return_value=SimpleNamespace(enabled=False, api_key="", base_url=""),
+            ),
+        ):
+            a = AIAgent(
+                api_key="test-key-1234567890",
+                model="anthropic/claude-3-haiku",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=False,
+            )
+
+        assert a._memory_manager is None
+        assert "mem0_profile" not in a.valid_tool_names
+
+
 class TestMemoryNudgeCounterPersistence:
     """_turns_since_memory must persist across run_conversation calls."""
 

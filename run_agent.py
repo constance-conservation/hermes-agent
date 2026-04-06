@@ -1026,6 +1026,11 @@ class AIAgent:
             _agent_cfg = _load_agent_config()
         except Exception:
             _agent_cfg = {}
+        mem_config = (
+            _agent_cfg.get("memory", {}) if isinstance(_agent_cfg, dict) else {}
+        )
+        if not isinstance(mem_config, dict):
+            mem_config = {}
 
         # Persistent memory (MEMORY.md + USER.md) -- loaded from disk
         self._memory_store = None
@@ -1037,7 +1042,6 @@ class AIAgent:
         self._iters_since_skill = 0
         if not skip_memory:
             try:
-                mem_config = _agent_cfg.get("memory", {})
                 self._memory_enabled = mem_config.get("memory_enabled", False)
                 self._user_profile_enabled = mem_config.get("user_profile_enabled", False)
                 self._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
@@ -1059,7 +1063,7 @@ class AIAgent:
         self._memory_manager = None
         if not skip_memory:
             try:
-                _mem_provider_name = mem_config.get("provider", "") if mem_config else ""
+                _mem_provider_name = (mem_config.get("provider", "") or "").strip()
 
                 # Auto-migrate: if Honcho was actively configured (enabled +
                 # credentials) but memory.provider is not set, activate the
@@ -1083,6 +1087,32 @@ class AIAgent:
                             if not self.quiet_mode:
                                 print("  ✓ Auto-migrated Honcho to memory provider plugin.")
                                 print("    Your config and data are preserved.\n")
+                    except Exception:
+                        pass
+
+                # Auto-activate Mem0 when credentials exist but memory.provider is
+                # unset. Mirrors Honcho migration: users with MEM0_API_KEY (or
+                # api_key in mem0.json) expect mem0_* tools without editing YAML.
+                if not _mem_provider_name:
+                    try:
+                        from plugins.memory.mem0 import _load_config as _mem0_load_cfg
+
+                        _m0_cfg = _mem0_load_cfg()
+                        if (_m0_cfg.get("api_key") or "").strip():
+                            _mem_provider_name = "mem0"
+                            try:
+                                from hermes_cli.config import load_config as _lc, save_config as _sc
+
+                                _cfg = _lc()
+                                _cfg.setdefault("memory", {})["provider"] = "mem0"
+                                _sc(_cfg)
+                            except Exception:
+                                pass
+                            if not self.quiet_mode:
+                                print(
+                                    "  ✓ Auto-activated Mem0 memory provider "
+                                    "(MEM0_API_KEY or mem0.json api_key).\n"
+                                )
                     except Exception:
                         pass
 

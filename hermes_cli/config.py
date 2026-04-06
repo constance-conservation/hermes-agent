@@ -220,6 +220,21 @@ DEFAULT_CONFIG = {
         # (force on/off for all models), or a list of model-name substrings
         # to match (e.g. ["gpt", "codex", "gemini", "qwen"]).
         "tool_use_enforcement": "auto",
+        # Optional CLI-only: fast auxiliary LLM routes user text to a named profile via
+        # delegate_task before the main agent loop (off by default — extra cost/latency).
+        "profile_router": {
+            "enabled": False,
+            "confidence_threshold": 0.72,
+            "min_message_chars": 12,
+            "exclude_current_profile": True,
+            # If non-empty, only run the router when get_active_profile_name() is listed.
+            "only_when_current_profiles": [],
+            # If non-empty, only these slugs may be routing targets.
+            "allow_only_profiles": [],
+            "exclude_profiles": [],
+            "router_model": "",
+            "router_provider": "",
+        },
     },
     
     "terminal": {
@@ -384,6 +399,13 @@ DEFAULT_CONFIG = {
             "api_key": "",
             "timeout": 60,
         },
+        "profile_router": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 25,
+        },
     },
     
     "display": {
@@ -465,9 +487,12 @@ DEFAULT_CONFIG = {
         "user_profile_enabled": True,
         "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
-        # External memory provider plugin (empty = built-in only).
-        # Set to a provider name to activate: "openviking", "mem0",
-        # "hindsight", "holographic", "retaindb", "byterover".
+        # External memory provider plugin (empty = auto-detect).
+        # Set to a provider name to activate explicitly: "openviking", "mem0",
+        # "hindsight", "holographic", "retaindb", "byterover", "honcho".
+        # When empty: Honcho auto-migrates if ~/.honcho/config.json is enabled
+        # with credentials; else Mem0 activates if MEM0_API_KEY or mem0.json
+        # has api_key (run_agent persists memory.provider on first activation).
         # Only ONE external provider is allowed at a time.
         "provider": "",
     },
@@ -561,7 +586,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 14,
+    "_config_version": 15,
 }
 
 # =============================================================================
