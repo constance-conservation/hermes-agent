@@ -156,6 +156,19 @@ class TestFallbackChainAdvancement:
             assert agent.model == "gpt-4o"
 
 
+class TestQuotaStyleApiFailure:
+    def test_402_triggers(self):
+        class _E(Exception):
+            status_code = 402
+
+        assert AIAgent._quota_style_api_failure(_E("pay")) is True
+
+    def test_insufficient_credits_message(self):
+        assert AIAgent._quota_style_api_failure(
+            RuntimeError("Error: insufficient credits on OpenRouter")
+        ) is True
+
+
 class TestOnlyRateLimitFallback:
     def test_only_rate_limit_skips_without_rate_limit_flag(self):
         fb = {

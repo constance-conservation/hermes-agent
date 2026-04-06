@@ -31,14 +31,17 @@ version: 1
 enabled: true
 
 # Concrete OpenRouter slugs per tier (see policy § Model Tiering Framework).
+# Tier F must not be Anthropic/Claude here: dynamic routing and consultant upgrades
+# would otherwise run Sonnet without org deliberation. Use strongest non-Claude slug.
 tier_models:
-  A: "openrouter/auto"
+  # Do not use openrouter/auto here — it may route to Anthropic without org deliberation.
+  A: "google/gemini-2.5-flash"
   B: "google/gemini-2.5-flash-lite"
   # OpenRouter: use deepseek-r1 (deepseek-reasoner is the DeepSeek-direct API name, not a valid OR slug).
   C: "deepseek/deepseek-r1"
   D: "google/gemini-2.5-flash"
   E: "google/gemini-2.5-pro"
-  F: "anthropic/claude-sonnet-4.5"
+  F: "google/gemini-3-pro-preview"
 
 # Chief orchestrator baseline when config says `model.default: tier:D` (or omit default_model here).
 chief_default_tier: D
@@ -52,6 +55,8 @@ blocked_fallback_tier: B
 blocked_model_substrings:
   - claude-opus
   - claude-sonnet-4
+  - claude-sonnet-4.5
+  - anthropic/claude
   - claude-3.5-sonnet
   - gpt-4
   - gpt-5

@@ -61,10 +61,10 @@ auxiliary:
     provider: openrouter
     model: tier:dynamic
   # Internal consultant pipeline (logged to workspace/operations/consultant_deliberations.jsonl).
-  # Router: cheap / openrouter auto; Chief: strong tier aligned with policy.
+  # Router: fixed cheap tier (not openrouter/auto — auto can pick Claude without deliberation).
   consultant_router:
     provider: openrouter
-    model: openrouter/auto
+    model: tier:B
   consultant_challenger:
     provider: openrouter
     model: tier:B

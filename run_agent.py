@@ -4527,10 +4527,16 @@ class AIAgent:
         return {k: v for k, v in fb.items() if k not in _FALLBACK_CHAIN_META_KEYS}
 
     @staticmethod
-    def _exception_indicates_rate_limit(exc: BaseException) -> bool:
-        """True when an API exception looks like quota / rate limiting."""
+    def _quota_style_api_failure(exc: BaseException) -> bool:
+        """True for rate limits, quota exhaustion, or provider billing/credits errors.
+
+        Used for eager fallback, retry backoff, and primary health probes.  OpenRouter
+        and similar aggregators often return 402 or credit-related messages when the
+        account has no balance — treat like quota so ``only_rate_limit`` fallback can
+        switch to a direct provider (e.g. Gemini/Gemma).
+        """
         status = getattr(exc, "status_code", None)
-        if status == 429:
+        if status in (402, 429):
             return True
         msg = str(exc).lower()
         return any(
@@ -4542,8 +4548,22 @@ class AIAgent:
                 "usage limit",
                 "resource exhausted",
                 "quota",
+                "insufficient credits",
+                "not enough credits",
+                "please add credits",
+                "payment required",
+                "requires payment",
+                "billing_hard_limit",
+                "exceeded your current quota",
+                "credit balance",
+                "no credits",
             )
         )
+
+    @staticmethod
+    def _exception_indicates_rate_limit(exc: BaseException) -> bool:
+        """Alias for quota/billing-style failures (used by primary health probe)."""
+        return AIAgent._quota_style_api_failure(exc)
 
     def _probe_primary_healthy(self) -> bool:
         """Send a minimal primary-model request; True if it succeeds without rate limits.
@@ -4624,7 +4644,9 @@ class AIAgent:
 
         Args:
             triggered_by_rate_limit: When ``only_rate_limit: true`` is set on the
-                fallback entry, activation is skipped unless this is True.
+                fallback entry, activation is skipped unless this is True.  Pass
+                True for rate limits, quota exhaustion, and billing/credits errors
+                (same class as ``_quota_style_api_failure``).
         """
         if getattr(self, "_fallback_only_rate_limit", False) and not triggered_by_rate_limit:
             return False
@@ -7557,18 +7579,11 @@ class AIAgent:
                     # compress history and retry, not abort immediately.
                     status_code = getattr(api_error, "status_code", None)
 
-                    # Eager fallback for rate-limit errors (429 or quota exhaustion).
+                    # Eager fallback for rate limits, quota, or billing/credits errors.
                     # When a fallback model is configured, switch immediately instead
                     # of burning through retries with exponential backoff -- the
                     # primary provider won't recover within the retry window.
-                    is_rate_limited = (
-                        status_code == 429
-                        or "rate limit" in error_msg
-                        or "too many requests" in error_msg
-                        or "rate_limit" in error_msg
-                        or "usage limit" in error_msg
-                        or "quota" in error_msg
-                    )
+                    is_rate_limited = self._quota_style_api_failure(api_error)
                     if is_rate_limited and self._fallback_index < len(self._fallback_chain):
                         # Don't eagerly fallback if credential pool rotation may
                         # still recover.  The pool's retry-then-rotate cycle needs
@@ -7577,7 +7592,9 @@ class AIAgent:
                         pool = self._credential_pool
                         pool_may_recover = pool is not None and pool.has_available()
                         if not pool_may_recover:
-                            self._emit_status("⚠️ Rate limited — switching to fallback provider...")
+                            self._emit_status(
+                                "⚠️ Quota, billing, or rate limit — switching to fallback provider...",
+                            )
                             if self._try_activate_fallback(triggered_by_rate_limit=True):
                                 retry_count = 0
                                 continue
