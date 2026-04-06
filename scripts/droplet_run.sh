@@ -23,6 +23,8 @@
 #
 # Replace local ~/.hermes with /home/hermesuser/.hermes from the VPS (binary-safe ssh -T; backs up first):
 #   ./scripts/droplet_pull_hermes_home.sh
+# Push local ~/.hermes to the VPS (backs up remote .hermes first; see script for gateway restart):
+#   ./scripts/droplet_push_hermes_home.sh
 #
 # Same credentials as scripts/ssh_droplet.sh (~/.env/.env). HERMES_DROPLET_INTERACTIVE=1
 # keeps the IDE TTY gate satisfied; SSH key rules follow ssh_droplet.sh.
