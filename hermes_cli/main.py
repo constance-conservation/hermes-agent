@@ -3802,6 +3802,23 @@ def cmd_profile(args):
             print(f"Error: {e}")
             sys.exit(1)
 
+    elif action == "sync-org":
+        import subprocess
+        from pathlib import Path
+
+        script = Path(__file__).resolve().parent.parent / "scripts" / "core" / "bootstrap_org_agent_profiles.py"
+        if not script.is_file():
+            print(f"Missing {script}", file=sys.stderr)
+            sys.exit(1)
+        cmd = [sys.executable, str(script)]
+        if getattr(args, "dry_run", False):
+            cmd.append("--dry-run")
+        if getattr(args, "refresh_config", False):
+            cmd.append("--refresh-config")
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            sys.exit(rc)
+
 
 def cmd_completion(args):
     """Print shell completion script."""
@@ -5355,7 +5372,58 @@ For more help on a command:
     profile_import.add_argument("--name", dest="import_name", metavar="NAME",
                                 help="Profile name (default: inferred from archive)")
 
+    profile_sync_org = profile_subparsers.add_parser(
+        "sync-org",
+        help="Create missing profiles from scripts/core/org_agent_profiles_manifest.yaml (org roles)",
+    )
+    profile_sync_org.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print actions without creating profiles",
+    )
+    profile_sync_org.add_argument(
+        "--refresh-config",
+        action="store_true",
+        help="Re-merge toolsets/max_turns from manifest into existing role profiles",
+    )
+
     profile_parser.set_defaults(func=cmd_profile)
+
+    # =========================================================================
+    # workspace command (operations/*.yaml under HERMES_HOME/workspace)
+    # =========================================================================
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Workspace operations helpers (governance YAML auto-injected into agent context)",
+    )
+    workspace_sub = workspace_parser.add_subparsers(dest="workspace_action")
+    gov_parser = workspace_sub.add_parser(
+        "governance",
+        help="runtime_governance.runtime.yaml + role_assignments.yaml",
+    )
+    gov_sub = gov_parser.add_subparsers(dest="governance_action", required=True)
+    gov_sub.add_parser(
+        "init",
+        help="Copy example YAML into workspace/operations/ if missing",
+    )
+    gov_sub.add_parser(
+        "show",
+        help="Print key fields of runtime_governance.runtime.yaml (sanitized keys only)",
+    )
+    gov_sub.add_parser(
+        "path",
+        help="Print absolute paths to governance files",
+    )
+
+    def cmd_workspace(args):
+        from hermes_cli.workspace_governance import workspace_governance_command
+
+        if getattr(args, "workspace_action", None) != "governance":
+            print("Use: hermes workspace governance {init|show|path}", file=sys.stderr)
+            sys.exit(2)
+        workspace_governance_command(args)
+
+    workspace_parser.set_defaults(func=cmd_workspace)
 
     # =========================================================================
     # completion command

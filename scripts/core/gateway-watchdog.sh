@@ -44,6 +44,9 @@
 #   WATCHDOG_COOLDOWN_SECONDS      — sleep after hitting attempt cap (default 900)
 #   WATCHDOG_RESTART_WAIT_SECONDS  — wait after restart before re-check (default 20)
 #   WATCHDOG_POST_DOCTOR_WAIT_SECONDS — wait after doctor+restart (default 25)
+#   WATCHDOG_ENFORCE_SINGLE_GATEWAY — 1 = before each health check, terminate extra
+#      `hermes_cli.main … gateway run` PIDs for this user (keep canonical gateway.pid
+#      when alive; else keep newest PID). Set 0 to disable. Default 1.
 #
 # Profile resolution (when HERMES_HOME is unset)
 # ----------------------------------------------
@@ -120,6 +123,7 @@ COOLDOWN_SECONDS="${WATCHDOG_COOLDOWN_SECONDS:-900}"
 RESTART_WAIT="${WATCHDOG_RESTART_WAIT_SECONDS:-20}"
 POST_DOCTOR_WAIT="${WATCHDOG_POST_DOCTOR_WAIT_SECONDS:-25}"
 PREFER_SYSTEMD="${WATCHDOG_PREFER_SYSTEMD:-1}"
+ENFORCE_SINGLE="${WATCHDOG_ENFORCE_SINGLE_GATEWAY:-1}"
 
 mkdir -p "$LOG_DIR"
 # Tighten log perms when possible (REM-005 / audit); ignore if not owner.
@@ -165,6 +169,64 @@ attempt_count() {
 
 record_attempt() {
   ATTEMPTS+=("$(now_epoch)")
+}
+
+canonical_gateway_pid() {
+  if [[ ! -f "$HERMES_HOME/gateway.pid" ]]; then
+    echo ""
+    return 0
+  fi
+  HERMES_HOME="$HERMES_HOME" python3 <<'PY' 2>/dev/null || true
+import json, os
+from pathlib import Path
+p = Path(os.environ["HERMES_HOME"]) / "gateway.pid"
+try:
+    d = json.loads(p.read_text())
+    v = d.get("pid")
+    if isinstance(v, int):
+        print(v)
+    elif v is not None:
+        print(int(v) if str(v).isdigit() else "")
+except Exception:
+    pass
+PY
+}
+
+enforce_single_gateway() {
+  [[ "$ENFORCE_SINGLE" == "0" ]] && return 0
+  local pids canon keeper pid
+  pids="$(pgrep -f 'python.*hermes_cli\.main.*gateway run' 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  local -a plist=()
+  for pid in $pids; do
+    plist+=("$pid")
+  done
+  ((${#plist[@]} <= 1)) && return 0
+
+  canon="$(canonical_gateway_pid)"
+  keeper=""
+  if [[ -n "$canon" ]] && ps -p "$canon" -o args= 2>/dev/null | grep -q '[h]ermes_cli.main.*gateway run'; then
+    keeper="$canon"
+  else
+    keeper="$(printf '%s\n' "${plist[@]}" | sort -n | tail -1)"
+  fi
+  log "enforce_single_gateway: found ${#plist[@]} gateway PIDs; keeping ${keeper}"
+  for pid in "${plist[@]}"; do
+    [[ "$pid" == "$keeper" ]] && continue
+    if kill "$pid" 2>/dev/null; then
+      log "enforce_single_gateway: SIGTERM duplicate pid=$pid"
+    fi
+  done
+  sleep 2
+  for pid in "${plist[@]}"; do
+    [[ "$pid" == "$keeper" ]] && continue
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+      log "enforce_single_gateway: SIGKILL stubborn pid=$pid"
+    fi
+  done
 }
 
 check_health() {
@@ -231,6 +293,7 @@ main() {
   log "watchdog started HERMES_HOME=${HERMES_HOME} interval=${CHECK_INTERVAL}s backoff<=${MAX_BACKOFF}s jitter<=${JITTER_MAX}s attempts=${MAX_ATTEMPTS}/${ATTEMPT_WINDOW}s cooldown=${COOLDOWN_SECONDS}s prefer_systemd=${PREFER_SYSTEMD} cli=${HERMES_CLI[*]}"
 
   while true; do
+    enforce_single_gateway
     if check_health; then
       if [[ "$last_state" != "healthy" ]]; then
         log "health restored (${HEALTH_REASON}); resetting failure counters"

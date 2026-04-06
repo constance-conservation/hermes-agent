@@ -5658,6 +5658,22 @@ class GatewayRunner:
             if self._ephemeral_system_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
 
+            # Single-bot multi-persona: channel/thread → role slug → role_assignments.yaml
+            try:
+                from hermes_constants import get_hermes_home as _gh_home
+                from gateway.messaging_role import build_messaging_role_ephemeral
+
+                _msg_cfg = getattr(self.config, "messaging", None) or {}
+                _rr = _msg_cfg.get("role_routing") if isinstance(_msg_cfg, dict) else None
+                if isinstance(_rr, dict):
+                    _role_block = build_messaging_role_ephemeral(
+                        source, _rr, hermes_home=_gh_home()
+                    )
+                    if _role_block:
+                        combined_ephemeral = (combined_ephemeral + "\n\n" + _role_block).strip()
+            except Exception:
+                pass
+
             # Re-read .env and config for fresh credentials (gateway is long-lived,
             # keys may change without restart).
             try:

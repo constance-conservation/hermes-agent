@@ -102,7 +102,7 @@ hermes gateway status --system         # Linux only: inspect the system service 
 
 ## Production uptime (watchdog)
 
-For always-on deployments, use **`hermes gateway watchdog-check`** together with the optional shell loop **`scripts/core/gateway-watchdog.sh`** so a dead process or a total loss of platform connections triggers **`hermes gateway run --replace`** and, if needed, **`hermes doctor --fix`**. See [Gateway watchdog](./gateway-watchdog).
+For always-on deployments, use **`hermes gateway watchdog-check`** together with the optional shell loop **`scripts/core/gateway-watchdog.sh`** so a dead process or a total loss of platform connections triggers **`hermes gateway run --replace`** and, if needed, **`hermes doctor --fix`**. See [Gateway watchdog](./gateway-watchdog). For **workspace YAML** that auto-injects governance into every agent and **single-bot role routing** (Slack channel/thread → persona), see [Runtime governance & messaging roles](./runtime-governance-roles).
 
 ## Chat Commands (Inside Messaging)
 

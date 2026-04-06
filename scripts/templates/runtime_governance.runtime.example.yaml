@@ -1,0 +1,33 @@
+# Copy to: HERMES_HOME/workspace/operations/runtime_governance.runtime.yaml
+# Install: hermes workspace governance init
+#
+# Concise runtime directives injected into every new agent (CLI + gateway).
+# Chief / HR edit this file; no manual paste of long activation blocks required.
+
+version: 1
+enabled: true
+
+# Optional: phased activation session number (1–20) from activation_sessions_cumulative_cover_2_20.txt
+activation_session: 3
+
+# Logical org role for this profile (not necessarily a Hermes profile name)
+active_role_slug: chief_orchestrator
+
+assigned_by: chief-orchestrator
+
+summary: |
+  Operate under the materialized policy pack in POLICY_ROOT. Prefer registers under
+  WORKSPACE/operations/ for durable state. Do not redesign the org architecture unless policy requires it.
+
+concise_directives:
+  - "Read POLICY_ROOT/core/deployment-handoff.md from disk when planning activation — do not ask the operator to paste it."
+  - "Handoff (A/B numbered) before Verification when executing phased activation sessions."
+  - "Use delegate_task with hermes_profile when work must run under another isolated profile."
+
+read_order_paths:
+  - "HERMES_HOME/.hermes.md"
+  - "WORKSPACE/AGENTS.md"
+  - "WORKSPACE/operations/hermes_token_governance.runtime.yaml"
+
+notes: |
+  IT/Security may tighten watchdog + gateway singleton policy; see gateway-watchdog docs.

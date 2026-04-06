@@ -253,6 +253,9 @@ class GatewayConfig:
     # Streaming configuration
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
 
+    # Optional messaging extras (e.g. role_routing for single-bot multi-persona)
+    messaging: Dict[str, Any] = field(default_factory=dict)
+
     def get_connected_platforms(self) -> List[Platform]:
         """Return list of platforms that are enabled and configured."""
         connected = []
@@ -335,6 +338,7 @@ class GatewayConfig:
             "group_sessions_per_user": self.group_sessions_per_user,
             "unauthorized_dm_behavior": self.unauthorized_dm_behavior,
             "streaming": self.streaming.to_dict(),
+            "messaging": dict(self.messaging) if self.messaging else {},
         }
     
     @classmethod
@@ -381,6 +385,10 @@ class GatewayConfig:
             "pair",
         )
 
+        messaging = data.get("messaging")
+        if not isinstance(messaging, dict):
+            messaging = {}
+
         return cls(
             platforms=platforms,
             default_reset_policy=default_policy,
@@ -394,6 +402,7 @@ class GatewayConfig:
             group_sessions_per_user=_coerce_bool(group_sessions_per_user, True),
             unauthorized_dm_behavior=unauthorized_dm_behavior,
             streaming=StreamingConfig.from_dict(data.get("streaming", {})),
+            messaging=messaging,
         )
 
     def get_unauthorized_dm_behavior(self, platform: Optional[Platform] = None) -> str:
@@ -482,6 +491,13 @@ def load_gateway_config() -> GatewayConfig:
                     yaml_cfg.get("unauthorized_dm_behavior"),
                     "pair",
                 )
+
+            _messaging_yaml = yaml_cfg.get("messaging")
+            if isinstance(_messaging_yaml, dict):
+                _prev = gw_data.get("messaging")
+                if not isinstance(_prev, dict):
+                    _prev = {}
+                gw_data["messaging"] = {**_prev, **_messaging_yaml}
 
             # Merge platforms section from config.yaml into gw_data so that
             # nested keys like platforms.webhook.extra.routes are loaded.

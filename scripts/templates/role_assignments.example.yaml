@@ -1,0 +1,26 @@
+# Copy to: HERMES_HOME/workspace/operations/role_assignments.yaml
+# Install: hermes workspace governance init
+#
+# Maps messaging role slugs (used by config.yaml messaging.role_routing) to policy reads
+# and optional Hermes profiles for delegation. One Slack bot can switch persona per channel.
+
+version: 1
+
+roles:
+  chief_orchestrator:
+    display_name: Chief Orchestrator
+    policy_reads:
+      - "POLICY_ROOT/core/chief-orchestrator-directive.md"
+      - "WORKSPACE/operations/ORG_REGISTRY.md"
+    hermes_profile_for_delegation: chief-orchestrator
+
+  security_governor:
+    display_name: Chief Security Governor
+    policy_reads:
+      - "POLICY_ROOT/core/security-prompts.md"
+      - "WORKSPACE/operations/SECURITY_ALERT_REGISTER.md"
+    hermes_profile_for_delegation: ag-sec-governor
+    forbidden:
+      - "Stand down production gateways without IT approval."
+
+  # Add entries for each role slug referenced under messaging.role_routing in config.yaml

@@ -1,0 +1,162 @@
+"""Resolve per-surface messaging role slugs for ephemeral system prompt injection.
+
+One Slack / Telegram / WhatsApp bot can serve multiple *organizational personas* by
+routing channel/thread/chat identifiers to a **role slug**. Bindings and required
+policy reads live in ``workspace/operations/role_assignments.yaml``.
+
+Hermes still uses a single gateway ``HERMES_HOME`` (one token set). Personas are
+enforced via prompt + disk reads, not separate bot installs. For hard isolation
+(separate memories, credentials), run additional profiles with their own gateway
+units instead.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from gateway.config import Platform
+from gateway.session import SessionSource
+
+logger = logging.getLogger(__name__)
+
+_ASSIGNMENTS_REL = Path("workspace") / "operations" / "role_assignments.yaml"
+
+
+def resolve_messaging_role_slug(
+    source: SessionSource,
+    role_routing_cfg: Dict[str, Any],
+    *,
+    hermes_home: Path,
+) -> Optional[str]:
+    """Return role slug for this message source, or None to skip extra block."""
+    if not isinstance(role_routing_cfg, dict) or not role_routing_cfg.get("enabled"):
+        return None
+
+    plat = source.platform
+    if plat in (Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK):
+        return None
+
+    default = role_routing_cfg.get("default_role") or role_routing_cfg.get("default_slug")
+    plat_cfg = role_routing_cfg.get(plat.value)
+    if not isinstance(plat_cfg, dict):
+        return str(default).strip() if default else None
+
+    # Thread wins over channel (Slack / Discord threads)
+    thread_id = (source.thread_id or "").strip()
+    if thread_id:
+        threads = plat_cfg.get("threads")
+        if isinstance(threads, dict) and thread_id in threads:
+            slug = threads.get(thread_id)
+            if isinstance(slug, str) and slug.strip():
+                return slug.strip()
+
+    chat_id = str(source.chat_id or "").strip()
+    if chat_id:
+        chats = plat_cfg.get("chats") or plat_cfg.get("channels")
+        if isinstance(chats, dict) and chat_id in chats:
+            slug = chats.get(chat_id)
+            if isinstance(slug, str) and slug.strip():
+                return slug.strip()
+
+    if default:
+        return str(default).strip()
+    return None
+
+
+def load_role_assignment_block(
+    slug: str,
+    *,
+    hermes_home: Path,
+    max_chars: int = 4000,
+) -> str:
+    """Load role entry from role_assignments.yaml and format a short markdown block."""
+    path = hermes_home / _ASSIGNMENTS_REL
+    if not path.is_file():
+        return ""
+
+    try:
+        import yaml
+
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.debug("role_assignments: load failed %s: %s", path, exc)
+        return ""
+
+    if not isinstance(doc, dict):
+        return ""
+
+    roles = doc.get("roles")
+    if not isinstance(roles, dict):
+        return ""
+
+    entry = roles.get(slug) or roles.get(str(slug).replace("-", "_"))
+    if not isinstance(entry, dict):
+        return ""
+
+    lines: List[str] = [
+        f"## Messaging role: `{slug}`",
+        "",
+        "You are answering **as this org role** for this surface. "
+        "Stay inside published policies; use tools to read paths — do not ask the operator to paste policy packs.",
+        "",
+    ]
+
+    dn = entry.get("display_name")
+    if isinstance(dn, str) and dn.strip():
+        lines.append(f"- **Display name:** {dn.strip()}")
+
+    scope = entry.get("scope") or entry.get("mission")
+    if isinstance(scope, str) and scope.strip():
+        lines.extend(["", "### Scope", "", scope.strip(), ""])
+
+    reads = entry.get("policy_reads") or entry.get("read_order_paths")
+    if isinstance(reads, list) and reads:
+        lines.append("### Read with file tools (priority order)")
+        lines.append("")
+        for r in reads:
+            if isinstance(r, str) and r.strip():
+                lines.append(f"- `{r.strip()}`")
+        lines.append("")
+
+    hp = entry.get("hermes_profile_for_delegation")
+    if isinstance(hp, str) and hp.strip():
+        lines.append(
+            f"- **Delegation:** For work that must run under another Hermes profile, "
+            f"use `delegate_task` with `hermes_profile=\"{hp.strip()}\"` when appropriate."
+        )
+        lines.append("")
+
+    forbid = entry.get("forbidden")
+    if isinstance(forbid, list) and forbid:
+        lines.append("### Do not")
+        lines.append("")
+        for f in forbid:
+            if isinstance(f, str) and f.strip():
+                lines.append(f"- {f.strip()}")
+        lines.append("")
+
+    text = "\n".join(lines).strip()
+    if len(text) > max_chars:
+        text = text[: max_chars - 20] + "\n… (truncated)"
+    return text + "\n\n"
+
+
+def build_messaging_role_ephemeral(
+    source: SessionSource,
+    role_routing_cfg: Dict[str, Any],
+    *,
+    hermes_home: Path,
+) -> str:
+    slug = resolve_messaging_role_slug(source, role_routing_cfg, hermes_home=hermes_home)
+    if not slug:
+        return ""
+    block = load_role_assignment_block(slug, hermes_home=hermes_home)
+    if not block:
+        return (
+            f"## Messaging role: `{slug}`\n\n"
+            f"Bindings file missing or role undefined: `{_ASSIGNMENTS_REL}` — "
+            f"create it (`hermes workspace governance init`) and define `roles.{slug}`.\n\n"
+        )
+    return block

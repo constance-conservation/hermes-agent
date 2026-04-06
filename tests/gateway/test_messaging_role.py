@@ -1,0 +1,62 @@
+"""Tests for gateway messaging role routing."""
+
+from __future__ import annotations
+
+import pytest
+import yaml
+
+from gateway.config import Platform
+from gateway.messaging_role import (
+    build_messaging_role_ephemeral,
+    resolve_messaging_role_slug,
+)
+from gateway.session import SessionSource
+
+
+def test_resolve_thread_over_channel(tmp_path):
+    cfg = {
+        "enabled": True,
+        "default_role": "chief_orchestrator",
+        "slack": {
+            "channels": {"C111": "channel_role"},
+            "threads": {"174.999": "thread_role"},
+        },
+    }
+    src = SessionSource(
+        platform=Platform.SLACK,
+        chat_id="C111",
+        chat_type="channel",
+        thread_id="174.999",
+    )
+    assert resolve_messaging_role_slug(src, cfg, hermes_home=tmp_path) == "thread_role"
+
+
+def test_resolve_default(tmp_path):
+    cfg = {"enabled": True, "default_role": "chief_orchestrator"}
+    src = SessionSource(
+        platform=Platform.TELEGRAM,
+        chat_id="999",
+        chat_type="group",
+    )
+    assert resolve_messaging_role_slug(src, cfg, hermes_home=tmp_path) == "chief_orchestrator"
+
+
+def test_build_ephemeral_with_assignments(tmp_path):
+    cfg = {"enabled": True, "default_role": "r1"}
+    ops = tmp_path / "workspace" / "operations"
+    ops.mkdir(parents=True)
+    doc = {
+        "roles": {
+            "r1": {
+                "display_name": "Role One",
+                "policy_reads": ["WORKSPACE/AGENTS.md"],
+                "hermes_profile_for_delegation": "r1-profile",
+            }
+        }
+    }
+    (ops / "role_assignments.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    src = SessionSource(platform=Platform.SLACK, chat_id="C1", chat_type="channel")
+    block = build_messaging_role_ephemeral(src, cfg, hermes_home=tmp_path)
+    assert "r1" in block
+    assert "AGENTS.md" in block
+    assert "delegate_task" in block or "hermes_profile" in block

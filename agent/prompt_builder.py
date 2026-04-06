@@ -956,6 +956,15 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
     if workspace_pack:
         sections.append(workspace_pack)
 
+    try:
+        from agent.runtime_governance_prompt import load_runtime_governance_prompt
+
+        _gov_rt = load_runtime_governance_prompt()
+        if _gov_rt:
+            sections.append(_gov_rt)
+    except Exception:
+        pass
+
     workspace_root = get_hermes_home() / "workspace"
     in_materialized_workspace = cwd_path == workspace_root.resolve()
 

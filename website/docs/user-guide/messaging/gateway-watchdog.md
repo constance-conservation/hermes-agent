@@ -53,6 +53,7 @@ All variables are optional; defaults are in the script header.
 - **`WATCHDOG_INTERVAL_SECONDS`** — Seconds between checks when healthy (default `60`).
 - **`WATCHDOG_MAX_BACKOFF_SECONDS`**, **`WATCHDOG_JITTER_MAX_SECONDS`** — Backoff behavior between recovery attempts.
 - **`WATCHDOG_MAX_ATTEMPTS_IN_WINDOW`**, **`WATCHDOG_ATTEMPT_WINDOW_SECONDS`**, **`WATCHDOG_COOLDOWN_SECONDS`** — Rate limiting after repeated failures.
+- **`WATCHDOG_ENFORCE_SINGLE_GATEWAY`** — `1` (default): before each poll, terminate **extra** `python … hermes_cli.main … gateway run` processes for the same Unix user. The canonical PID from **`gateway.pid`** is kept when that process is still alive; otherwise the **newest** matching PID is kept. Set `0` to disable. This reduces Slack/Telegram/WhatsApp **token lock** incidents when two gateways were started by mistake.
 
 ### Logs
 
