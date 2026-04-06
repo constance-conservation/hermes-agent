@@ -11,6 +11,9 @@ Config via environment variables:
   MEM0_AGENT_ID      — Agent identifier (default: hermes)
 
 Or via $HERMES_HOME/mem0.json.
+
+Optional for org/project APIs, webhooks, and ``client.project``: ``org_id``, ``project_id``
+(env: ``MEM0_ORG_ID``, ``MEM0_PROJECT_ID``).
 """
 
 from __future__ import annotations
@@ -32,8 +35,10 @@ logger = logging.getLogger(__name__)
 _BREAKER_THRESHOLD = 5
 _BREAKER_COOLDOWN_SECS = 120
 
-# Required exact string for mem0_delete_all_memories (destructive).
+# Required exact strings for destructive Mem0 operations.
 _DELETE_ALL_CONFIRM = "YES_DELETE_ALL_MY_MEM0_MEMORIES"
+_RESET_ACCOUNT_CONFIRM = "YES_RESET_ENTIRE_MEM0_ACCOUNT"
+_DELETE_PROJECT_CONFIRM = "YES_DELETE_MEM0_PROJECT"
 
 
 def _json_response(data: Any) -> str:
@@ -60,6 +65,8 @@ def _load_config() -> dict:
         "api_key": os.environ.get("MEM0_API_KEY", ""),
         "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
         "agent_id": os.environ.get("MEM0_AGENT_ID", "hermes"),
+        "org_id": os.environ.get("MEM0_ORG_ID", ""),
+        "project_id": os.environ.get("MEM0_PROJECT_ID", ""),
         "rerank": True,
         "keyword_search": False,
     }
@@ -75,6 +82,10 @@ def _load_config() -> dict:
                     merged["user_id"] = defaults["user_id"]
                 if not (merged.get("agent_id") or "").strip():
                     merged["agent_id"] = defaults["agent_id"]
+                if not (merged.get("org_id") or "").strip():
+                    merged["org_id"] = defaults["org_id"]
+                if not (merged.get("project_id") or "").strip():
+                    merged["project_id"] = defaults["project_id"]
                 return merged
         except Exception:
             pass
@@ -361,6 +372,274 @@ BATCH_DELETE_SCHEMA = {
     },
 }
 
+RESET_ACCOUNT_SCHEMA = {
+    "name": "mem0_reset_account",
+    "description": (
+        "Nuclear: MemoryClient.reset() — deletes all entities and memories for the API key. "
+        f"confirm must be exactly {_RESET_ACCOUNT_CONFIRM!r}."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "confirm": {"type": "string"},
+        },
+        "required": ["confirm"],
+    },
+}
+
+CREATE_EXPORT_SCHEMA = {
+    "name": "mem0_create_memory_export",
+    "description": "Start a structured memory export (JSON schema string + optional filters).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "schema": {
+                "type": "string",
+                "description": "JSON schema string for export shape.",
+            },
+            "user_id": {
+                "type": "string",
+                "description": "Optional; defaults to configured Mem0 user_id.",
+            },
+        },
+        "required": ["schema"],
+    },
+}
+
+GET_EXPORT_SCHEMA = {
+    "name": "mem0_get_memory_export",
+    "description": "Retrieve export payload (POST /v1/exports/get/). Optional filters.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "filters": {
+                "type": "object",
+                "description": "Optional filter object; user_id defaults to configured user if omitted.",
+            },
+        },
+        "required": [],
+    },
+}
+
+EXPORT_SUMMARY_SCHEMA = {
+    "name": "mem0_get_memory_export_summary",
+    "description": "Summary/status for a memory export (MemoryClient.get_summary).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "filters": {"type": "object", "description": "Optional filters dict."},
+        },
+        "required": [],
+    },
+}
+
+GET_WEBHOOKS_SCHEMA = {
+    "name": "mem0_get_webhooks",
+    "description": "List webhooks for a Mem0 project_id (must match configured project when set).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+        },
+        "required": ["project_id"],
+    },
+}
+
+CREATE_WEBHOOK_SCHEMA = {
+    "name": "mem0_create_webhook",
+    "description": "Create a Mem0 project webhook.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+            "url": {"type": "string"},
+            "name": {"type": "string"},
+            "event_types": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Event type strings per Mem0 API.",
+            },
+        },
+        "required": ["project_id", "url", "name", "event_types"],
+    },
+}
+
+UPDATE_WEBHOOK_SCHEMA = {
+    "name": "mem0_update_webhook",
+    "description": "Update webhook by numeric id.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "webhook_id": {"type": "integer"},
+            "name": {"type": "string"},
+            "url": {"type": "string"},
+            "event_types": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["webhook_id"],
+    },
+}
+
+DELETE_WEBHOOK_SCHEMA = {
+    "name": "mem0_delete_webhook",
+    "description": "Delete webhook by numeric id.",
+    "parameters": {
+        "type": "object",
+        "properties": {"webhook_id": {"type": "integer"}},
+        "required": ["webhook_id"],
+    },
+}
+
+PROJECT_GET_SCHEMA = {
+    "name": "mem0_project_get",
+    "description": "Get current Mem0 project settings (client.project.get). Requires org_id+project_id in mem0.json.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional field names to return.",
+            },
+        },
+        "required": [],
+    },
+}
+
+PROJECT_UPDATE_SCHEMA = {
+    "name": "mem0_project_update",
+    "description": "Update project via client.project.update (instructions, categories, graph, etc.).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "custom_instructions": {"type": "string"},
+            "custom_categories": {"type": "array", "items": {"type": "string"}},
+            "retrieval_criteria": {"type": "array", "items": {"type": "object"}},
+            "enable_graph": {"type": "boolean"},
+            "multilingual": {"type": "boolean"},
+        },
+        "required": [],
+    },
+}
+
+PROJECT_CREATE_SCHEMA = {
+    "name": "mem0_project_create",
+    "description": "Create a new project under the configured org (client.project.create).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+        },
+        "required": ["name"],
+    },
+}
+
+PROJECT_DELETE_SCHEMA = {
+    "name": "mem0_project_delete",
+    "description": (
+        "Delete the configured Mem0 project. "
+        f"confirm must be {_DELETE_PROJECT_CONFIRM!r}."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"confirm": {"type": "string"}},
+        "required": ["confirm"],
+    },
+}
+
+PROJECT_MEMBERS_SCHEMA = {
+    "name": "mem0_project_members",
+    "description": "List members of the current Mem0 project.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
+PROJECT_MEMBER_ADD_SCHEMA = {
+    "name": "mem0_project_member_add",
+    "description": "Add a project member by email.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "email": {"type": "string"},
+            "role": {
+                "type": "string",
+                "description": "Default READER if omitted.",
+            },
+        },
+        "required": ["email"],
+    },
+}
+
+PROJECT_MEMBER_UPDATE_SCHEMA = {
+    "name": "mem0_project_member_update",
+    "description": "Change a project member's role.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "email": {"type": "string"},
+            "role": {"type": "string"},
+        },
+        "required": ["email", "role"],
+    },
+}
+
+PROJECT_MEMBER_REMOVE_SCHEMA = {
+    "name": "mem0_project_member_remove",
+    "description": "Remove a project member by email.",
+    "parameters": {
+        "type": "object",
+        "properties": {"email": {"type": "string"}},
+        "required": ["email"],
+    },
+}
+
+LEGACY_PROJECT_GET_SCHEMA = {
+    "name": "mem0_legacy_project_get",
+    "description": (
+        "Deprecated MemoryClient.get_project — use mem0_project_get when possible. "
+        "Requires org_id and project_id on the client."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fields": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [],
+    },
+}
+
+LEGACY_PROJECT_UPDATE_SCHEMA = {
+    "name": "mem0_legacy_project_update",
+    "description": (
+        "Deprecated MemoryClient.update_project with extended fields "
+        "(version, inclusion_prompt, memory_depth, …). Requires org_id+project_id."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "custom_instructions": {"type": "string"},
+            "custom_categories": {"type": "array", "items": {"type": "string"}},
+            "retrieval_criteria": {"type": "array", "items": {"type": "object"}},
+            "enable_graph": {"type": "boolean"},
+            "version": {"type": "string"},
+            "inclusion_prompt": {"type": "string"},
+            "exclusion_prompt": {"type": "string"},
+            "memory_depth": {"type": "string"},
+            "usecase_setting": {"type": "string"},
+            "multilingual": {"type": "boolean"},
+        },
+        "required": [],
+    },
+}
+
+CHAT_STUB_SCHEMA = {
+    "name": "mem0_chat",
+    "description": (
+        "MemoryClient.chat is not implemented in the Mem0 SDK. Calling returns an error "
+        "explaining to use other mem0_* tools."
+    ),
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
 MEM0_ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     PROFILE_SCHEMA,
     SEARCH_SCHEMA,
@@ -377,6 +656,25 @@ MEM0_ALL_TOOL_SCHEMAS: List[Dict[str, Any]] = [
     FEEDBACK_SCHEMA,
     BATCH_UPDATE_SCHEMA,
     BATCH_DELETE_SCHEMA,
+    RESET_ACCOUNT_SCHEMA,
+    CREATE_EXPORT_SCHEMA,
+    GET_EXPORT_SCHEMA,
+    EXPORT_SUMMARY_SCHEMA,
+    GET_WEBHOOKS_SCHEMA,
+    CREATE_WEBHOOK_SCHEMA,
+    UPDATE_WEBHOOK_SCHEMA,
+    DELETE_WEBHOOK_SCHEMA,
+    PROJECT_GET_SCHEMA,
+    PROJECT_UPDATE_SCHEMA,
+    PROJECT_CREATE_SCHEMA,
+    PROJECT_DELETE_SCHEMA,
+    PROJECT_MEMBERS_SCHEMA,
+    PROJECT_MEMBER_ADD_SCHEMA,
+    PROJECT_MEMBER_UPDATE_SCHEMA,
+    PROJECT_MEMBER_REMOVE_SCHEMA,
+    LEGACY_PROJECT_GET_SCHEMA,
+    LEGACY_PROJECT_UPDATE_SCHEMA,
+    CHAT_STUB_SCHEMA,
 ]
 
 
@@ -394,6 +692,8 @@ class Mem0MemoryProvider(MemoryProvider):
         self._api_key = ""
         self._user_id = "hermes-user"
         self._agent_id = "hermes"
+        self._org_id = ""
+        self._project_id = ""
         self._rerank = True
         self._keyword_search = False
         self._prefetch_result = ""
@@ -431,6 +731,8 @@ class Mem0MemoryProvider(MemoryProvider):
             {"key": "api_key", "description": "Mem0 Platform API key", "secret": True, "required": True, "env_var": "MEM0_API_KEY", "url": "https://app.mem0.ai"},
             {"key": "user_id", "description": "User identifier", "default": "hermes-user"},
             {"key": "agent_id", "description": "Agent identifier", "default": "hermes"},
+            {"key": "org_id", "description": "Mem0 organization id (project/webhook APIs)", "env_var": "MEM0_ORG_ID"},
+            {"key": "project_id", "description": "Mem0 project id (project/webhook APIs)", "env_var": "MEM0_PROJECT_ID"},
             {"key": "rerank", "description": "Enable reranking for recall", "default": "true", "choices": ["true", "false"]},
         ]
 
@@ -441,7 +743,13 @@ class Mem0MemoryProvider(MemoryProvider):
                 return self._client
             try:
                 from mem0 import MemoryClient
-                self._client = MemoryClient(api_key=self._api_key)
+
+                kw: Dict[str, Any] = {"api_key": self._api_key}
+                if self._org_id:
+                    kw["org_id"] = self._org_id
+                if self._project_id:
+                    kw["project_id"] = self._project_id
+                self._client = MemoryClient(**kw)
                 return self._client
             except ImportError:
                 raise RuntimeError("mem0 package not installed. Run: pip install mem0ai")
@@ -474,19 +782,23 @@ class Mem0MemoryProvider(MemoryProvider):
         self._api_key = self._config.get("api_key", "")
         self._user_id = self._config.get("user_id", "hermes-user")
         self._agent_id = self._config.get("agent_id", "hermes")
+        self._org_id = (self._config.get("org_id") or "").strip()
+        self._project_id = (self._config.get("project_id") or "").strip()
         self._rerank = self._config.get("rerank", True)
         self._keyword_search = self._config.get("keyword_search", False)
 
     def system_prompt_block(self) -> str:
         _names = ", ".join(s["name"] for s in MEM0_ALL_TOOL_SCHEMAS)
+        _scope = f"user_id={self._user_id}, agent_id={self._agent_id}"
+        if self._org_id and self._project_id:
+            _scope += f", org_id={self._org_id}, project_id={self._project_id}"
         return (
             "# Mem0 Memory (Platform API)\n"
-            f"Active. user_id={self._user_id}, agent_id={self._agent_id}.\n"
+            f"Active. {_scope}.\n"
             f"Tools: {_names}.\n"
-            "Parity with Mem0 MCP: add/list/get/update/delete memories, list/delete "
-            "entities, history, feedback, batch update/delete. "
-            "mem0_conclude stores one verbatim fact (infer off); mem0_add_memory uses "
-            "Mem0 extraction when infer is true (default).\n"
+            "Includes Mem0 MCP memory tools, export/summary, webhooks, project CRUD/members, "
+            "legacy project APIs, account reset, and mem0_chat (SDK stub). "
+            "mem0_conclude = verbatim store; mem0_add_memory uses Mem0 extraction when infer=true.\n"
             "If a result JSON has \"error\", the Mem0 API rejected the call—check "
             "credentials, quota, filters, or parameters—not \"missing tools\"."
         )
@@ -552,6 +864,45 @@ class Mem0MemoryProvider(MemoryProvider):
 
         self._sync_thread = threading.Thread(target=_sync, daemon=True, name="mem0-sync")
         self._sync_thread.start()
+
+    def _effective_org_id(self, client: Any) -> str:
+        return (getattr(client, "org_id", None) or self._org_id or "").strip()
+
+    def _effective_project_id(self, client: Any) -> str:
+        return (getattr(client, "project_id", None) or self._project_id or "").strip()
+
+    def _require_org_project_json(self, client: Any) -> str | None:
+        if not self._effective_org_id(client) or not self._effective_project_id(client):
+            return json.dumps({
+                "error": (
+                    "org_id and project_id are required (mem0.json / MEM0_ORG_ID / "
+                    "MEM0_PROJECT_ID, or as returned by Mem0 after API key validation)."
+                ),
+            })
+        return None
+
+    def _require_org_json(self, client: Any) -> str | None:
+        if not self._effective_org_id(client):
+            return json.dumps(
+                {
+                    "error": (
+                        "org_id required (mem0.json / MEM0_ORG_ID, or from Mem0 after "
+                        "API key validation)."
+                    ),
+                }
+            )
+        return None
+
+    def _webhook_project_guard(self, client: Any, project_id: str) -> str | None:
+        pid = (project_id or "").strip()
+        if not pid:
+            return json.dumps({"error": "project_id required"})
+        cfg_pid = self._effective_project_id(client)
+        if cfg_pid and pid != cfg_pid:
+            return json.dumps({
+                "error": f"project_id must match active Mem0 project ({cfg_pid!r}).",
+            })
+        return None
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         return list(MEM0_ALL_TOOL_SCHEMAS)
@@ -835,6 +1186,311 @@ class Mem0MemoryProvider(MemoryProvider):
             except Exception as e:
                 self._record_failure()
                 return json.dumps({"error": f"batch_delete failed: {e}"})
+
+        elif tool_name == "mem0_reset_account":
+            if (args.get("confirm") or "").strip() != _RESET_ACCOUNT_CONFIRM:
+                return json.dumps(
+                    {"error": f"confirm must be exactly {_RESET_ACCOUNT_CONFIRM!r}"}
+                )
+            try:
+                raw = client.reset()
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"reset_account failed: {e}"})
+
+        elif tool_name == "mem0_create_memory_export":
+            schema = args.get("schema")
+            if not isinstance(schema, str) or not schema.strip():
+                return json.dumps({"error": "schema must be a non-empty string (JSON schema text)"})
+            uid = (args.get("user_id") or "").strip() or self._user_id
+            try:
+                raw = client.create_memory_export(schema, user_id=uid)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"create_memory_export failed: {e}"})
+
+        elif tool_name == "mem0_get_memory_export":
+            filters = args.get("filters")
+            if filters is None:
+                filters = {}
+            if not isinstance(filters, dict):
+                return json.dumps({"error": "filters must be an object"})
+            body = dict(filters)
+            if "user_id" not in body:
+                body["user_id"] = self._user_id
+            try:
+                raw = client.get_memory_export(**body)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"get_memory_export failed: {e}"})
+
+        elif tool_name == "mem0_get_memory_export_summary":
+            filters = args.get("filters")
+            if filters is not None and not isinstance(filters, dict):
+                return json.dumps({"error": "filters must be an object or omitted"})
+            try:
+                raw = client.get_summary(
+                    filters if isinstance(filters, dict) else None
+                )
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"get_memory_export_summary failed: {e}"})
+
+        elif tool_name == "mem0_get_webhooks":
+            pid = args.get("project_id", "")
+            wg = self._webhook_project_guard(client, str(pid))
+            if wg:
+                return wg
+            try:
+                raw = client.get_webhooks(str(pid).strip())
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"get_webhooks failed: {e}"})
+
+        elif tool_name == "mem0_create_webhook":
+            pid = str(args.get("project_id") or "")
+            wg = self._webhook_project_guard(client, pid)
+            if wg:
+                return wg
+            url = (args.get("url") or "").strip()
+            name = (args.get("name") or "").strip()
+            ev = args.get("event_types")
+            if not url or not name:
+                return json.dumps({"error": "url and name required"})
+            if not isinstance(ev, list) or not ev:
+                return json.dumps({"error": "event_types must be a non-empty array"})
+            try:
+                raw = client.create_webhook(url, name, pid.strip(), ev)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"create_webhook failed: {e}"})
+
+        elif tool_name == "mem0_update_webhook":
+            wid = args.get("webhook_id")
+            if wid is None:
+                return json.dumps({"error": "webhook_id required"})
+            try:
+                w_int = int(wid)
+            except (TypeError, ValueError):
+                return json.dumps({"error": "webhook_id must be an integer"})
+            et = args.get("event_types")
+            try:
+                raw = client.update_webhook(
+                    w_int,
+                    name=args.get("name"),
+                    url=args.get("url"),
+                    event_types=et if isinstance(et, list) else None,
+                )
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"update_webhook failed: {e}"})
+
+        elif tool_name == "mem0_delete_webhook":
+            wid = args.get("webhook_id")
+            if wid is None:
+                return json.dumps({"error": "webhook_id required"})
+            try:
+                w_int = int(wid)
+            except (TypeError, ValueError):
+                return json.dumps({"error": "webhook_id must be an integer"})
+            try:
+                raw = client.delete_webhook(w_int)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"delete_webhook failed: {e}"})
+
+        elif tool_name == "mem0_project_get":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            fields = args.get("fields")
+            flist = fields if isinstance(fields, list) else None
+            try:
+                raw = client.project.get(fields=flist)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_get failed: {e}"})
+
+        elif tool_name == "mem0_project_update":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            keys = (
+                "custom_instructions",
+                "custom_categories",
+                "retrieval_criteria",
+                "enable_graph",
+                "multilingual",
+            )
+            kw = {k: args[k] for k in keys if k in args}
+            if not kw:
+                return json.dumps({"error": "Provide at least one field to update"})
+            try:
+                raw = client.project.update(**kw)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_update failed: {e}"})
+
+        elif tool_name == "mem0_project_create":
+            err = self._require_org_json(client)
+            if err:
+                return err
+            name = (args.get("name") or "").strip()
+            if not name:
+                return json.dumps({"error": "name required"})
+            try:
+                raw = client.project.create(name, description=args.get("description"))
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_create failed: {e}"})
+
+        elif tool_name == "mem0_project_delete":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            if (args.get("confirm") or "").strip() != _DELETE_PROJECT_CONFIRM:
+                return json.dumps(
+                    {"error": f"confirm must be exactly {_DELETE_PROJECT_CONFIRM!r}"}
+                )
+            try:
+                raw = client.project.delete()
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_delete failed: {e}"})
+
+        elif tool_name == "mem0_project_members":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            try:
+                raw = client.project.get_members()
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_members failed: {e}"})
+
+        elif tool_name == "mem0_project_member_add":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            email = (args.get("email") or "").strip()
+            if not email:
+                return json.dumps({"error": "email required"})
+            role = (args.get("role") or "READER").strip().upper()
+            try:
+                raw = client.project.add_member(email, role=role)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_member_add failed: {e}"})
+
+        elif tool_name == "mem0_project_member_update":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            email = (args.get("email") or "").strip()
+            role = (args.get("role") or "").strip().upper()
+            if not email or not role:
+                return json.dumps({"error": "email and role required"})
+            try:
+                raw = client.project.update_member(email, role)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_member_update failed: {e}"})
+
+        elif tool_name == "mem0_project_member_remove":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            email = (args.get("email") or "").strip()
+            if not email:
+                return json.dumps({"error": "email required"})
+            try:
+                raw = client.project.remove_member(email)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"project_member_remove failed: {e}"})
+
+        elif tool_name == "mem0_legacy_project_get":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            fields = args.get("fields")
+            flist = fields if isinstance(fields, list) else None
+            try:
+                raw = client.get_project(fields=flist)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"legacy_project_get failed: {e}"})
+
+        elif tool_name == "mem0_legacy_project_update":
+            err = self._require_org_project_json(client)
+            if err:
+                return err
+            legacy_keys = (
+                "custom_instructions",
+                "custom_categories",
+                "retrieval_criteria",
+                "enable_graph",
+                "version",
+                "inclusion_prompt",
+                "exclusion_prompt",
+                "memory_depth",
+                "usecase_setting",
+                "multilingual",
+            )
+            kw = {k: args[k] for k in legacy_keys if k in args}
+            if not kw:
+                return json.dumps({"error": "Provide at least one legacy field to update"})
+            try:
+                raw = client.update_project(**kw)
+                self._record_success()
+                return _json_response(raw)
+            except Exception as e:
+                self._record_failure()
+                return json.dumps({"error": f"legacy_project_update failed: {e}"})
+
+        elif tool_name == "mem0_chat":
+            return json.dumps(
+                {
+                    "error": (
+                        "MemoryClient.chat is not implemented in the mem0ai SDK. "
+                        "Use mem0_search, mem0_add_memory, mem0_get_memory, etc."
+                    )
+                }
+            )
 
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

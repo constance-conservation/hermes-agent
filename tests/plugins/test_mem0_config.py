@@ -34,7 +34,7 @@ def test_mem0_search_filters_non_empty():
 def test_mem0_tool_schema_registry_count():
     from plugins.memory.mem0 import MEM0_ALL_TOOL_SCHEMAS, Mem0MemoryProvider
 
-    assert len(MEM0_ALL_TOOL_SCHEMAS) == 15
+    assert len(MEM0_ALL_TOOL_SCHEMAS) == 34
     prov = Mem0MemoryProvider()
     names = [s["name"] for s in prov.get_tool_schemas()]
     assert names == [s["name"] for s in MEM0_ALL_TOOL_SCHEMAS]
