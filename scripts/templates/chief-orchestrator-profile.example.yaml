@@ -88,6 +88,11 @@ auxiliary:
   consultant_chief:
     provider: openrouter
     model: tier:D
+  # CLI per-turn profile router: keep off OpenRouter when the key is exhausted (403);
+  # tier:dynamic here would hit the same quota as other auxiliary tasks.
+  profile_router:
+    provider: gemini
+    model: gemini-2.5-flash
 
 delegation:
   provider: openrouter

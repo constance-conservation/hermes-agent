@@ -45,6 +45,34 @@ def test_classify_skips_when_wrong_current_profile():
     assert "not in only_when_current" in reason
 
 
+@patch.dict("os.environ", {"GEMINI_API_KEY": "x"}, clear=False)
+@patch("agent.auxiliary_client.extract_content_or_reasoning")
+@patch("agent.auxiliary_client.call_llm")
+def test_classify_uses_gemini_fallback_when_primary_raises(mock_call, mock_extract):
+    from agent.profile_router import classify_profile_for_prompt
+
+    mock_call.side_effect = [RuntimeError("openrouter 403"), object()]
+    mock_extract.return_value = '{"profile": "sec-bot", "confidence": 0.95, "reason": "ok"}'
+
+    t, conf, _reason = classify_profile_for_prompt(
+        "full security posture audit please",
+        candidates=["sec-bot", "other"],
+        current_profile="chief-orchestrator",
+        router_cfg={
+            "only_when_current_profiles": ["chief-orchestrator"],
+            "min_message_chars": 3,
+            "confidence_threshold": 0.72,
+        },
+    )
+    assert t == "sec-bot"
+    assert conf == 0.95
+    assert mock_call.call_count == 2
+    second = mock_call.call_args_list[1]
+    assert second.kwargs.get("provider") == "gemini"
+    assert second.kwargs.get("model") == "gemini-2.5-flash"
+    assert second.kwargs.get("task") is None
+
+
 @patch("agent.profile_router.list_routable_profile_names", return_value=["worker"])
 @patch("agent.auxiliary_client.extract_content_or_reasoning")
 @patch("agent.auxiliary_client.call_llm")

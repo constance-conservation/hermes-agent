@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -111,24 +112,48 @@ def classify_profile_for_prompt(
         f"User message:\n{user_message.strip()[:8000]}"
     )
 
-    try:
-        from agent.auxiliary_client import call_llm, extract_content_or_reasoning
+    from agent.auxiliary_client import call_llm, extract_content_or_reasoning
 
+    _messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    text: Optional[str] = None
+    try:
         resp = call_llm(
             task="profile_router",
             provider=provider_override,
             model=model_override,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=_messages,
             temperature=0.1,
             max_tokens=256,
         )
         text = extract_content_or_reasoning(resp)
     except Exception as exc:
         logger.warning("profile_router LLM call failed: %s", exc)
-        return None, 0.0, f"router error: {exc}"
+        # Chief/orchestrator configs often route auxiliary tasks through OpenRouter + tier.
+        # When the OpenRouter key is exhausted (403), fall back to Gemini direct — same as
+        # fallback_model for the main agent — so routing still works.
+        if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+            try:
+                resp = call_llm(
+                    task=None,
+                    provider="gemini",
+                    model="gemini-2.5-flash",
+                    messages=_messages,
+                    temperature=0.1,
+                    max_tokens=256,
+                )
+                text = extract_content_or_reasoning(resp)
+                logger.info("profile_router: used Gemini fallback after auxiliary failure")
+            except Exception as exc2:
+                logger.warning("profile_router Gemini fallback failed: %s", exc2)
+                return None, 0.0, f"router error: {exc}"
+        else:
+            return None, 0.0, f"router error: {exc}"
+
+    if not (text and str(text).strip()):
+        return None, 0.0, "empty router model output"
 
     data = _parse_router_json(text)
     if not data:

@@ -3024,7 +3024,9 @@ class HermesCLI:
             print("  /profile list         — list installed profiles")
             print("  /profile menu         — interactive picker (arrow keys)")
             print("  /profile use <name>   — set sticky default (~/.hermes/active_profile)")
-            print("  /profile-use <name>   — same as /profile use <name>\n")
+            print("  /profile-use <name>   — same as /profile use <name>")
+            print("  /profile-switch         — interactive menu (same as /profile menu)")
+            print("  /profile-switch <name>  — same as /profile use <name>\n")
             return
 
         if sub in ("use", "switch"):
@@ -3106,11 +3108,10 @@ class HermesCLI:
         print()
 
     def _handle_profile_use_command(self, cmd_original: str):
-        """Set sticky profile — forwards to /profile use."""
+        """Set sticky profile — forwards to /profile use, or menu if no name given."""
         raw = (cmd_original or "").strip().split()
         if len(raw) < 2:
-            print("\n  Usage: /profile-use <profile-name>")
-            print("  Same as: /profile use <name>\n")
+            self._handle_profile_command("/profile menu")
             return
         name = raw[1].strip()
         self._handle_profile_command(f"/profile use {name}")
