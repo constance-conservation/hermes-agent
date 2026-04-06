@@ -36,15 +36,27 @@ fi
 BIN="${HERMES}/bin/gateway-watchdog.sh"
 LOG_DIR="${HERMES}/logs"
 OUTER_LOG="${LOG_DIR}/gateway-watchdog.outer.log"
+# Older VPS installs used ~/.hermes/bin/gateway-watchdog.sh while HERMES_HOME was a profile;
+# stop those too so we do not leave two loops (same flock + health checks).
+LEGACY_BIN="${_PROFILE_BASE}/bin/gateway-watchdog.sh"
 
 mkdir -p "$(dirname "$BIN")" "${LOG_DIR}"
 cp -f "$SRC" "$BIN"
 chmod +x "$BIN"
 
-# Match only processes whose argv includes the installed script path.
-if pkill -f "${BIN}" 2>/dev/null; then
-  sleep 2
-fi
+_stop_prior() {
+  local any=0
+  if [[ "${LEGACY_BIN}" != "${BIN}" ]] && pkill -f "${LEGACY_BIN}" 2>/dev/null; then
+    any=1
+  fi
+  if pkill -f "${BIN}" 2>/dev/null; then
+    any=1
+  fi
+  if [[ "${any}" -eq 1 ]]; then
+    sleep 2
+  fi
+}
+_stop_prior
 
 nohup "${BIN}" >>"${OUTER_LOG}" 2>&1 &
 echo "gateway-watchdog started pid=$! bin=${BIN}"
