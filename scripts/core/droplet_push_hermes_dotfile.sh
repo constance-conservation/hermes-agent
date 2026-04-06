@@ -7,6 +7,7 @@
 #   ./scripts/core/droplet_push_hermes_dotfile.sh
 #   HERMES_LOCAL_HERMES_HOME=/Users/you/.hermes ./scripts/core/droplet_push_hermes_dotfile.sh
 #   HERMES_LOCAL_HERMES_DOTFILE=/path/to/dotfile ./scripts/core/droplet_push_hermes_dotfile.sh
+#   REMOTE_HERMES_BASENAME=.hermes.md  # default .hermes — top of /home/hermesuser/.hermes/
 #
 set -euo pipefail
 
@@ -14,7 +15,8 @@ ENV_FILE="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
 KEY_FILE="${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}"
 _HH="${HERMES_LOCAL_HERMES_HOME:-${HOME}/.hermes}"
 LOCAL="${HERMES_LOCAL_HERMES_DOTFILE:-${_HH}/.hermes}"
-REMOTE_DOT="/home/hermesuser/.hermes/.hermes"
+_RB="${REMOTE_HERMES_BASENAME:-.hermes}"
+REMOTE_DOT="/home/hermesuser/.hermes/${_RB}"
 
 if [[ ! -f "$LOCAL" ]]; then
   echo "droplet_push_hermes_dotfile.sh: missing local file: ${LOCAL}" >&2

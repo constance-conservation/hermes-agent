@@ -27,8 +27,10 @@ for arg in "$@"; do
   esac
 done
 
-if [[ ! -d "${HOME}/.hermes" ]]; then
-  echo "droplet_push_hermes_home.sh: missing ${HOME}/.hermes" >&2
+# Override source tree (default: $HOME/.hermes), e.g. HERMES_HOME_LOCAL=/Users/you/.hermes
+_HERMES_SRC="${HERMES_HOME_LOCAL:-${HOME}/.hermes}"
+if [[ ! -d "$_HERMES_SRC" ]]; then
+  echo "droplet_push_hermes_home.sh: missing ${_HERMES_SRC} (set HERMES_HOME_LOCAL or ensure ~/.hermes exists)" >&2
   exit 1
 fi
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -123,21 +125,24 @@ ARCHIVE="${TMPDIR:-/tmp}/hermes-home-to-droplet.$$".tar.gz
 _REMOTE_ARCHIVE="/tmp/hermes-home-push.$$".tar.gz
 
 if [[ "$DRY" == "1" ]]; then
-  echo "Would tar ${HOME}/.hermes (excluding .DS_Store) -> ${ARCHIVE}"
+  echo "Would tar ${_HERMES_SRC} (excluding .DS_Store) -> ${ARCHIVE}"
   echo "Would scp to ${REMOTE_USER}@${HOST}:${_REMOTE_ARCHIVE}"
   echo "Would backup remote .hermes then extract and chown hermesuser"
   exit 0
 fi
 
-echo "Packing ${HOME}/.hermes ..."
-# Avoid macOS tar xattrs (Linux tar warns; some versions exit non-zero on pax headers).
+echo "Packing ${_HERMES_SRC} ..."
+# Avoid macOS tar xattrs (Linux tar warns on LIBARCHIVE.* headers; can yield noisy stderr).
 if [[ "$(uname -s)" == "Darwin" ]]; then
   export COPYFILE_DISABLE=1
 fi
+# Tar as .hermes at archive root so remote extract -C /home/hermesuser yields .hermes/
+_PARENT="$(cd "$(dirname "$_HERMES_SRC")" && pwd)"
+_LEAF="$(basename "$_HERMES_SRC")"
 tar czf "$ARCHIVE" \
   --exclude='.DS_Store' \
   --exclude='._*' \
-  -C "$HOME" .hermes
+  -C "$_PARENT" "$_LEAF"
 
 if [[ ! -s "$ARCHIVE" ]]; then
   echo "droplet_push_hermes_home.sh: empty archive" >&2
@@ -156,7 +161,7 @@ if [[ -d /home/hermesuser/.hermes ]]; then \
   printf '%s' '${PW_B64}' | base64 -d | sudo -S mv /home/hermesuser/.hermes /home/hermesuser/.hermes.backup.${TS}; \
   echo Remote backup: /home/hermesuser/.hermes.backup.${TS}; \
 fi; \
-printf '%s' '${PW_B64}' | base64 -d | sudo -S tar xzf '${RARCH}' -C /home/hermesuser; \
+printf '%s' '${PW_B64}' | base64 -d | sudo -S tar --warning=no-unknown-keyword -xzf '${RARCH}' -C /home/hermesuser; \
 printf '%s' '${PW_B64}' | base64 -d | sudo -S chown -R hermesuser:hermesuser /home/hermesuser/.hermes; \
 printf '%s' '${PW_B64}' | base64 -d | sudo -S rm -f '${RARCH}'; \
 printf '%s' '${PW_B64}' | base64 -d | sudo -S find /home/hermesuser/.hermes -name gateway.pid -delete 2>/dev/null || true; \
@@ -191,5 +196,5 @@ if [[ "$RESTART_GW" == "1" ]]; then
     'cd ~/hermes-agent && ./venv/bin/python -m hermes_cli.main -p chief-orchestrator gateway restart'
 fi
 
-echo "Done. Local was: ${HOME}/.hermes"
+echo "Done. Local was: ${_HERMES_SRC}"
 echo "If messaging bots share tokens with this Mac, stop one side or use separate profiles."
