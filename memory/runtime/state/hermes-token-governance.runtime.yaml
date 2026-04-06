@@ -1,0 +1,46 @@
+version: 1
+enabled: true
+tier_models:
+  A: google/gemini-2.5-flash
+  B: google/gemini-2.5-flash-lite
+  C: deepseek/deepseek-r1
+  D: google/gemini-2.5-flash
+  E: google/gemini-2.5-pro
+  F: google/gemini-3-pro-preview
+chief_default_tier: D
+blocked_fallback_tier: B
+blocked_model_substrings:
+- claude-opus
+- claude-sonnet-4
+- claude-3.5-sonnet
+- gpt-4
+- gpt-5
+- openai/o1
+- openai/o3
+- claude-sonnet-4.5
+- anthropic/claude
+max_agent_turns: 50
+delegation_max_iterations: 30
+dynamic_tier_routing: true
+default_routing_tier: D
+skip_context_files: false
+hr_consultation:
+  enabled: true
+  hermes_profile: ag-org-hr
+  max_iterations: 28
+  min_message_chars: 12
+  trigger_keywords:
+  - new agent
+  - redundant agent
+  - headcount
+  - org chart
+  - RACI
+  - HR approval
+  - escalate to chief
+  - org registry
+  - proposal for role
+  - retire agent
+  - hiring agent
+org_tool_policy_notes: Security foundation profiles (ag-sec-*) use toolsets from scripts/org_agent_profiles_manifest.yaml
+  after bootstrap; not duplicated in core. Default delegation uses chief tier_models;
+  use consultant routing / tier E–F for incident or board-class work per MODEL_ROUTING_REGISTRY.md.

@@ -1,0 +1,17 @@
+version: 1
+enabled: true
+tier_models:
+  A: ""
+  B: ""
+  C: ""
+  D: ""
+  E: ""
+  F: ""
+chief_default_tier: D
+blocked_fallback_tier: B
+blocked_model_substrings: []
+max_agent_turns: 50
+delegation_max_iterations: 30
+dynamic_tier_routing: true
+default_routing_tier: D
+skip_context_files: false

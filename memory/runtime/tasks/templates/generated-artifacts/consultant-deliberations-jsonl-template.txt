@@ -1,0 +1,1 @@
+{"timestamp":"<ISO8601>","request_id":"CR-001","tier":"E","router_decision":"<summary>","challenge":"<summary>","chief_decision":"approved|denied|defer","notes":"<context>"}

@@ -1,0 +1,137 @@
+# Example Hermes profile layout for a VPS "chief-orchestrator" instance.
+#
+# 1. From repo: ./scripts/core/droplet_bootstrap_chief_orchestrator.sh
+#    (or: ./venv/bin/hermes profile create chief-orchestrator && ./venv/bin/hermes profile use chief-orchestrator)
+#    Bootstrap also runs ./scripts/core/ensure_chief_orchestrator_profile_env.sh so the profile has
+#    its own ~/.hermes/profiles/chief-orchestrator/.env (Hermes loads only HERMES_HOME/.env).
+#    Use ./venv/bin/hermes — bare `hermes` is not on PATH unless you add venv/bin.
+# 2. Merge this into ~/.hermes/profiles/chief-orchestrator/config.yaml
+# 3. Put OPENROUTER_API_KEY in that profile's ~/.hermes/profiles/chief-orchestrator/.env
+#
+# Token / model governance (Session 2+ after activation): do **not** hardcode expensive OpenRouter slugs here.
+# - Copy policies/core/runtime/agent/memory/runtime/tasks/templates/script-templates/hermes_token_governance.runtime.example.yaml to
+#   HERMES_HOME/workspace/operations/hermes_token_governance.runtime.yaml
+# - Edit **tier_models** (A–F) there when pricing changes; keep policy alignment with
+#   workspace/operations/MODEL_ROUTING_REGISTRY.md
+# - **tier:D** (or tier:X) on `model.default` resolves at load_config() to a concrete slug.
+# - **tier:dynamic** on auxiliary tasks and delegation: Hermes picks tier **per prompt**
+#   from `tier_models` using the same heuristics as the main agent (no fixed tier letter
+#   per channel in this file). Concrete slugs live only in `hermes_token_governance.runtime.yaml`.
+# - Each user turn can log "Token governance: this turn Tier X → …" when `dynamic_tier_routing`
+#   is enabled, or when the main model is `tier:dynamic`.
+#
+# `scripts/core/agent-droplet` uses the workstation sticky profile name on the VPS (HERMES_HOME=.../profiles/<name>);
+# if sticky is default/missing it uses chief-orchestrator. Trailing `droplet` on the CLI is not a profile.
+#
+# Org roles (security / directors / HR / project lead): after chief-orchestrator exists, run
+#   ./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py
+# then delegate with delegate_task(..., hermes_profile="ag-sec-preflight" | "fd-product" | …).
+#
+# CLI profile router: per user message, an auxiliary model may delegate to another Hermes profile
+# before the main loop (chief stays default sticky). Enable with:
+#   ./venv/bin/hermes profile router-on
+# Or merge the block below. ``hermes profile router-off`` disables.
+#
+# Org automation (markdown registers + manifest bootstrap): cron or agent tool when enabled:
+#   ./venv/bin/hermes workspace org-automation apply
+# Agent tool ``sync_org_automation`` requires agent.org_automation.enabled (or ORG_AUTOMATION_ALLOW_AGENT=1).
+
+agent:
+  profile_router:
+    enabled: true
+    confidence_threshold: 0.65
+    min_message_chars: 12
+    only_when_current_profiles:
+      - chief-orchestrator
+    # Router LLM: tier pick from ``free_model_routing.kimi_router`` (default: gemma-4-31b-it via Gemini API).
+    # Set GEMINI_API_KEY / GOOGLE_API_KEY for routing; HF_TOKEN only if you use router_provider: huggingface.
+    use_free_model_routing: true
+    # Optional: pin a hub id before the free_model_routing chain (same provider as main HF path):
+    # router_provider: huggingface
+    # router_model: MiniMaxAI/MiniMax-M2.5
+  org_automation:
+    enabled: true
+
+model:
+  provider: openrouter
+  default: tier:D
+
+compression:
+  summary_provider: openrouter
+  summary_model: tier:dynamic
+
+auxiliary:
+  vision:
+    provider: openrouter
+    model: tier:dynamic
+  web_extract:
+    provider: openrouter
+    model: tier:dynamic
+  compression:
+    provider: openrouter
+    model: tier:dynamic
+  session_search:
+    provider: openrouter
+    model: tier:dynamic
+  skills_hub:
+    provider: openrouter
+    model: tier:dynamic
+  approval:
+    provider: openrouter
+    model: tier:dynamic
+  mcp:
+    provider: openrouter
+    model: tier:dynamic
+  flush_memories:
+    provider: openrouter
+    model: tier:dynamic
+  # Internal consultant pipeline (logged to workspace/operations/consultant_deliberations.jsonl).
+  # Router: fixed cheap tier (not openrouter/auto — auto can pick Claude without deliberation).
+  consultant_router:
+    provider: openrouter
+    model: tier:B
+  consultant_challenger:
+    provider: openrouter
+    model: tier:B
+  consultant_chief:
+    provider: openrouter
+    model: tier:D
+  # CLI profile routing does not use auxiliary.profile_router — it uses agent.profile_router
+  # + free_model_routing.kimi_router (tier pick).
+
+delegation:
+  provider: openrouter
+  model: tier:dynamic
+
+# Free-model pipeline when paid/OpenRouter paths fail (do not set legacy ``fallback_model`` here —
+# it overrides this entire chain). Order: Kimi tiered router → optional Gemini.
+# Gemma on Gemini API: https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api
+free_model_routing:
+  enabled: true
+  # Tier router: gemma-4-31b-it on Google AI picks between MiniMax and gpt-oss served locally (see local_models/).
+  kimi_router:
+    router_provider: gemini
+    router_model: gemma-4-31b-it
+    tiers:
+      - id: local
+        description: "Locally served HF checkpoints (HERMES_LOCAL_INFERENCE_BASE_URL)"
+        models:
+          - MiniMaxAI/MiniMax-M2.5
+          - openai/gpt-oss-120b
+  optional_gemini:
+    enabled: true
+    model: gemma-4-31b-it
+    only_rate_limit: true
+    restore_health_check: true
+
+# Gateway watchdog (`hermes gateway watchdog-check`, scripts/core/gateway-watchdog.sh):
+# when true, every configured messaging platform (Slack, Telegram, WhatsApp, …) must be
+# `connected` in gateway_state.json — not only one adapter. Triggers recovery if any drop.
+# Override with env HERMES_GATEWAY_WATCHDOG_REQUIRE_ALL_PLATFORMS=0|1.
+messaging:
+  watchdog_require_all_platforms: true
+
+# Skip dangerous-terminal approval prompts (gateway + CLI). Same effect as HERMES_YOLO_MODE.
+# Set to manual/smart when you want interactive approvals again.
+approvals:
+  mode: off
