@@ -1,10 +1,26 @@
 """Mem0 plugin config: file + env merge."""
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def test_load_config_reads_mem0_api_key_from_profile_dotenv(tmp_path, monkeypatch):
+    """``MEM0_API_KEY`` only in profile ``.env`` (not in os.environ) must load."""
+    profile_home = tmp_path / ".hermes" / "profiles" / "chief-orchestrator"
+    profile_home.mkdir(parents=True)
+    (profile_home / ".env").write_text(
+        "MEM0_API_KEY=from-dotenv-only\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("HERMES_HOME", str(profile_home))
+    monkeypatch.delenv("MEM0_API_KEY", raising=False)
+    from plugins.memory.mem0 import _load_config
+
+    out = _load_config()
+    assert out["api_key"] == "from-dotenv-only"
 
 
 def test_load_config_merges_mem0_api_key_from_env(tmp_path, monkeypatch):
@@ -40,12 +56,12 @@ def test_mem0_tool_schema_registry_count():
     assert names == [s["name"] for s in MEM0_ALL_TOOL_SCHEMAS]
 
 
-def test_mem0_delete_all_memories_requires_exact_confirm():
+def test_mem0_delete_all_memories_requires_exact_confirm(monkeypatch):
+    monkeypatch.setenv("MEM0_API_KEY", "test-key-for-delete-all")
     from plugins.memory.mem0 import Mem0MemoryProvider, _DELETE_ALL_CONFIRM
 
     prov = Mem0MemoryProvider()
     prov.initialize("s1")
-    prov._api_key = "test-key-for-delete-all"
     out = json.loads(
         prov.handle_tool_call(
             "mem0_delete_all_memories", {"confirm": "wrong"}
@@ -77,17 +93,22 @@ def test_mem0_async_invoke_chat_skips_sync_client():
     assert "error" in out
 
 
-@patch("mem0.AsyncMemoryClient")
-def test_mem0_async_invoke_delete_all_invalid_confirm(mock_ac):
+def test_mem0_async_invoke_delete_all_invalid_confirm(monkeypatch):
+    """Async path imports ``mem0`` lazily; stub the module when mem0ai is not installed."""
+    mock_ac_class = MagicMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=MagicMock())
+    cm.__aexit__ = AsyncMock(return_value=None)
+    mock_ac_class.return_value = cm
+    fake_pkg = MagicMock()
+    fake_pkg.AsyncMemoryClient = mock_ac_class
+    monkeypatch.setitem(sys.modules, "mem0", fake_pkg)
+
+    monkeypatch.setenv("MEM0_API_KEY", "test-key")
     from plugins.memory.mem0 import Mem0MemoryProvider
 
     prov = Mem0MemoryProvider()
     prov.initialize("s-async-del")
-    prov._api_key = "test-key"
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=MagicMock())
-    cm.__aexit__ = AsyncMock(return_value=None)
-    mock_ac.return_value = cm
     out = json.loads(
         prov.handle_tool_call(
             "mem0_async_invoke",
@@ -97,13 +118,13 @@ def test_mem0_async_invoke_delete_all_invalid_confirm(mock_ac):
     assert "error" in out
 
 
-def test_mem0_profile_uses_v2_filters_on_get_all():
+def test_mem0_profile_uses_v2_filters_on_get_all(monkeypatch):
     """v2 list memories requires ``filters`` in the JSON body, not bare user_id."""
+    monkeypatch.setenv("MEM0_API_KEY", "test-key-for-profile")
     from plugins.memory.mem0 import Mem0MemoryProvider
 
     prov = Mem0MemoryProvider()
     prov.initialize("sess-1")
-    prov._api_key = "test-key-for-profile"
     mock_client = MagicMock()
     mock_client.get_all.return_value = {"results": [{"memory": "fact one"}]}
     with patch.object(prov, "_get_client", return_value=mock_client):

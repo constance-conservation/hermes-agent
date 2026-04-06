@@ -56,14 +56,48 @@ def _json_response(data: Any) -> str:
 # Config
 # ---------------------------------------------------------------------------
 
+def _parse_mem0_key_from_env_file(path: Path) -> str:
+    """Read MEM0_API_KEY from a .env file without requiring python-dotenv."""
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if line.startswith("MEM0_API_KEY="):
+            val = line.split("=", 1)[1].strip()
+            if (len(val) >= 2) and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]
+            return val
+    return ""
+
+
 def _load_config() -> dict:
     """Load config from $HERMES_HOME/mem0.json merged with env vars.
 
+    Always refreshes process env from ``load_hermes_dotenv`` for the active
+    ``HERMES_HOME`` (profile ``.env``) so ``MEM0_API_KEY`` is visible even when
+    the gateway cached an AIAgent that initialized before dotenv was applied.
+
     File values win when set; env fills missing ``api_key`` / ``user_id`` /
-    ``agent_id`` so ``MEM0_API_KEY`` in ``~/.hermes/.env`` still works when
+    ``agent_id`` so ``MEM0_API_KEY`` in profile or root ``.env`` still works when
     ``mem0.json`` only contains non-secret options (rerank, etc.).
     """
     from hermes_constants import get_hermes_home
+    from hermes_cli.env_loader import load_hermes_dotenv
+
+    home = get_hermes_home()
+    try:
+        load_hermes_dotenv(hermes_home=home)
+    except Exception as exc:
+        logger.debug("Mem0 load_hermes_dotenv skipped: %s", exc)
+
     defaults = {
         "api_key": os.environ.get("MEM0_API_KEY", ""),
         "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
@@ -73,7 +107,23 @@ def _load_config() -> dict:
         "rerank": True,
         "keyword_search": False,
     }
-    config_path = get_hermes_home() / "mem0.json"
+    if not (defaults["api_key"] or "").strip():
+        pk = _parse_mem0_key_from_env_file(home / ".env")
+        if pk:
+            defaults["api_key"] = pk
+    if not (defaults["api_key"] or "").strip():
+        parts = home.parts
+        if "profiles" in parts:
+            try:
+                pi = parts.index("profiles")
+                root_env = Path(*parts[:pi]) / ".env"
+                pk2 = _parse_mem0_key_from_env_file(root_env)
+                if pk2:
+                    defaults["api_key"] = pk2
+            except (ValueError, OSError):
+                pass
+
+    config_path = home / "mem0.json"
     if config_path.exists():
         try:
             file_cfg = json.loads(config_path.read_text(encoding="utf-8"))
@@ -821,17 +871,32 @@ class Mem0MemoryProvider(MemoryProvider):
                 self._consecutive_failures, _BREAKER_COOLDOWN_SECS,
             )
 
+    def _reload_from_disk(self) -> None:
+        """Re-read profile ``.env`` + ``mem0.json`` (gateway may cache agents across env changes)."""
+        cfg = _load_config()
+        new_key = (cfg.get("api_key") or "").strip()
+        new_org = (cfg.get("org_id") or "").strip()
+        new_proj = (cfg.get("project_id") or "").strip()
+        old_key = (self._api_key or "").strip()
+        old_org = (self._org_id or "").strip()
+        old_proj = (self._project_id or "").strip()
+        if (new_key, new_org, new_proj) != (old_key, old_org, old_proj):
+            with self._client_lock:
+                self._client = None
+        self._config = cfg
+        self._api_key = new_key
+        self._user_id = cfg.get("user_id", "hermes-user")
+        self._agent_id = cfg.get("agent_id", "hermes")
+        self._org_id = new_org
+        self._project_id = new_proj
+        self._rerank = cfg.get("rerank", True)
+        self._keyword_search = cfg.get("keyword_search", False)
+
     def initialize(self, session_id: str, **kwargs) -> None:
-        self._config = _load_config()
-        self._api_key = self._config.get("api_key", "")
-        self._user_id = self._config.get("user_id", "hermes-user")
-        self._agent_id = self._config.get("agent_id", "hermes")
-        self._org_id = (self._config.get("org_id") or "").strip()
-        self._project_id = (self._config.get("project_id") or "").strip()
-        self._rerank = self._config.get("rerank", True)
-        self._keyword_search = self._config.get("keyword_search", False)
+        self._reload_from_disk()
 
     def system_prompt_block(self) -> str:
+        self._reload_from_disk()
         _names = ", ".join(s["name"] for s in MEM0_ALL_TOOL_SCHEMAS)
         _scope = f"user_id={self._user_id}, agent_id={self._agent_id}"
         if self._org_id and self._project_id:
@@ -880,7 +945,10 @@ class Mem0MemoryProvider(MemoryProvider):
         return f"## Mem0 Memory\n{result}"
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
-        if self._is_breaker_open() or not (self._api_key or "").strip():
+        if self._is_breaker_open():
+            return
+        self._reload_from_disk()
+        if not (self._api_key or "").strip():
             return
 
         def _run():
@@ -908,7 +976,10 @@ class Mem0MemoryProvider(MemoryProvider):
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Send the turn to Mem0 for server-side fact extraction (non-blocking)."""
-        if self._is_breaker_open() or not (self._api_key or "").strip():
+        if self._is_breaker_open():
+            return
+        self._reload_from_disk()
+        if not (self._api_key or "").strip():
             return
 
         def _sync():
@@ -1048,6 +1119,8 @@ class Mem0MemoryProvider(MemoryProvider):
             return json.dumps({
                 "error": "Mem0 API temporarily unavailable (multiple consecutive failures). Will retry automatically."
             })
+
+        self._reload_from_disk()
 
         # Async invoke first: operation "chat" is a stub and does not need an API key.
         if tool_name == "mem0_async_invoke":
