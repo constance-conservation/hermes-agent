@@ -117,6 +117,43 @@ class TestPrimaryRuntimeSnapshot:
 # _restore_primary_runtime()
 # =============================================================================
 
+class TestRestoreWithHealthCheck:
+    def test_probe_fail_keeps_fallback(self):
+        agent = _make_agent(
+            fallback_model={
+                "provider": "openrouter",
+                "model": "anthropic/claude-sonnet-4",
+                "restore_health_check": True,
+            },
+        )
+        mock_client = _mock_resolve()
+        with patch("agent.auxiliary_client.resolve_provider_client", return_value=(mock_client, None)):
+            agent._try_activate_fallback()
+        assert agent._fallback_activated is True
+        with patch.object(agent, "_probe_primary_healthy", return_value=False):
+            assert agent._restore_primary_runtime() is False
+        assert agent._fallback_activated is True
+        assert agent.provider == "openrouter"
+
+    def test_probe_ok_restores_primary(self):
+        agent = _make_agent(
+            fallback_model={
+                "provider": "openrouter",
+                "model": "anthropic/claude-sonnet-4",
+                "restore_health_check": True,
+            },
+        )
+        original_provider = agent.provider
+        mock_client = _mock_resolve()
+        with patch("agent.auxiliary_client.resolve_provider_client", return_value=(mock_client, None)):
+            agent._try_activate_fallback()
+        with patch.object(agent, "_probe_primary_healthy", return_value=True):
+            with patch("run_agent.OpenAI", return_value=MagicMock()):
+                assert agent._restore_primary_runtime() is True
+        assert agent._fallback_activated is False
+        assert agent.provider == original_provider
+
+
 class TestRestorePrimaryRuntime:
     def test_noop_when_not_fallback(self):
         agent = _make_agent()

@@ -75,6 +75,13 @@ from tools.browser_tool import cleanup_browser
 
 from hermes_constants import OPENROUTER_BASE_URL
 
+# Hermes-only keys on ``fallback_model`` / ``fallback_providers`` entries (not passed to the provider router).
+_FALLBACK_CHAIN_META_KEYS = frozenset({
+    "only_rate_limit",
+    "restore_health_check",
+    "health_check_message",
+})
+
 # Agent internals extracted to agent/ package for modularity
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
@@ -895,6 +902,18 @@ class AIAgent:
             else:
                 print(f"🔄 Fallback chain ({len(self._fallback_chain)} providers): " +
                       " → ".join(f"{f['model']} ({f['provider']})" for f in self._fallback_chain))
+
+        # Optional behaviour flags (read from the first chain entry; documented in templates).
+        self._fallback_only_rate_limit = False
+        self._fallback_restore_health_check = False
+        self._fallback_health_check_message = "ping"
+        if self._fallback_chain:
+            _fb0 = self._fallback_chain[0]
+            self._fallback_only_rate_limit = bool(_fb0.get("only_rate_limit"))
+            self._fallback_restore_health_check = bool(_fb0.get("restore_health_check"))
+            _hcm = (_fb0.get("health_check_message") if isinstance(_fb0.get("health_check_message"), str) else None)
+            if _hcm is not None:
+                self._fallback_health_check_message = _hcm.strip() or "ping"
 
         # Get available tools with filtering
         self.tools = get_tool_definitions(
@@ -4502,7 +4521,96 @@ class AIAgent:
 
     # ── Provider fallback ──────────────────────────────────────────────────
 
-    def _try_activate_fallback(self) -> bool:
+    @staticmethod
+    def _fallback_entry_for_resolve(fb: Dict[str, Any]) -> Dict[str, Any]:
+        """Strip Hermes-only keys from a fallback chain entry for the provider router."""
+        return {k: v for k, v in fb.items() if k not in _FALLBACK_CHAIN_META_KEYS}
+
+    @staticmethod
+    def _exception_indicates_rate_limit(exc: BaseException) -> bool:
+        """True when an API exception looks like quota / rate limiting."""
+        status = getattr(exc, "status_code", None)
+        if status == 429:
+            return True
+        msg = str(exc).lower()
+        return any(
+            s in msg
+            for s in (
+                "rate limit",
+                "too many requests",
+                "rate_limit",
+                "usage limit",
+                "resource exhausted",
+                "quota",
+            )
+        )
+
+    def _probe_primary_healthy(self) -> bool:
+        """Send a minimal primary-model request; True if it succeeds without rate limits.
+
+        Uses ``_primary_runtime`` (snapshot at agent init), not the active fallback client.
+        """
+        self._last_primary_probe_rate_limited = False
+        rt = getattr(self, "_primary_runtime", None) or {}
+        api_mode = rt.get("api_mode")
+        ping = getattr(self, "_fallback_health_check_message", "ping") or "ping"
+
+        try:
+            if api_mode == "anthropic_messages":
+                from agent.anthropic_adapter import build_anthropic_client
+
+                client = build_anthropic_client(
+                    rt.get("anthropic_api_key") or "",
+                    rt.get("anthropic_base_url"),
+                )
+                try:
+                    resp = client.messages.create(
+                        model=rt.get("model") or "",
+                        max_tokens=16,
+                        messages=[{"role": "user", "content": ping}],
+                    )
+                finally:
+                    close_fn = getattr(client, "close", None)
+                    if callable(close_fn):
+                        try:
+                            close_fn()
+                        except Exception:
+                            pass
+                for block in getattr(resp, "content", None) or []:
+                    txt = getattr(block, "text", None)
+                    if txt and str(txt).strip():
+                        return True
+                return False
+
+            if api_mode != "chat_completions":
+                return True
+
+            kw = dict(rt.get("client_kwargs") or {})
+            if kw.get("timeout") is None:
+                kw["timeout"] = 25.0
+            client = OpenAI(**kw)
+            try:
+                resp = client.chat.completions.create(
+                    model=rt.get("model") or "",
+                    messages=[{"role": "user", "content": ping}],
+                    max_tokens=16,
+                )
+            finally:
+                self._close_openai_client(client, reason="primary_health_probe", shared=False)
+
+            choice0 = resp.choices[0] if resp and getattr(resp, "choices", None) else None
+            msg = getattr(choice0, "message", None) if choice0 else None
+            content = getattr(msg, "content", None) if msg else None
+            if isinstance(content, str):
+                return bool(content.strip())
+            return bool(content)
+        except Exception as exc:
+            if self._exception_indicates_rate_limit(exc):
+                self._last_primary_probe_rate_limited = True
+            logger.info("Primary health probe failed: %s", exc)
+            return False
+
+    def _try_activate_fallback(self, *, triggered_by_rate_limit: bool = False) -> bool:
         """Switch to the next fallback model/provider in the chain.
 
         Called when the current model is failing after retries.  Swaps the
@@ -4513,16 +4621,24 @@ class AIAgent:
         Uses the centralized provider router (resolve_provider_client) for
         auth resolution and client construction — no duplicated provider→key
         mappings.
+
+        Args:
+            triggered_by_rate_limit: When ``only_rate_limit: true`` is set on the
+                fallback entry, activation is skipped unless this is True.
         """
+        if getattr(self, "_fallback_only_rate_limit", False) and not triggered_by_rate_limit:
+            return False
+
         if self._fallback_index >= len(self._fallback_chain):
             return False
 
         fb = self._fallback_chain[self._fallback_index]
         self._fallback_index += 1
-        fb_provider = (fb.get("provider") or "").strip().lower()
-        fb_model = (fb.get("model") or "").strip()
+        fb_resolve = self._fallback_entry_for_resolve(fb)
+        fb_provider = (fb_resolve.get("provider") or "").strip().lower()
+        fb_model = (fb_resolve.get("model") or "").strip()
         if not fb_provider or not fb_model:
-            return self._try_activate_fallback()  # skip invalid, try next
+            return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # skip invalid, try next
 
         # Use centralized router for client construction.
         # raw_codex=True because the main agent needs direct responses.stream()
@@ -4535,7 +4651,7 @@ class AIAgent:
                 logging.warning(
                     "Fallback to %s failed: provider not configured",
                     fb_provider)
-                return self._try_activate_fallback()  # try next in chain
+                return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain
 
             # Determine api_mode from provider / base URL
             fb_api_mode = "chat_completions"
@@ -4611,7 +4727,7 @@ class AIAgent:
             return True
         except Exception as e:
             logging.error("Failed to activate fallback %s: %s", fb_model, e)
-            return self._try_activate_fallback()  # try next in chain
+            return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain
 
     # ── Per-turn primary restoration ─────────────────────────────────────
 
@@ -4625,12 +4741,31 @@ class AIAgent:
 
         The gateway creates a fresh agent per message so this is a no-op
         there (``_fallback_activated`` is always False at turn start).
+
+        When ``restore_health_check`` is set on the fallback entry, the primary
+        is probed with a minimal message (default ``ping``) first; if the probe
+        still hits rate limits, the agent stays on the fallback model.
         """
         if not self._fallback_activated:
             return False
 
         rt = self._primary_runtime
         try:
+            if getattr(self, "_fallback_restore_health_check", False):
+                pm = rt.get("api_mode")
+                if pm in ("chat_completions", "anthropic_messages"):
+                    if not self._probe_primary_healthy():
+                        if getattr(self, "_last_primary_probe_rate_limited", False):
+                            self._emit_status(
+                                "🔁 Primary still rate-limited — staying on fallback model",
+                                "fallback",
+                            )
+                        else:
+                            self._emit_status(
+                                "🔁 Primary health check failed — staying on fallback model",
+                                "fallback",
+                            )
+                        return False
             # ── Core runtime state ──
             self.model = rt["model"]
             self.provider = rt["provider"]
@@ -6962,7 +7097,7 @@ class AIAgent:
                         # rather than retrying with extended backoff.
                         if self._fallback_index < len(self._fallback_chain):
                             self._emit_status("⚠️ Empty/malformed response — switching to fallback...")
-                        if self._try_activate_fallback():
+                        if self._try_activate_fallback(triggered_by_rate_limit=False):
                             retry_count = 0
                             continue
 
@@ -6997,7 +7132,7 @@ class AIAgent:
                         if retry_count >= max_retries:
                             # Try fallback before giving up
                             self._emit_status(f"⚠️ Max retries ({max_retries}) for invalid responses — trying fallback...")
-                            if self._try_activate_fallback():
+                            if self._try_activate_fallback(triggered_by_rate_limit=False):
                                 retry_count = 0
                                 continue
                             self._emit_status(f"❌ Max retries ({max_retries}) exceeded for invalid responses. Giving up.")
@@ -7443,7 +7578,7 @@ class AIAgent:
                         pool_may_recover = pool is not None and pool.has_available()
                         if not pool_may_recover:
                             self._emit_status("⚠️ Rate limited — switching to fallback provider...")
-                            if self._try_activate_fallback():
+                            if self._try_activate_fallback(triggered_by_rate_limit=True):
                                 retry_count = 0
                                 continue
 
@@ -7632,7 +7767,7 @@ class AIAgent:
                         # Try fallback before aborting — a different provider
                         # may not have the same issue (rate limit, auth, etc.)
                         self._emit_status(f"⚠️ Non-retryable error (HTTP {status_code}) — trying fallback...")
-                        if self._try_activate_fallback():
+                        if self._try_activate_fallback(triggered_by_rate_limit=False):
                             retry_count = 0
                             continue
                         self._dump_api_request_debug(
@@ -7686,7 +7821,7 @@ class AIAgent:
                             continue
                         # Try fallback before giving up entirely
                         self._emit_status(f"⚠️ Max retries ({max_retries}) exhausted — trying fallback...")
-                        if self._try_activate_fallback():
+                        if self._try_activate_fallback(triggered_by_rate_limit=is_rate_limited):
                             retry_count = 0
                             continue
                         _final_summary = self._summarize_api_error(api_error)

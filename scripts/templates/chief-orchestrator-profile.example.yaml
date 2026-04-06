@@ -76,6 +76,19 @@ delegation:
   provider: openrouter
   model: tier:dynamic
 
+# Rate-limit fallback: hosted Gemma 4 on the Gemini API (not OpenRouter). Uses GEMINI_API_KEY
+# from this profile’s .env (same key as AI Studio). Official model id: gemma-4-31b-it
+# (see https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api ).
+# only_rate_limit: switch to fallback only on 429 / quota-style errors (not auth or payload errors).
+# restore_health_check: each new turn probes the primary with health_check_message (default "ping");
+# if the primary still rate-limits, stay on Gemma until the probe succeeds.
+fallback_model:
+  provider: gemini
+  model: gemma-4-31b-it
+  only_rate_limit: true
+  restore_health_check: true
+  health_check_message: "ping"
+
 # Skip dangerous-terminal approval prompts (gateway + CLI). Same effect as HERMES_YOLO_MODE.
 # Set to manual/smart when you want interactive approvals again.
 approvals:

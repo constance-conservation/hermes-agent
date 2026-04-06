@@ -20,6 +20,12 @@
 #
 # Disable enforcement: HERMES_TOKEN_GOVERNANCE_DISABLE=1
 # Allow blocked models through: HERMES_GOVERNANCE_ALLOW_PREMIUM=1
+#
+# When the primary OpenRouter (or other) tier hits quota/rate limits, configure
+# fallback_model in profiles/<name>/config.yaml (see chief-orchestrator-profile.example.yaml):
+# provider gemini + model gemma-4-31b-it + only_rate_limit + restore_health_check so Hermes
+# uses hosted Gemma 4 via generativelanguage.googleapis.com (GEMINI_API_KEY) until the primary
+# passes a minimal ping again.
 
 version: 1
 enabled: true

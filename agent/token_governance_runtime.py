@@ -240,6 +240,9 @@ def apply_token_governance_runtime(agent: Any) -> None:
 
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
+    # Stay on the active provider/model while provider fallback is pinned (e.g. rate limits).
+    if getattr(agent, "_fallback_activated", False):
+        return
     from agent.consultant_routing import (
         consultant_routing_enabled,
         format_status_line,

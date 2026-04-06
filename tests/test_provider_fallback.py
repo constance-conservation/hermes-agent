@@ -154,3 +154,28 @@ class TestFallbackChainAdvancement:
             ]
             assert agent._try_activate_fallback() is True
             assert agent.model == "gpt-4o"
+
+
+class TestOnlyRateLimitFallback:
+    def test_only_rate_limit_skips_without_rate_limit_flag(self):
+        fb = {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "only_rate_limit": True,
+        }
+        agent = _make_agent(fallback_model=fb)
+        assert agent._try_activate_fallback(triggered_by_rate_limit=False) is False
+        assert agent._fallback_activated is False
+        assert agent._fallback_index == 0
+
+    def test_only_rate_limit_activates_when_rate_limited(self):
+        fb = {
+            "provider": "openai",
+            "model": "gpt-4o",
+            "only_rate_limit": True,
+        }
+        agent = _make_agent(fallback_model=fb)
+        with patch("agent.auxiliary_client.resolve_provider_client",
+                    return_value=(_mock_client(), "gpt-4o")):
+            assert agent._try_activate_fallback(triggered_by_rate_limit=True) is True
+        assert agent._fallback_activated is True
