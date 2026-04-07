@@ -655,7 +655,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 24,
+    "_config_version": 25,
 }
 
 # =============================================================================
@@ -2093,6 +2093,46 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if not quiet:
                 print(f"  ⚠ v24 blocklist migration skipped: {e}")
             results["warnings"].append(f"v24 migration: {e}")
+
+    # ── Version 24 → 25: update governance YAML blocked_model_substrings to allow claude-sonnet-4.6 ──
+    if current_ver < 25:
+        try:
+            import copy as _copy
+            # Remove overbroad claude blocks from the governance runtime YAML so
+            # anthropic/claude-sonnet-4-6 (tier D) is not blocked at runtime.
+            _ops_path = None
+            try:
+                from hermes_constants import get_hermes_home as _ghh
+                _ops_path = _ghh() / "workspace" / "operations" / "hermes_token_governance.runtime.yaml"
+            except Exception:
+                pass
+            if _ops_path and _ops_path.exists():
+                import yaml as _yaml
+                with open(_ops_path) as _yf:
+                    _gov = _yaml.safe_load(_yf) or {}
+                _blocked = _gov.get("blocked_model_substrings")
+                if isinstance(_blocked, list):
+                    _TO_REMOVE = {"claude-sonnet-4", "claude-sonnet-4.5", "anthropic/claude"}
+                    _cleaned = [x for x in _blocked if str(x).strip() not in _TO_REMOVE]
+                    if len(_cleaned) != len(_blocked):
+                        _gov["blocked_model_substrings"] = _cleaned
+                        # Also update tier D if it's still google/gemini-2.5-flash
+                        _tm = _gov.get("tier_models")
+                        if isinstance(_tm, dict):
+                            _d = str(_tm.get("D") or "").strip()
+                            if _d in ("google/gemini-2.5-flash", "openrouter/auto", ""):
+                                _tm["D"] = "anthropic/claude-sonnet-4-6"
+                                _gov["tier_models"] = _tm
+                        with open(_ops_path, "w") as _yf:
+                            _yaml.dump(_gov, _yf, default_flow_style=False, allow_unicode=True)
+                        if not quiet:
+                            print("  ✓ v25: Updated governance YAML — enabled claude-sonnet-4.6 as tier D")
+            merge_user_config_yaml({"_config_version": 25})
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v25 governance YAML migration skipped: {e}")
+            results["warnings"].append(f"v25 migration: {e}")
+            merge_user_config_yaml({"_config_version": 25})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

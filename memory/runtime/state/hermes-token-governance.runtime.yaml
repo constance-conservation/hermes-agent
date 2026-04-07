@@ -1,20 +1,20 @@
 version: 1
 enabled: true
 tier_models:
-  A: google/gemini-2.5-flash          # fast, free daily via Gemini API
-  B: google/gemini-2.5-flash-lite     # cheapest, routine tasks
+  # A-C: free Gemini tiers (via Gemini API direct or OpenRouter).
+  A: google/gemini-2.5-flash          # ultra-fast, free daily cap
+  B: google/gemini-2.5-flash-lite     # lightest, cheapest — routine tasks
   C: google/gemini-2.5-pro            # stronger reasoning, medium tasks
-  D: google/gemini-2.5-flash          # solid general default
-  # E/F: OpenAI GPT-5 consultants via api.openai.com (OPENAI_API_KEY_DROPLET).
-  E: gpt-5.4
-  F: gpt-5.3-codex
+  # D: dominant consultant for most complex tasks — claude-sonnet-4.6 via OpenRouter.
+  D: anthropic/claude-sonnet-4-6
+  # E/F: native api.openai.com consultants (OPENAI_API_KEY_DROPLET or OPENAI_API_KEY).
+  E: gpt-5.4                          # hardest non-coding reasoning
+  F: gpt-5.3-codex                    # coding specialist — preferred for engineering
 chief_default_tier: D
 blocked_fallback_tier: B
 blocked_model_substrings:
+  # Block only the most expensive/deprecated models; claude-sonnet-4.6 is tier D.
   - claude-opus
-  - claude-sonnet-4
-  - claude-sonnet-4.5
-  - anthropic/claude
   - claude-3.5-sonnet
   - gpt-4
   - openai/o1

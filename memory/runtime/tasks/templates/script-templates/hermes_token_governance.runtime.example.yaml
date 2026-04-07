@@ -35,13 +35,15 @@ enabled: true
 # you explicitly use OpenRouter for the main session and pick OR models in /models.
 # Consultant tiers E/F run only when consultant_routing approves (policy § Consultant model).
 tier_models:
-  # A–D default to OpenRouter auto-routing; blocklisted vendor slugs in YAML are rewritten at runtime.
-  A: "openrouter/auto"
-  B: "openrouter/auto"
-  C: "openrouter/auto"
-  D: "openrouter/auto"
-  E: "gpt-5.4"
-  F: "gpt-5.3-codex"
+  # A–C: free Gemini tiers (direct Gemini API or OpenRouter).
+  A: "google/gemini-2.5-flash"        # ultra-fast, free daily cap
+  B: "google/gemini-2.5-flash-lite"   # lightest, routine tasks
+  C: "google/gemini-2.5-pro"          # stronger reasoning, medium tasks
+  # D: dominant consultant for most complex tasks — claude-sonnet-4.6 via OpenRouter.
+  D: "anthropic/claude-sonnet-4-6"
+  # E/F: native api.openai.com consultants (OPENAI_API_KEY_DROPLET or OPENAI_API_KEY).
+  E: "gpt-5.4"                        # hardest non-coding reasoning
+  F: "gpt-5.3-codex"                  # coding specialist — preferred for engineering
 
 # Chief orchestrator baseline when config says `model.default: tier:D` (or omit default_model here).
 chief_default_tier: D
@@ -53,10 +55,8 @@ blocked_fallback_tier: B
 # default_model: "tier:D"
 
 blocked_model_substrings:
+  # Block only premium/deprecated models; claude-sonnet-4.6 is explicitly allowed as tier D.
   - claude-opus
-  - claude-sonnet-4
-  - claude-sonnet-4.5
-  - anthropic/claude
   - claude-3.5-sonnet
   - gpt-4
   - openai/o1

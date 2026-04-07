@@ -312,6 +312,20 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
             logger.debug("resolve_consultant_tier failed", exc_info=True)
             tier = deterministic_tier
             audit = {}
+
+    # Store free_model_brief for injection into user message (free tiers A/B/C only).
+    _router_rec = audit.get("router") or {}
+    _free_brief = _router_rec.get("free_model_brief") if isinstance(_router_rec, dict) else None
+    if _free_brief and tier in ("A", "B", "C"):
+        setattr(agent, "_free_model_brief_for_turn", str(_free_brief).strip())
+    else:
+        setattr(agent, "_free_model_brief_for_turn", None)
+
+    # Log profile suggestion if routing engine provided one.
+    _profile_sug = _router_rec.get("profile_suggestion") if isinstance(_router_rec, dict) else None
+    if _profile_sug:
+        logger.info("routing_engine: suggested profile=%r for this turn (informational)", _profile_sug)
+
     mid = tier_models.get(tier)
     if not mid:
         return

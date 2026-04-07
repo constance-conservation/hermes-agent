@@ -7014,6 +7014,17 @@ class AIAgent:
         finally:
             self._skip_per_turn_tier_routing = False
 
+        # Inject free_model_brief when routing engine assigned a free tier (A/B/C).
+        # The brief is a concise, machine-readable restatement of the task optimised
+        # for the limited model so it performs better without full-context reasoning.
+        _free_brief = getattr(self, "_free_model_brief_for_turn", None)
+        if _free_brief:
+            user_message = (
+                f"[ROUTING BRIEF — follow precisely]\n{_free_brief}\n\n"
+                f"[USER REQUEST]\n{user_message}"
+            )
+            setattr(self, "_free_model_brief_for_turn", None)  # consumed
+
         # Optional HR / org profile consultation (same governance runtime YAML)
         try:
             from agent.token_governance_runtime import load_runtime_config

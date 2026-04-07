@@ -152,6 +152,7 @@ def _call_aux_task(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+    # Session override takes highest priority (user chose a specific router via /models router).
     override = getattr(agent, "_router_session_override", None) if agent is not None else None
     if isinstance(override, dict):
         prov = str(override.get("provider") or "").strip()
@@ -183,6 +184,35 @@ def _call_aux_task(
                 max_tokens=max_tokens,
             )
             return extract_content_or_reasoning(resp) or ""
+
+    # For routing/classification tasks: prefer GPT-5.4 via native OpenAI.
+    # This gives genuinely dynamic, non-static routing decisions rather than
+    # always falling back to the same Gemini model. Challenger/chief tasks also
+    # benefit from GPT-5.4's nuanced judgment.
+    _ROUTING_TASKS = ("consultant_router", "consultant_challenger", "consultant_chief",
+                      "profile_router")
+    if task in _ROUTING_TASKS:
+        try:
+            from agent.openai_native_runtime import native_openai_runtime_tuple
+            _rt = native_openai_runtime_tuple()
+            bt, ak = _rt if _rt else (None, None)
+            if bt and ak:
+                resp = call_llm(
+                    task=None,
+                    provider="custom",
+                    model="gpt-5.4",
+                    base_url=bt,
+                    api_key=ak,
+                    messages=msgs,
+                    temperature=0.2,
+                    max_tokens=max_tokens,
+                )
+                result = extract_content_or_reasoning(resp) or ""
+                if result:
+                    logger.debug("_call_aux_task: used GPT-5.4 for task=%s", task)
+                    return result
+        except Exception as exc:
+            logger.debug("_call_aux_task: GPT-5.4 routing failed for %s, falling back: %s", task, exc)
 
     resp = call_llm(
         task,
@@ -333,17 +363,18 @@ def resolve_consultant_tier(
             )
         sys_router = (
             "You are an intelligent routing advisor for a multi-tier AI organization. "
-            "Tiers B–F increase in capability and cost. Match tier to genuine task complexity.\n"
-            "- Tier B: ultra-simple ops (classify, format, short Q&A, one-liners)\n"
-            "- Tier C: routine reasoning, medium-length tasks without heavy code/architecture\n"
-            "- Tier D: solid general work — coding, debugging, multi-step reasoning, analysis\n"
-            "- Tier E: consultant — complex multi-file refactors, novel architectures, deep "
-            "security analysis, cross-system reconciliation, tasks that genuinely require "
-            "top-tier reasoning to get right the first time\n"
-            "- Tier F: coding consultant — the hardest coding/engineering tasks\n\n"
-            "IMPORTANT: Do not default to D. Recommend E or F whenever the task complexity "
-            "genuinely warrants it. Under-routing costs more in retries than a single E/F call. "
-            "Set request_consultant_escalation=true whenever you recommend E or F."
+            "Tiers A–F increase in capability and cost. Match tier strictly to genuine task complexity.\n"
+            "- Tier A: one-liners, trivial ack/lookup, pure formatting\n"
+            "- Tier B: short/simple tasks, renames, single-file edits (FREE)\n"
+            "- Tier C: multi-step reasoning, moderate analysis, batch ops (FREE)\n"
+            "- Tier D: complex tasks, most consultations, writing, planning, debugging (claude-sonnet-4.6)\n"
+            "- Tier E: hardest non-coding reasoning, ambiguous multi-domain problems (gpt-5.4)\n"
+            "- Tier F: deep engineering, architecture, refactors, complex code generation (gpt-5.3-codex)\n\n"
+            "ROUTING BIAS: Use A/B/C for the bulk of routine/menial work — they are free. "
+            "Only escalate to D for genuinely complex tasks. Only escalate to E/F for the hardest tasks "
+            "or after repeated failures. Under-routing is better than over-routing unless quality matters.\n"
+            "IMPORTANT: Set request_consultant_escalation=true whenever you recommend E or F. "
+            "For coding/engineering tasks that warrant consultant escalation, prefer F over E."
         )
         hint = ""
         if gov_sig:
@@ -365,26 +396,74 @@ def resolve_consultant_tier(
             "Actively recommend E/F for complex multi-step, architectural, security-sensitive, "
             "or previously-failed tasks."
         )
+        # --- Unified routing engine (GPT-5.4 primary, Gemini Flash fallback) ---
+        # Attempt routing_engine.route_prompt first for unified tier + free_model_brief.
+        # Only use its result when it actually got an LLM response (parsed=True).
+        # Otherwise fall through to the legacy _call_aux_task path.
+        rec = None
+        esc = False
+        free_model_brief = None
+        coding_task_hint = False
+        _used_routing_engine = False
         try:
-            raw_r = _call_aux_task(
-                router_task, sys_router, user_router, max_tokens=400, agent=agent
+            from agent.routing_engine import route_prompt as _route_prompt
+
+            _conv = getattr(agent, "_conversation_history_for_routing", None)
+            _route = _route_prompt(
+                user_message,
+                available_profiles=None,
+                conversation_messages=_conv,
+                fallback_tier=deterministic_tier,
             )
-            parsed = _extract_json_object(raw_r) or {}
-            rec = _normalize_tier_letter(str(parsed.get("recommended_tier") or ""), tier_models)
-            esc = bool(parsed.get("request_consultant_escalation"))
-            audit["router"] = {
-                "raw_excerpt": raw_r[:2000],
-                "recommended_tier": rec,
-                "request_consultant_escalation": esc,
-                "rationale": str(parsed.get("rationale") or "")[:500],
-            }
-        except Exception as e:
-            logger.info("consultant router LLM failed; using deterministic tier: %s", e)
-            audit["router"] = {"error": str(e)}
-            return deterministic_tier, audit
+            if _route.audit.get("parsed"):
+                rec = _normalize_tier_letter(_route.tier, tier_models)
+                esc = _route.tier in ("E", "F")
+                free_model_brief = _route.free_model_brief
+                coding_task_hint = _route.coding_task
+                audit["router"] = {
+                    "raw_excerpt": (_route.audit.get("raw_excerpt") or "")[:500],
+                    "recommended_tier": rec,
+                    "request_consultant_escalation": esc,
+                    "rationale": "routing_engine unified decision",
+                    "free_model_brief": free_model_brief,
+                    "coding_task": coding_task_hint,
+                    "profile_suggestion": _route.profile,
+                }
+                _used_routing_engine = True
+        except Exception as _re_err:
+            logger.debug("routing_engine import/call failed: %s", _re_err)
+
+        if not _used_routing_engine:
+            # Legacy fallback: _call_aux_task (also used by tests that mock it)
+            try:
+                raw_r = _call_aux_task(
+                    router_task, sys_router, user_router, max_tokens=400, agent=agent
+                )
+                parsed = _extract_json_object(raw_r) or {}
+                rec = _normalize_tier_letter(str(parsed.get("recommended_tier") or ""), tier_models)
+                esc = bool(parsed.get("request_consultant_escalation"))
+                audit["router"] = {
+                    "raw_excerpt": raw_r[:2000],
+                    "recommended_tier": rec,
+                    "request_consultant_escalation": esc,
+                    "rationale": str(parsed.get("rationale") or "")[:500],
+                }
+            except Exception as e:
+                logger.info("consultant router LLM failed; using deterministic tier: %s", e)
+                audit["router"] = {"error": str(e)}
+                return deterministic_tier, audit
 
         if rec is None:
             return deterministic_tier, audit
+
+        # coding_task hint: prefer tier F (gpt-5.3-codex) over E when escalating to consultant.
+        if coding_task_hint and rec == "E" and "F" in tier_models:
+            logger.debug("routing_engine: coding_task hint — upgrading E → F (gpt-5.3-codex)")
+            rec = "F"
+            esc = True
+            if isinstance(audit.get("router"), dict):
+                audit["router"]["recommended_tier"] = rec
+                audit["router"]["coding_task_upgrade"] = True
 
         if mode == "llm":
             # Router may downgrade below deterministic or upgrade; still subject to deliberation gates.

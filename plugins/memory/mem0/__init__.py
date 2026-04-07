@@ -98,10 +98,31 @@ def _load_config() -> dict:
     except Exception as exc:
         logger.debug("Mem0 load_hermes_dotenv skipped: %s", exc)
 
+    # Auto-derive profile-scoped agent_id so each profile maintains its own
+    # memory entity in Mem0 (e.g. agent:chief-orchestrator, agent:coder, etc.).
+    # Override explicitly with MEM0_AGENT_ID env var or mem0.json "agent_id" field.
+    _default_agent_id = os.environ.get("MEM0_AGENT_ID", "")
+    if not _default_agent_id.strip():
+        try:
+            from hermes_constants import get_hermes_home as _ghh
+            _parts = _ghh().parts
+            if "profiles" in _parts:
+                _pi = _parts.index("profiles")
+                if _pi + 1 < len(_parts):
+                    _default_agent_id = f"agent:{_parts[_pi + 1]}"
+        except Exception:
+            pass
+    if not _default_agent_id.strip():
+        _default_agent_id = "hermes"
+
+    # User entity: MEM0_USER_ID defaults to "hermes-user" but can be set to
+    # "user:<given_name>" in the profile's .env to give named users their own memory.
+    _default_user_id = os.environ.get("MEM0_USER_ID", "hermes-user")
+
     defaults = {
         "api_key": os.environ.get("MEM0_API_KEY", ""),
-        "user_id": os.environ.get("MEM0_USER_ID", "hermes-user"),
-        "agent_id": os.environ.get("MEM0_AGENT_ID", "hermes"),
+        "user_id": _default_user_id,
+        "agent_id": _default_agent_id,
         "org_id": os.environ.get("MEM0_ORG_ID", ""),
         "project_id": os.environ.get("MEM0_PROJECT_ID", ""),
         "rerank": True,
