@@ -147,7 +147,13 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="Download HF models under local_models/hub/")
     ap.add_argument("--budget-gb", type=float, default=200.0)
-    ap.add_argument("--max-workers", type=int, default=32)
+    ap.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Parallel shard workers. Overrides manifest max_workers when provided. "
+             "Keep ≤4 on low-RAM hosts (VPS) to avoid OOM.",
+    )
     ap.add_argument("--manifest", type=Path, default=LOCAL / "manifest.yaml")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
@@ -165,7 +171,11 @@ def main() -> int:
 
     raw = yaml.safe_load(args.manifest.read_text(encoding="utf-8")) or {}
     budget_bytes = int(float(raw.get("budget_gb", args.budget_gb)) * (1024**3))
-    max_workers = int(raw.get("max_workers", args.max_workers))
+    # CLI --max-workers takes priority over manifest to allow VPS-safe overrides
+    if args.max_workers is not None:
+        max_workers = args.max_workers
+    else:
+        max_workers = int(raw.get("max_workers", 4))
     repos_cfg = raw.get("repos") or []
 
     api = HfApi()
