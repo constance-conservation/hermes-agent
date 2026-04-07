@@ -2291,7 +2291,9 @@ class HermesCLI:
                 except Exception:
                     _loc = None
                 if _loc:
-                    _local_base, _local_key = _loc
+                    _local_base, _local_key = _loc[0], _loc[1]
+                    # Use the resolved local path as model name (avoids server re-download)
+                    _local_model = _loc[2] if len(_loc) > 2 and _loc[2] else model
                 else:
                     # HERMES_LOCAL_INFERENCE_BASE_URL not set — assume default vLLM port.
                     _local_base = (
@@ -2304,6 +2306,7 @@ class HermesCLI:
                         _os_local.environ.get("HERMES_LOCAL_INFERENCE_API_KEY", "").strip()
                         or "dummy-local"
                     )
+                    _local_model = model
                     print(
                         f"\n⚠  Local inference server URL not configured. "
                         f"Trying {_local_base}\n"
@@ -2313,7 +2316,7 @@ class HermesCLI:
                     )
                 self._pipeline_model_once = None
                 return {
-                    "model": model,
+                    "model": _local_model,
                     "runtime": {
                         "api_key": _local_key,
                         "base_url": _local_base,
@@ -2325,7 +2328,7 @@ class HermesCLI:
                     },
                     "label": f"/models → {model} (local)",
                     "skip_per_turn_tier_routing": True,
-                    "signature": (model, "openai", _local_base, None, None, ()),
+                    "signature": (_local_model, "openai", _local_base, None, None, ()),
                 }
             if pk == "openrouter":
                 rt = resolve_runtime_provider(requested="openrouter")

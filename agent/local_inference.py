@@ -69,8 +69,43 @@ def filter_hub_model_ids_by_local_state(
     return filtered
 
 
-def local_inference_override_for_hub_model(fb_model: str) -> Optional[Tuple[str, str]]:
-    """If ``HERMES_LOCAL_INFERENCE_BASE_URL`` is set and *fb_model* is in download state, return (base_url, api_key)."""
+def _resolve_served_model_path(hub_id: str, state: dict) -> str:
+    """Return the best local path to use as the ``model`` field in API calls.
+
+    Prefers a 4-bit quantized variant (``<path>-mlx-4bit``) when present,
+    then the original BF16 path from state.json, then the hub id unchanged.
+    """
+    repos = state.get("repos") or {}
+    entry = repos.get(hub_id) if isinstance(repos, dict) else None
+    base_path: Optional[str] = None
+    if isinstance(entry, dict):
+        base_path = (entry.get("path") or "").strip() or None
+
+    if not base_path:
+        # Derive from hub id: Qwen/QwQ-32B -> local_models/hub/Qwen__QwQ-32B
+        derived = hub_id.replace("/", "__")
+        candidate = Path(__file__).resolve().parent.parent / "local_models" / "hub" / derived
+        if candidate.is_dir():
+            base_path = str(candidate)
+
+    if base_path:
+        quant_path = base_path + "-mlx-4bit"
+        if Path(quant_path).is_dir():
+            return quant_path
+        if Path(base_path).is_dir():
+            return base_path
+
+    return hub_id  # fallback: let the server resolve it
+
+
+def local_inference_override_for_hub_model(fb_model: str) -> Optional[Tuple[str, str, str]]:
+    """If ``HERMES_LOCAL_INFERENCE_BASE_URL`` is set and *fb_model* is in download state,
+    return ``(base_url, api_key, served_model_name)``.
+
+    *served_model_name* is the local filesystem path to pass as the ``model``
+    field in OpenAI-compatible API calls (avoids the server re-downloading the
+    hub model).  Prefers the 4-bit quantized variant when present.
+    """
     base = os.environ.get("HERMES_LOCAL_INFERENCE_BASE_URL", "").strip()
     if not base:
         return None
@@ -91,4 +126,5 @@ def local_inference_override_for_hub_model(fb_model: str) -> Optional[Tuple[str,
     if not b.endswith("/v1"):
         b = f"{b}/v1"
     key = os.environ.get("HERMES_LOCAL_INFERENCE_API_KEY", "dummy-local").strip() or "dummy-local"
-    return b, key
+    served_name = _resolve_served_model_path(mid, state)
+    return b, key, served_name

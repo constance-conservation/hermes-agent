@@ -5006,6 +5006,10 @@ class AIAgent:
                     logger.debug("local_inference override failed", exc_info=True)
                 if _loc:
                     explicit_base, explicit_key = _loc[0], _loc[1]
+                    # Use the resolved local path as model name so the server
+                    # reuses the already-loaded model instead of re-fetching.
+                    if len(_loc) > 2 and _loc[2] and _loc[2] != fb_model:
+                        fb_model = _loc[2]
                 else:
                     # If the model is locally downloaded but no server is configured,
                     # skip HF inference entirely and fall through to next fallback
