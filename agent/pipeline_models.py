@@ -15,6 +15,12 @@ from agent.routing_model_blocklist import filter_blocklisted_models, is_routing_
 MENU_ACTION_OPENROUTER_BROWSE = "openrouter_browse"
 MENU_ACTION_CHOOSE_ROUTER = "choose_router"
 
+# Bumped when /models menu shape changes (shortcuts, actions, pipeline filter rules).
+MODELS_MENU_SCHEMA_VERSION = 2
+
+# Bumped when /models menu shape changes (shortcuts, actions, blocklist). Check with: /models list
+MODELS_MENU_SCHEMA_VERSION = 2
+
 # Next-prompt routing: api.openai.com + OPENAI_API_KEY (bare model ids).
 PROVIDER_KIND_OPENAI_NATIVE = "openai_native"
 # Session router row: same stack, stored as custom+base_url on the agent override.

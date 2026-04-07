@@ -5862,6 +5862,7 @@ class HermesCLI:
             from agent.pipeline_models import (
                 MENU_ACTION_CHOOSE_ROUTER,
                 MENU_ACTION_OPENROUTER_BROWSE,
+                MODELS_MENU_SCHEMA_VERSION,
                 PROVIDER_KIND_OPENAI_NATIVE_ROUTER,
                 collect_models_menu_entries,
                 collect_router_picker_model_rows,
@@ -5885,6 +5886,15 @@ class HermesCLI:
             }
 
         if rest.lower() == "list":
+            _cprint(
+                f"  /models menu schema v{MODELS_MENU_SCHEMA_VERSION} — "
+                "expect GPT-5 shortcuts + OpenRouter browse + Choose-Router before pipeline rows."
+            )
+            _cprint(
+                f"  {_DIM}If line 1 is only your config primary with no shortcuts, this process is not "
+                f"running this checkout: use `{_RST}./venv/bin/python -m hermes_cli.main tui{_DIM}` "
+                f"(or `scripts/hermes`) from the updated repo, not an old global `hermes`.{_RST}"
+            )
             for i, e in enumerate(entries, start=1):
                 if e.get("kind") == "action":
                     _cprint(f"  {i}. {e.get('label')}")
