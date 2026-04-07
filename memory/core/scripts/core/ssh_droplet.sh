@@ -118,7 +118,10 @@ REMOTE_BASE=(
   ssh -tt -o BatchMode=no -o IdentitiesOnly=yes -o IdentityAgent=none
   -o AddKeysToAgent=no -o ControlMaster=no -o ControlPath=none
   -o StrictHostKeyChecking=accept-new
-  -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4
+  -o ConnectTimeout=20
+  -o ServerAliveInterval=10
+  -o ServerAliveCountMax=30
+  -o TCPKeepAlive=yes
   -i "$KEY_FILE" -p "${SSH_PORT:?}"
   "${SSH_USER:?}@${HOST}"
 )
