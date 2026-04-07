@@ -655,7 +655,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 23,
+    "_config_version": 24,
 }
 
 # =============================================================================
@@ -2017,6 +2017,82 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if not quiet:
                 print(f"  ⚠ v23 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v23 migration: {e}")
+
+    # ── Version 23 → 24: purge blocklisted model IDs from free_model_routing tiers ──
+    if current_ver < 24:
+        try:
+            cfg_path = get_config_path()
+            raw_user: dict = {}
+            if cfg_path.exists():
+                with open(cfg_path) as _f:
+                    raw_user = yaml.safe_load(_f) or {}
+            if not isinstance(raw_user, dict):
+                raw_user = {}
+
+            fmr = raw_user.get("free_model_routing")
+            if isinstance(fmr, dict):
+                fmr = copy.deepcopy(fmr)
+                _changed = False
+
+                _BLOCK = ["kimi", "minimax", "gemma-3", "deepseek", "gpt-oss"]
+
+                def _blocked(mid: str) -> bool:
+                    low = str(mid).lower()
+                    return any(sub in low for sub in _BLOCK)
+
+                def _clean_tier_list(tiers_list):
+                    nonlocal _changed
+                    if not isinstance(tiers_list, list):
+                        return tiers_list
+                    result = []
+                    for tier in tiers_list:
+                        if not isinstance(tier, dict):
+                            result.append(tier)
+                            continue
+                        models = tier.get("models")
+                        if isinstance(models, list):
+                            clean = [m for m in models if not _blocked(str(m))]
+                            if len(clean) != len(models):
+                                tier = dict(tier)
+                                tier["models"] = clean
+                                _changed = True
+                        result.append(tier)
+                    return result
+
+                # Clean top-level tiers
+                if "tiers" in fmr:
+                    fmr["tiers"] = _clean_tier_list(fmr["tiers"])
+
+                # Clean kimi_router sub-section
+                kr = fmr.get("kimi_router")
+                if isinstance(kr, dict):
+                    kr = dict(kr)
+                    rm = str(kr.get("router_model") or "").strip()
+                    if rm and _blocked(rm):
+                        kr["router_model"] = "gemma-4-31b-it"
+                        _changed = True
+                    if "tiers" in kr:
+                        kr["tiers"] = _clean_tier_list(kr["tiers"])
+                    fmr["kimi_router"] = kr
+
+                if _changed:
+                    merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 24})
+                    results["config_added"].append(
+                        "free_model_routing (v24: purged blocklisted model IDs)"
+                    )
+                    if not quiet:
+                        print(
+                            "  ✓ v24: Removed blocklisted model IDs (kimi/minimax/deepseek/gpt-oss) "
+                            "from free_model_routing tiers"
+                        )
+                else:
+                    merge_user_config_yaml({"_config_version": 24})
+            else:
+                merge_user_config_yaml({"_config_version": 24})
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v24 blocklist migration skipped: {e}")
+            results["warnings"].append(f"v24 migration: {e}")
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

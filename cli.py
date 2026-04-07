@@ -267,6 +267,17 @@ def load_cli_config() -> Dict[str, Any]:
         },
     }
     
+    # Auto-run pending config migrations silently before loading config.
+    # This ensures that blocked/stale model IDs are purged from config.yaml
+    # before we read it into memory, even if the agent/ package is old.
+    try:
+        from hermes_cli.config import check_config_version, migrate_config as _migrate_config
+        _cur_ver, _latest_ver = check_config_version()
+        if _cur_ver < _latest_ver:
+            _migrate_config(interactive=False, quiet=True)
+    except Exception:
+        pass
+
     # Track whether the config file explicitly set terminal config.
     # When using defaults (no config file / no terminal section), we should NOT
     # overwrite env vars that were already set by .env -- only a user's config
