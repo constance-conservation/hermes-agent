@@ -6,7 +6,7 @@ Consolidated rules for runtime zones, generated outputs, and template use.
 
 Policy zone (canonical source):
 
-- `policies/core/runtime/agent/memory/governance/source/*`
+- `workspace/memory/governance/source/*`
 
 Runtime zone (operational truth for instantiated work):
 

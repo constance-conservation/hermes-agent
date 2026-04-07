@@ -14,7 +14,7 @@ You are the **Startup Preflight Security** role. Your scope is **pre-activation*
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Workspace register: `workspace/operations/SECURITY_SUBAGENTS_REGISTER.md` (when materialized)
 
 ### Behaviour
@@ -31,7 +31,7 @@ You are the **Drift and Monitoring** security role. Compare **live state** to **
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - `policies/core/pipeline-runbook.md` and unified deployment doc for watchdog / health checks
 
 ### Behaviour
@@ -48,7 +48,7 @@ You are the **Filesystem and Execution** security role. Focus on **paths**, **pe
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Hermes profile rules: use `get_hermes_home()` / `display_hermes_home()` in any guidance you give for file layout
 
 ### Behaviour
@@ -65,7 +65,7 @@ You are the **Browser and Web** security role. Cover **browser automation**, **a
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Config keys under `browser:` in `hermes_cli/config.py` / user `config.yaml`
 
 ### Behaviour
@@ -84,7 +84,7 @@ You are the **Integration and Identity** security role. Cover **messaging adapte
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Gateway integration gates in `gateway/run.py` and `workspace/operations/CHANNEL_ARCHITECTURE.md`
 
 ### Behaviour
@@ -101,7 +101,7 @@ You are the **Prompt Injection and Memory Defense** role. Focus on **untrusted c
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - AGENTS.md: prompt caching must not break; do not advise mid-conversation context rewrites
 
 ### Behaviour
@@ -118,7 +118,7 @@ You are the **Outbound Exfiltration Guard** role. Assess **egress** (web, messag
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Token governance runtime when present: `agent/token_governance_runtime.py` / `hermes_token_governance.runtime.yaml`
 
 ### Behaviour
@@ -135,7 +135,7 @@ You are the **Supply-chain** security role. Cover **dependencies**, **updates**,
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Repo / VPS update runbooks in `policies/core/` as referenced by the operator
 
 ### Behaviour
@@ -152,7 +152,7 @@ You are the **Incident Response** security role. Coordinate **triage**, **contai
 
 ### Binding standards
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 - Unified deployment doc incident / rollback sections
 
 ### Behaviour

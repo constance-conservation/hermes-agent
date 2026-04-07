@@ -29,7 +29,7 @@ After completing this file, the next file in the order of operations is:
 
 Then:
 
-- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the runtime artifact trees (`AGENT_HOME/workspace/operations/` and runtime-editable `.../workspace/policies/core/governance/generated/`).
+- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the runtime artifact trees (`AGENT_HOME/workspace/operations/` and runtime-editable `.../policies/core/governance/generated/`).
 
 ---
 
@@ -40,8 +40,8 @@ Follow this order exactly:
 1. `policies/core/security-first-setup.md` (this file)
 2. `policies/core/unified-deployment-and-security.md`
 3. `policies/core/deployment-handoff.md`
-4. `policies/core/runtime/agent/BOOTSTRAP.md`
-5. `policies/core/runtime/agent/AGENTS.md`
+4. `workspace/memory/BOOTSTRAP.md`
+5. `workspace/memory/AGENTS.md`
 6. the remaining attached agent markdown files referenced by `BOOTSTRAP.md` and `AGENTS.md`
 
 **Within this file (human setup before the policies pipeline):** finish the **environment** (Steps 1–8) → provision **isolated service accounts** and credentials the agent will use (Step 9) → place **deployment entry files** (Step 10) → keep integrations minimal (Step 11) → **validate** (Step 12). **After** `deployment-handoff.md`, when you are ready to verify and index the policy tree, run the pipeline described in [`policies/core/pipeline-runbook.md`](pipeline-runbook.md) (`start_pipeline.py`)—do not treat the pipeline as a substitute for the runbooks.
@@ -213,7 +213,7 @@ Before deploying any runtime policies or prompts, you should end up with:
   - `workspace/output`
   - `workspace/logs`
 - one **runtime policy root** under `AGENT_HOME/policies/` (canonical read-mostly policy bundle outside workspace)
-- one **workspace-editable policy area** under `AGENT_HOME/workspace/policies/` for policy files expected to change during operation (for example generated markdown and approved local working copies)
+- one **workspace-editable policy area** under `AGENT_HOME/policies/` for policy files expected to change during operation (for example generated markdown and approved local working copies)
 - one **dedicated browser profile** on the runtime host if a browser is used—only for the agent
 - **no** mounting workstation directories into the runtime workspace
 - **no** password manager or personal vault on the runtime host
@@ -352,7 +352,7 @@ Rules:
 - no broad filesystem roots
 - no mounted workstation paths
 - canonical policy files consumed by runtime should be staged under `AGENT_HOME/policies/` (outside workspace)
-- only runtime-editable policy material should be under `AGENT_HOME/workspace/policies/`
+- only runtime-editable policy material should be under `AGENT_HOME/policies/`
 
 Make a note of the exact canonical path to this workspace.
 
@@ -533,13 +533,13 @@ If your workflow uses an **IDE** or similar **agent-assisted coding environment*
 
 ## Step 10 — Prepare the Deployment Entry Files
 
-Before activation, place these entry files where the builder and runtime can access them. In runtime deployments, stage canonical policy files under `AGENT_HOME/policies/` and keep only runtime-editable policy files under `AGENT_HOME/workspace/policies/`:
+Before activation, place these entry files where the builder and runtime can access them. In runtime deployments, stage canonical policy files under `AGENT_HOME/policies/` and keep only runtime-editable policy files under `AGENT_HOME/policies/`:
 
 - `policies/core/security-first-setup.md`
 - `policies/core/unified-deployment-and-security.md`
 - `policies/core/deployment-handoff.md`
-- `policies/core/runtime/agent/BOOTSTRAP.md`
-- `policies/core/runtime/agent/AGENTS.md`
+- `workspace/memory/BOOTSTRAP.md`
+- `workspace/memory/AGENTS.md`
 
 The order is intentional (see the “Required Order of Operations” section above).
 
@@ -604,7 +604,7 @@ Before allowing any runtime agent to activate, manually verify:
 - no workstation mounts inside workspace
 - `operations/` exists under `AGENT_HOME/workspace/operations/`
 - canonical runtime policy bundle exists outside workspace under `AGENT_HOME/policies/`
-- only runtime-editable policy files are in `AGENT_HOME/workspace/policies/`
+- only runtime-editable policy files are in `AGENT_HOME/policies/`
 
 ### Network posture
 
@@ -681,7 +681,7 @@ Rules:
 - Runtime file operations are constrained to workspace paths by policy.
 - Agent state/config directories are separated from task workspace directories.
 - Operational registers and project archival memory live under `AGENT_HOME/workspace/operations/`.
-- Runtime policy consumption defaults to `AGENT_HOME/policies/` (outside workspace), while runtime-editable policy content lives under `AGENT_HOME/workspace/policies/`.
+- Runtime policy consumption defaults to `AGENT_HOME/policies/` (outside workspace), while runtime-editable policy content lives under `AGENT_HOME/policies/`.
 
 ### 5) Host firewall posture (default-deny inbound and outbound)
 

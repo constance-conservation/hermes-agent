@@ -16,5 +16,5 @@
 
 ## Policy Mirror
 
-- `policies/core/runtime/agent/`
-- `policies/core/runtime/agent/memory/governance/source/generated/`
+- `workspace/memory/`
+- `workspace/memory/governance/source/generated/`

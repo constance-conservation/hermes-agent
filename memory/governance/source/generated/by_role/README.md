@@ -6,7 +6,7 @@
 
 # Generated output by role (scaling template)
 
-Use this layout when a **named company role** (e.g. product lead, engineering supervisor, pipeline specialist) needs a **durable workspace** under `policies/core/runtime/agent/memory/governance/source/generated/` that can grow without flattening everything into one folder.
+Use this layout when a **named company role** (e.g. product lead, engineering supervisor, pipeline specialist) needs a **durable workspace** under `workspace/memory/governance/source/generated/` that can grow without flattening everything into one folder.
 
 ## Principles
 
@@ -18,8 +18,8 @@ Use this layout when a **named company role** (e.g. product lead, engineering su
 ## Folder shape (minimal)
 
 ```text
-policies/core/runtime/agent/memory/governance/source/generated/by_role/<role_slug>/
-  README.md           # charter, scope, active projects, links to policies/core/runtime/agent/memory/governance/source/standards/* and policies/core/runtime/agent/memory/governance/source/role-prompts/*
+workspace/memory/governance/source/generated/by_role/<role_slug>/
+  README.md           # charter, scope, active projects, links to workspace/memory/governance/source/standards/* and workspace/memory/governance/source/role-prompts/*
   standards/          # role-specific norms that are not yet canonical policy
   playbooks/          # repeatable procedures for this role
   decisions/          # ADR-style or dated decision logs (no secrets)

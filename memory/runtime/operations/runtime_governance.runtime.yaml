@@ -1,0 +1,9 @@
+version: 1
+enabled: true
+active_role_slug: chief_orchestrator
+summary: |
+  Runtime governance directives for the chief-orchestrator profile.
+read_order_paths:
+  - HERMES_HOME/.hermes.md
+  - WORKSPACE/memory/knowledge/references/anchors/agents.md
+  - WORKSPACE/memory/runtime/state/hermes-token-governance.runtime.yaml

@@ -53,6 +53,18 @@ The active consolidation and memory integration plan is implemented through this
 
 - `../references/index/memory-network.md`
 
+
+## Canonical Local Memory Source
+The directory /home/hermesuser/.hermes/profiles/chief-orchestrator/workspace/memory/ is the authoritative local memory system. It contains structured memory domains (core, governance, actors, knowledge, runtime) and should be consulted as the primary source of truth for chief-orchestrator operations. Do not treat root workspace files or other directories as authoritative memory sources.
+
+## Archival memory (mandatory)
+Project-level detail, evidence trails, and recall-oriented logs live under each project AGENT_HOME/workspace/memory/knowledge/projects tree, not in this file.
+Minimum cadence for writing archival files (in addition to role prompts):
+- after substantive decisions or governance-relevant actions
+- after evidence-producing steps
+- before handoff, long idle, or context compaction
+Keep this file to summaries and pointers (paths, dates, topics); duplicate long-form content only when the canonical pack requires it for upward summary.
+
 ## Related
 
 - `../../../runtime/tasks/procedures/mem0-cloud-memory-policy.md`

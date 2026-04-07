@@ -27,7 +27,7 @@ It does not replace the earlier constitutional layer.
 ## Implementation Prompt
 
 ```text
-Implement the additive governance defined in policies/core/runtime/agent/memory/governance/source/standards/token-model-tool-and-channel-governance-policy.md (canonical read-order: read that standard immediately before this prompt).
+Implement the additive governance defined in workspace/memory/governance/source/standards/token-model-tool-and-channel-governance-policy.md (canonical read-order: read that standard immediately before this prompt).
 
 Your role is to integrate this policy into the existing AI-company architecture without restating or weakening earlier policies.
 
@@ -146,5 +146,5 @@ If there is ambiguity, choose the interpretation that reduces token burn, reduce
 ```
 
 <!-- policy-read-order-nav:bottom -->
-> **Next step:** continue to [core/runtime/agent/BOOTSTRAP.md](../../runtime/agent/BOOTSTRAP.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
+> **Next step:** continue to [workspace/memory/BOOTSTRAP.md](../../runtime/agent/BOOTSTRAP.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.
 <!-- policy-read-order-nav:bottom-end -->

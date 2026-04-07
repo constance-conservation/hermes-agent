@@ -2,7 +2,7 @@
 
 | AG-ID | Project slug | Status | Policy | Prompt |
 |-------|--------------|--------|--------|--------|
-| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `policies/core/runtime/agent/memory/governance/source/standards/project-lead-policy-template.md` | `policies/core/runtime/agent/memory/governance/source/role-prompts/project-lead-template.md` — Hermes profile **`project-lead-agentic-company`** (manifest bootstrap) |
+| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `workspace/memory/governance/source/standards/project-lead-policy-template.md` | `workspace/memory/governance/source/role-prompts/project-lead-template.md` — Hermes profile **`project-lead-agentic-company`** (manifest bootstrap) |
 
 ## Project brief (agentic-company)
 

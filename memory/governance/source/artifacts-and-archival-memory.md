@@ -14,10 +14,10 @@ This document defines how the **agentic company** pipeline produces **runtime fi
 
 | Zone | Path (default) | Purpose |
 |------|----------------|---------|
-| **Policy-side generation** | `policies/core/runtime/agent/memory/governance/source/generated/` in source control; runtime copy under `AGENT_HOME/workspace/policies/core/runtime/agent/memory/governance/source/generated/` when editable | New markdown **derived from** policy work (playbooks, extensions, scoped directives). Indexed; visible to orchestrator and leads. |
+| **Policy-side generation** | `workspace/memory/governance/source/generated/` in source control; runtime copy under `AGENT_HOME/workspace/memory/governance/source/generated/` when editable | New markdown **derived from** policy work (playbooks, extensions, scoped directives). Indexed; visible to orchestrator and leads. |
 | **Operational truth** | `AGENT_HOME/workspace/operations/` | Cross-project **registers**, audits, and **per-project** folders. Not a substitute for canonical policies. |
 
-Keep canonical policy sources under `policies/` (except `generated/`) auditable and small. **Numbered domain policies** live in `policies/core/runtime/agent/memory/governance/source/standards/`. Put volume and churn in `AGENT_HOME/workspace/operations/` or `AGENT_HOME/workspace/policies/core/runtime/agent/memory/governance/source/generated/`.
+Keep canonical policy sources under `policies/` (except `generated/`) auditable and small. **Numbered domain policies** live in `workspace/memory/governance/source/standards/`. Put volume and churn in `AGENT_HOME/workspace/operations/` or `AGENT_HOME/workspace/memory/governance/source/generated/`.
 
 ### Runtime placement model (mandatory)
 
@@ -25,7 +25,7 @@ Keep canonical policy sources under `policies/` (except `generated/`) auditable 
 - Canonical policy files used at runtime should be staged under `AGENT_HOME/policies/` (or equivalent policy root under `AGENT_HOME`) so the agent can read them without treating them as routine editable workspace files.
 - Workspace-editable runtime files live under `AGENT_HOME/workspace/`.
 - Operational registers and project archival memory always live under `AGENT_HOME/workspace/operations/`.
-- Only policy files expected to change during routine operation should be in `AGENT_HOME/workspace/policies/` (for example generated markdown and approved local runtime working copies).
+- Only policy files expected to change during routine operation should be in `AGENT_HOME/policies/` (for example generated markdown and approved local runtime working copies).
 
 ---
 
@@ -53,7 +53,7 @@ operations/
         active/                # short-lived working notes (optional)
         archival/              # dated append-only archival files (mandatory use)
       artifacts/               # deliverables, exports, non-memory outputs
-      generated/               # project-scoped markdown not promoted to policies/core/runtime/agent/memory/governance/source/generated/
+      generated/               # project-scoped markdown not promoted to workspace/memory/governance/source/generated/
 ```
 
 **Archival rule:** Any agent with a project affiliation **must** write to `AGENT_HOME/workspace/operations/projects/<slug>/memory/archival/` continuously: dated filenames (`YYYY-MM-DD_topic.md` or sequential `0001_topic.md`), append-style entries for decisions, evidence pointers (not secrets), blockers, and handoffs. **Active recall:** orchestrators and project leads **must** consult recent archival files when resuming work or answering status questions.
@@ -62,12 +62,12 @@ Orchestrator `agent/MEMORY.md` holds **pointers** to archives, not a duplicate o
 
 ---
 
-## 3. `policies/core/runtime/agent/memory/governance/source/generated/` layout
+## 3. `workspace/memory/governance/source/generated/` layout
 
 On-demand markdown **approved by policy** (orchestrator, project lead, or security role per runbook) is stored here so it remains part of the **same brain** and discoverable.
 
 ```text
-policies/core/runtime/agent/memory/governance/source/generated/
+workspace/memory/governance/source/generated/
   README.md                    # index: table of paths, owner role, date, upstream policy anchor
   playbooks/                   # procedural bundles
   extensions/                  # scoped addenda to roles or channels
@@ -78,7 +78,7 @@ policies/core/runtime/agent/memory/governance/source/generated/
     <role_slug>/               # e.g. product_lead — standards/, playbooks/, decisions/, scratch/
 ```
 
-**Wiring rule:** Every new file under `policies/core/runtime/agent/memory/governance/source/generated/` must be listed in `policies/core/runtime/agent/memory/governance/source/generated/README.md` with: **title, path, owning role, date, related canonical policy/runbook section**. In runtime environments, keep the editable generated tree under `AGENT_HOME/workspace/policies/core/runtime/agent/memory/governance/source/generated/` and keep that index updated. Project-scoped generated docs that should **not** be shared company-wide stay under `AGENT_HOME/workspace/operations/projects/<slug>/generated/`.
+**Wiring rule:** Every new file under `workspace/memory/governance/source/generated/` must be listed in `workspace/memory/governance/source/generated/README.md` with: **title, path, owning role, date, related canonical policy/runbook section**. In runtime environments, keep the editable generated tree under `AGENT_HOME/workspace/memory/governance/source/generated/` and keep that index updated. Project-scoped generated docs that should **not** be shared company-wide stay under `AGENT_HOME/workspace/operations/projects/<slug>/generated/`.
 
 ---
 
@@ -87,8 +87,8 @@ policies/core/runtime/agent/memory/governance/source/generated/
 Agents **may** create new markdown files when needed to satisfy a governed goal or project scope, provided:
 
 1. The creator’s role is allowed to produce that artifact class (canonical pack + runbook).  
-2. The file lands in `policies/core/runtime/agent/memory/governance/source/generated/` (or runtime editable mirror under `AGENT_HOME/workspace/policies/core/runtime/agent/memory/governance/source/generated/`) **or** `AGENT_HOME/workspace/operations/projects/<slug>/generated/` per scope.  
-3. The index (`policies/core/runtime/agent/memory/governance/source/generated/README.md` or project `README.md`) is updated in the same change window.  
+2. The file lands in `workspace/memory/governance/source/generated/` (or runtime editable mirror under `AGENT_HOME/workspace/memory/governance/source/generated/`) **or** `AGENT_HOME/workspace/operations/projects/<slug>/generated/` per scope.  
+3. The index (`workspace/memory/governance/source/generated/README.md` or project `README.md`) is updated in the same change window.  
 4. No secrets, credentials, or unredacted PII.  
 5. Naming is consistent and sortable (prefix dates or serials).
 
@@ -98,7 +98,7 @@ Forbidden: silent drops of policy-adjacent files into random folders without ind
 
 ## 5. Deployment sync (agent pack)
 
-When policies or prompts change materially, the **workspace agent pack** (`policies/core/runtime/agent/*.md`) must stay aligned:
+When policies or prompts change materially, the **workspace agent pack** (`workspace/memory/*.md`) must stay aligned:
 
 - `AGENTS.md` and `BOOTSTRAP.md` reference this document and `policies/README.md`.  
 - `MEMORY.md` reflects active vs archival split.  

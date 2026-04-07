@@ -84,7 +84,7 @@ python policies/core/scripts/start_pipeline.py --init-operations
 5. **Materializes runtime-editable outputs** under `AGENT_HOME/workspace` when `--workspace-root` (or `AGENT_WORKSPACE_ROOT`) is provided:
    - **`operations/`** — registers and project trees (`init_operations_stubs.py`)
    - **`policies/core/governance/generated/`** — generated governance markdown
-   - **`policies/core/runtime/agent/`** — nested copy of the runtime agent pack (same as repo layout)
+   - **`workspace/memory/`** — nested copy of the runtime agent pack (same as repo layout)
    - **Workspace root (flat)** — copies `BOOTSTRAP.md`, `AGENTS.md`, and the rest of the runtime pack `*.md` files to the **top level** of the workspace directory so operators and Hermes see entry points without deep paths; writes **`WORKSPACE.md`** describing these paths
 6. **`--write-governance-md PATH`** (optional) — renders `scripts/templates/hermes_home_governance.md` with `{{WORKSPACE_ROOT}}` and `{{POLICY_ROOT}}` filled in (e.g. set `PATH` to `$HERMES_HOME/.hermes.md` so the agent receives path wiring via `agent/prompt_builder.py`).
 

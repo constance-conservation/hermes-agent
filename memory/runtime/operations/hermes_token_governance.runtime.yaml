@@ -1,0 +1,8 @@
+version: 1
+enabled: true
+max_agent_turns: 50
+dynamic_tier_routing: true
+default_routing_tier: D
+notes: |
+  Runtime governance source of truth is the active file under
+  WORKSPACE/memory/runtime/state/hermes-token-governance.runtime.yaml.

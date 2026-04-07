@@ -21,7 +21,7 @@
 
 ## Archival
 
-- Long-term narrative archival per `policies/core/runtime/agent/memory/governance/source/artifacts-and-archival-memory.md` when materialized.
+- Long-term narrative archival per `workspace/memory/governance/source/artifacts-and-archival-memory.md` when materialized.
 
 ## Chief bootstrap
 

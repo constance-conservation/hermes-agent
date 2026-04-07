@@ -4,7 +4,7 @@
 
 | Role | Hermes profile | Policy template | Prompt template | Status |
 |------|----------------|-----------------|-----------------|--------|
-| Product Director | `product-director` | `policies/core/runtime/agent/memory/governance/source/standards/functional-director-policy-template.md` (tailor title) | `policies/core/runtime/agent/memory/governance/source/role-prompts/functional-director-template.md` | **ACTIVE** |
+| Product Director | `product-director` | `workspace/memory/governance/source/standards/functional-director-policy-template.md` (tailor title) | `workspace/memory/governance/source/role-prompts/functional-director-template.md` | **ACTIVE** |
 | Engineering Director | `engineering-director` | same | same | **ACTIVE** |
 | Operations Director | `operations-director` | same | same | **ACTIVE** |
 | IT / Security Director | `it-security-director` | same | same | **ACTIVE** |

@@ -18,13 +18,13 @@ Primary references:
 
 - `policies/core/deployment-handoff.md`
 - `policies/core/pipeline-runbook.md`
-- `policies/core/runtime/agent/memory/governance/source/artifacts-and-archival-memory.md`
+- `workspace/memory/governance/source/artifacts-and-archival-memory.md`
 
 ## Activation Commands
 
 ```bash
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/activate-runtime-memory.sh
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
+./workspace/memory/runtime/tasks/scripts/activate-runtime-memory.sh
+./workspace/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
 ```
 
 ## Governance Restart (Folded From Previous Doc)
@@ -32,7 +32,7 @@ Primary references:
 After governance or runtime config changes, restart runtime entrypoints and verify load:
 
 ```bash
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/restart-governance-runtime.sh
+./workspace/memory/runtime/tasks/scripts/restart-governance-runtime.sh
 ./venv/bin/python -m hermes_cli.main -p chief-orchestrator gateway watchdog-check
 ```
 
@@ -44,7 +44,7 @@ cat ~/.hermes/profiles/chief-orchestrator/workspace/operations/hermes_token_gove
 
 ## Stub Policy
 
-Stub files under `policies/core/runtime/agent` were removed intentionally.
+Legacy runtime-agent stubs were removed intentionally; use `workspace/memory/` as canonical runtime memory tree.
 When needed, deploy operational files from templates under:
 
 - `memory/runtime/tasks/templates/generated-artifacts/`

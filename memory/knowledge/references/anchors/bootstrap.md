@@ -15,8 +15,8 @@ Apply runtime directives through root anchors, then expand context only by index
 ## Activation Commands
 
 ```bash
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/activate-runtime-memory.sh
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
+./workspace/memory/runtime/tasks/scripts/activate-runtime-memory.sh
+./workspace/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
 ```
 
 ## CLAW Verbatim Loop

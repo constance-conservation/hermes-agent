@@ -1,12 +1,12 @@
 # Policy Enforcement and Standards
 
-Consolidated non-negotiable standards from `policies/core/runtime/agent/memory/governance/source/standards`.
+Consolidated non-negotiable standards from `workspace/memory/governance/source/standards`.
 
 ## Security Core (Non-Negotiable)
 
 Source:
 
-- `policies/core/runtime/agent/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
+- `workspace/memory/governance/source/standards/canonical-ai-agent-security-policy.md`
 
 Enforce:
 
@@ -22,13 +22,13 @@ Precedence:
 Prompt hook to load with this section:
 
 - `policies/core/security-prompts.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/security-foundation-agents-role-prompts.md`
+- `workspace/memory/governance/source/role-prompts/security-foundation-agents-role-prompts.md`
 
 ## Token, Model, Tool, Channel (Non-Negotiable)
 
 Source:
 
-- `policies/core/runtime/agent/memory/governance/source/standards/token-model-tool-and-channel-governance-policy.md`
+- `workspace/memory/governance/source/standards/token-model-tool-and-channel-governance-policy.md`
 
 Enforce:
 
@@ -43,20 +43,20 @@ Additive-only rule:
 
 Prompt hook to load with this section:
 
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md`
+- `workspace/memory/governance/source/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md`
 
 ## Org and Role Standards
 
 Sources:
 
-- `policies/core/runtime/agent/memory/governance/source/standards/org-mapper-hr-policy.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/functional-director-policy-template.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/project-lead-policy-template.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/supervisor-policy-template.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/worker-specialist-policy-template.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/board-of-directors-review-policy.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/agent-lifecycle-org-hygiene-policy.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/task-state-and-evidence-policy.md`
+- `workspace/memory/governance/source/standards/org-mapper-hr-policy.md`
+- `workspace/memory/governance/source/standards/functional-director-policy-template.md`
+- `workspace/memory/governance/source/standards/project-lead-policy-template.md`
+- `workspace/memory/governance/source/standards/supervisor-policy-template.md`
+- `workspace/memory/governance/source/standards/worker-specialist-policy-template.md`
+- `workspace/memory/governance/source/standards/board-of-directors-review-policy.md`
+- `workspace/memory/governance/source/standards/agent-lifecycle-org-hygiene-policy.md`
+- `workspace/memory/governance/source/standards/task-state-and-evidence-policy.md`
 
 Enforce:
 
@@ -67,22 +67,22 @@ Enforce:
 
 Prompt hooks to load with this section:
 
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/org-mapper-hr-controller.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/functional-director-template.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/project-lead-template.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/supervisor-template.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/worker-specialist-template.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/board-of-directors-review.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/agent-lifecycle-org-hygiene-controller.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/task-state-evidence-enforcer.md`
+- `workspace/memory/governance/source/role-prompts/org-mapper-hr-controller.md`
+- `workspace/memory/governance/source/role-prompts/functional-director-template.md`
+- `workspace/memory/governance/source/role-prompts/project-lead-template.md`
+- `workspace/memory/governance/source/role-prompts/supervisor-template.md`
+- `workspace/memory/governance/source/role-prompts/worker-specialist-template.md`
+- `workspace/memory/governance/source/role-prompts/board-of-directors-review.md`
+- `workspace/memory/governance/source/role-prompts/agent-lifecycle-org-hygiene-controller.md`
+- `workspace/memory/governance/source/role-prompts/task-state-evidence-enforcer.md`
 
 ## Channel and Deployment Standards
 
 Sources:
 
-- `policies/core/runtime/agent/memory/governance/source/standards/channel-architecture-policy.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/client-deployment-policy.md`
-- `policies/core/runtime/agent/memory/governance/source/standards/agentic-company-template.md`
+- `workspace/memory/governance/source/standards/channel-architecture-policy.md`
+- `workspace/memory/governance/source/standards/client-deployment-policy.md`
+- `workspace/memory/governance/source/standards/agentic-company-template.md`
 
 Enforce:
 
@@ -92,10 +92,10 @@ Enforce:
 
 Prompt hooks to load with this section:
 
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/future-channel-architecture-planner.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/client-intake-deployment-template.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/markdown-playbook-generator.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/minimal-default-deployment-order.md`
+- `workspace/memory/governance/source/role-prompts/future-channel-architecture-planner.md`
+- `workspace/memory/governance/source/role-prompts/client-intake-deployment-template.md`
+- `workspace/memory/governance/source/role-prompts/markdown-playbook-generator.md`
+- `workspace/memory/governance/source/role-prompts/minimal-default-deployment-order.md`
 
 ## Prompt Hook Requirement
 

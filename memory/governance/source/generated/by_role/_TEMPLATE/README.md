@@ -12,8 +12,8 @@ Replace `<role_slug>` with your folder name (e.g. `product_lead`, `data_pipeline
 
 - **Title:** _[human-readable role title]_
 - **Reports to:** _[orchestrator / director / project lead]_
-- **Primary policies:** _[links to `policies/core/runtime/agent/memory/governance/source/standards/*.md`]_
-- **Primary prompts:** _[links to `policies/core/runtime/agent/memory/governance/source/role-prompts/*.md`]_
+- **Primary policies:** _[links to `workspace/memory/governance/source/standards/*.md`]_
+- **Primary prompts:** _[links to `workspace/memory/governance/source/role-prompts/*.md`]_
 
 ## Active projects
 

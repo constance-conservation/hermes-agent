@@ -8,19 +8,19 @@
 
 ## Purpose
 
-Activate when operating under `policies/core/runtime/agent/memory/governance/source/standards/client-deployment-policy.md` (and related deployment work). This prompt reminds the agent of **intake questions, scoping, and deployment boundaries** for client-facing or internal “client” workstreams.
+Activate when operating under `workspace/memory/governance/source/standards/client-deployment-policy.md` (and related deployment work). This prompt reminds the agent of **intake questions, scoping, and deployment boundaries** for client-facing or internal “client” workstreams.
 
 ## Instructions
 
 1. Confirm authority and Human Operator approval for the engagement.  
 2. Capture requirements, constraints, data boundaries, and success metrics in writing.  
-3. Map the engagement to **project slug** and `operations/projects/<slug>/` per `policies/core/runtime/agent/memory/governance/source/artifacts-and-archival-memory.md`.  
+3. Map the engagement to **project slug** and `operations/projects/<slug>/` per `workspace/memory/governance/source/artifacts-and-archival-memory.md`.  
 4. Do not store secrets in prompts or generated markdown.  
 5. Escalate ambiguities to Project Lead or orchestrator before irreversible deployment steps.
 
 ## Output
 
-Produce or update a client intake summary suitable for `operations/projects/<slug>/artifacts/` or governed `policies/core/runtime/agent/memory/governance/source/generated/`.
+Produce or update a client intake summary suitable for `operations/projects/<slug>/artifacts/` or governed `workspace/memory/governance/source/generated/`.
 
 <!-- policy-read-order-nav:bottom -->
 > **Next step:** continue to [core/governance/standards/agent-lifecycle-org-hygiene-policy.md](../standards/agent-lifecycle-org-hygiene-policy.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.

@@ -43,9 +43,9 @@ Use this order:
 4. `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` (or equivalent env vars) — verify tree, strict `standards/` cues, refresh `INDEX.md`, and materialize runtime outputs; see [`pipeline-runbook.md`](pipeline-runbook.md)
 5. [`security-prompts.md`](security-prompts.md) and [`chief-orchestrator-directive.md`](chief-orchestrator-directive.md) — activation layer in the **policy read** sequence (still required content before org expansion).
 6. `policies/core/governance/standards/token-model-tool-and-channel-governance-policy.md` then `policies/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md` — token / model / tool / channel governance plus Hermes `workspace/operations/hermes_token_governance.runtime.yaml`. **Phased activation (one chat per session)** runs this block as **Sessions 1–2** *before* **Session 3** (runtime activation audit) so caps apply early — see § Session-by-session prompt order. Implementation map: [`hermes-model-delegation-and-tier-runtime.md`](hermes-model-delegation-and-tier-runtime.md).
-7. `policies/core/runtime/agent/BOOTSTRAP.md`
-8. `policies/core/runtime/agent/AGENTS.md`
-9. the remaining attached agent markdown files referenced by `BOOTSTRAP.md` and `AGENTS.md` (paths under `policies/core/runtime/agent/` in this repository)
+7. `workspace/memory/BOOTSTRAP.md`
+8. `workspace/memory/AGENTS.md`
+9. the remaining attached agent markdown files referenced by `BOOTSTRAP.md` and `AGENTS.md` (paths under `workspace/memory/` in this repository)
 
 Do not skip `BOOTSTRAP.md`. It is required because it instigates and explains use of the full agent markdown pack.
 
@@ -98,7 +98,7 @@ Supporting policy and template sources:
 - `policies/core/governance/role-prompts/minimal-default-deployment-order.md`
 - `policies/core/governance/role-prompts/implement-token-model-and-tool-and-channel-governance-prompt.md`
 
-Attached agent markdown files that must be included in the full deployment process (under `policies/core/runtime/agent/` in this repo):
+Attached agent markdown files that must be included in the full deployment process (under `workspace/memory/` in this repo):
 - `BOOTSTRAP.md`
 - `AGENTS.md`
 - `IDENTITY.md`
@@ -136,7 +136,7 @@ Tasks:
 4. Treat the two files in `policies/core/` as the primary activation prompt sources.
 5. Preserve the current folder layout unless a runtime compatibility issue requires change.
 6. Verify the attached agent markdown pack exists and is readable.
-7. Use `policies/core/runtime/agent/BOOTSTRAP.md` as the bootstrapping file for the agent markdown pack.
+7. Use `workspace/memory/BOOTSTRAP.md` as the bootstrapping file for the agent markdown pack.
 8. Ensure `BOOTSTRAP.md` instigates and explains deployment/use of the other attached agent markdown files.
 9. Ensure `AGENTS.md` and the other attached agent markdown files contain references to the canonical policies, prompts, runbook, artifact pipeline, and bootstrap flow where relevant.
 10. Stage canonical runtime policy files under `AGENT_HOME/policies/` (outside workspace) so runtime can read them as the authoritative policy layer.
@@ -153,7 +153,7 @@ Tasks:
    - `operations/SECURITY_REMEDIATION_QUEUE.md`
    - `operations/INCIDENT_REGISTER.md`
 13. Ensure the pipeline output includes `AGENT_HOME/workspace/operations/projects/` and per-project `memory/archival/` trees for every active project slug.
-14. Ensure the pipeline output includes runtime-editable policy areas under `AGENT_HOME/workspace/policies/` (including `core/governance/generated/README.md` and subfolders) and all runtime agent files under `AGENT_HOME/workspace/policies/core/runtime/agent/`.
+14. Ensure the pipeline output includes runtime-editable policy areas under `AGENT_HOME/policies/` (including `core/governance/generated/README.md` and subfolders) and all runtime agent files under `AGENT_HOME/workspace/memory/`.
 15. Create any supporting folders, registries, templates, and operational files required by the runbook, but do not clone or duplicate canonical policy documents into workspace-editable locations unless the file is intended for routine runtime editing.
 16. Do not activate agents yourself unless explicitly required by runtime design.
 17. Do not weaken any security or governance rule for convenience.
@@ -226,30 +226,30 @@ Use this exact load order:
 7. `policies/core/agentic-company-deployment-pack.md`
 8. `policies/core/security-prompts.md`
 9. `policies/core/chief-orchestrator-directive.md`
-10. `policies/core/runtime/agent/BOOTSTRAP.md`
-11. `policies/core/runtime/agent/AGENTS.md`
-12. the remaining attached agent markdown files (under `policies/core/runtime/agent/` in this repository):
-   - `policies/core/runtime/agent/IDENTITY.md`
-   - `policies/core/runtime/agent/USER.md`
-   - `policies/core/runtime/agent/SOUL.md`
-   - `policies/core/runtime/agent/MEMORY.md`
-   - `policies/core/runtime/agent/ORCHESTRATOR.md`
-   - `policies/core/runtime/agent/RATE_LIMIT_POLICY.md`
-   - `policies/core/runtime/agent/TOOLS.md`
-   - `policies/core/runtime/agent/HEARTBEAT.md`
-   - `policies/core/runtime/agent/SECURITY.md`
-   - `policies/core/runtime/agent/README.md`
+10. `workspace/memory/BOOTSTRAP.md`
+11. `workspace/memory/AGENTS.md`
+12. the remaining attached agent markdown files (under `workspace/memory/` in this repository):
+   - `workspace/memory/IDENTITY.md`
+   - `workspace/memory/USER.md`
+   - `workspace/memory/SOUL.md`
+   - `workspace/memory/MEMORY.md`
+   - `workspace/memory/ORCHESTRATOR.md`
+   - `workspace/memory/RATE_LIMIT_POLICY.md`
+   - `workspace/memory/TOOLS.md`
+   - `workspace/memory/HEARTBEAT.md`
+   - `workspace/memory/SECURITY.md`
+   - `workspace/memory/README.md`
 13. secondary supporting policy files in `policies/core/governance/standards/`
 14. secondary supporting role templates in `policies/core/governance/role-prompts/`
 15. `AGENT_HOME/workspace/operations/` registers and `AGENT_HOME/workspace/operations/projects/*/memory/archival/` as applicable
-16. `AGENT_HOME/workspace/policies/core/governance/generated/` index and governed additions
+16. `AGENT_HOME/policies/core/governance/generated/` index and governed additions
 17. `policies/core/gateway-watchdog.md` when the messaging gateway is production-critical (after activation core)
 
 Activation rules:
 1. Treat the canonical deployment pack as authoritative.
 2. Treat the unified deployment/security runbook as the operational procedure.
-3. Treat `policies/core/runtime/agent/BOOTSTRAP.md` as the bootstrap handoff file for the agent markdown pack.
-4. Treat `policies/core/runtime/agent/AGENTS.md` as the startup/read-order and workspace agent rules file.
+3. Treat `workspace/memory/BOOTSTRAP.md` as the bootstrap handoff file for the agent markdown pack.
+4. Treat `workspace/memory/AGENTS.md` as the startup/read-order and workspace agent rules file.
 5. Do not create ad hoc structure outside the canonical framework unless runtime operation strictly requires it.
 6. Do not duplicate or rename policy files unless necessary for compatibility.
 7. Do not activate broad execution or project work until the security foundation is active.
@@ -257,7 +257,7 @@ Activation rules:
 Before broader activation, do the following:
 - verify the canonical policy files exist
 - verify the supporting policy and prompt files exist
-- verify `policies/core/runtime/agent/BOOTSTRAP.md` and all attached agent markdown files exist
+- verify `workspace/memory/BOOTSTRAP.md` and all attached agent markdown files exist
 - verify pipeline materialization has produced the operational files under `AGENT_HOME/workspace/operations/`:
   - `operations/ORG_REGISTRY.md`
   - `operations/ORG_CHART.md`
@@ -284,7 +284,7 @@ Only if the environment passes or is warning-only, continue by:
 - preparing standards and cadence files
 - activating one Project Lead per real project
 - allowing Project Leads to request subordinate agents only as needed
-- loading the attached agent markdown pack according to `policies/core/runtime/agent/BOOTSTRAP.md` and `policies/core/runtime/agent/AGENTS.md`
+- loading the attached agent markdown pack according to `workspace/memory/BOOTSTRAP.md` and `workspace/memory/AGENTS.md`
 
 Rules:
 - register every agent before activation
@@ -449,13 +449,13 @@ Use this order:
 8. `policies/core/agentic-company-deployment-pack.md`
 9. `policies/core/security-prompts.md`
 10. `policies/core/chief-orchestrator-directive.md`
-11. `policies/core/runtime/agent/BOOTSTRAP.md`
-12. `policies/core/runtime/agent/AGENTS.md`
+11. `workspace/memory/BOOTSTRAP.md`
+12. `workspace/memory/AGENTS.md`
 13. the remaining attached agent markdown files
 14. `policies/core/governance/standards/*.md` supporting policies
 15. `policies/core/governance/role-prompts/*.md` supporting role templates
 16. `AGENT_HOME/workspace/operations/` registers and project memory trees
-17. `AGENT_HOME/workspace/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime editable policy tree)
+17. `AGENT_HOME/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime editable policy tree)
 
 <!-- policy-read-order-nav:bottom -->
 > **Next step:** continue to [core/gateway-watchdog.md](gateway-watchdog.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.

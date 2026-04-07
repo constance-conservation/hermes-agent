@@ -13,11 +13,17 @@ Short-term task context, current objective, and active priorities.
 
 ## Current Objective Template
 
-- Objective:
+- Objective: Consolidate local memory architecture to use `/home/hermesuser/.hermes/profiles/chief-orchestrator/workspace/memory/` as the authoritative local memory source.
 - In-scope:
+  - Update MEMORY.md with explicit pointer to canonical local memory directory
+  - Verify memory architecture aligns with foundation memory contract
+  - Ensure all references to memory loading use structured domains
 - Out-of-scope:
-- Active blockers:
-- Next verification step:
+  - Modifying Mem0 configuration or cloud memory
+  - Changing runtime configuration files
+  - Reorganizing template directories
+- Active blockers: None
+- Next verification step: Check that current-focus.md content is properly loaded in active session.
 
 ## Read Next
 

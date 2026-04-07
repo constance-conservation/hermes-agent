@@ -19,3 +19,9 @@ Domain for live execution context, procedures, and event history.
 - `state/current-focus.md`
 - `tasks/procedures/session-and-bootstrap.md`
 - `tasks/procedures/orchestration-and-escalation.md`
+
+- `operations/` - operational runbooks and governance registers
+
+## Operations
+
+- `operations/README.md`

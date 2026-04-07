@@ -14,7 +14,7 @@ Consolidate startup and session boot rules into one procedure.
 ## Commanded Startup Path
 
 ```bash
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/activate-runtime-memory.sh
+./workspace/memory/runtime/tasks/scripts/activate-runtime-memory.sh
 ```
 
 ## CLAW Verbatim Gate

@@ -13,10 +13,10 @@ Consolidated runtime memory for `governance/source/` with strict enforcement rul
 
 Canonical source content is preserved through direct mapping from:
 
-- `policies/core/runtime/agent/memory/governance/source/standards/*.md`
-- `policies/core/runtime/agent/memory/governance/source/role-prompts/*.md`
-- `policies/core/runtime/agent/memory/governance/source/generated/*`
-- `policies/core/runtime/agent/memory/governance/source/artifacts-and-archival-memory.md`
+- `workspace/memory/governance/source/standards/*.md`
+- `workspace/memory/governance/source/role-prompts/*.md`
+- `workspace/memory/governance/source/generated/*`
+- `workspace/memory/governance/source/artifacts-and-archival-memory.md`
 
 ## Prompt Injection Behavior
 

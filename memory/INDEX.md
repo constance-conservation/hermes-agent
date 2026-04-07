@@ -18,3 +18,5 @@ Structured entrypoint for selective loading.
 - active execution state -> `runtime/state/current-focus.md`
 - evidence and event logs -> `runtime/logs/governance-and-requests-log.md`
 - environment initialization docs -> `core/init/agent-environment-initialization-index.md`
+
+- runtime operations runbooks -> `runtime/operations/README.md`

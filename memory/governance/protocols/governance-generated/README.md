@@ -1,6 +1,6 @@
 # Governance Generated Templates
 
-This directory contains template-style governance artifacts integrated from `policies/core/runtime/agent/memory/governance/source/generated`.
+This directory contains template-style governance artifacts integrated from `workspace/memory/governance/source/generated`.
 
 ## Files
 

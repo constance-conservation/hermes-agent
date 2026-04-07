@@ -1,0 +1,12 @@
+version: 1
+roles:
+  chief_orchestrator:
+    display_name: Chief Orchestrator
+    policy_reads:
+      - POLICY_ROOT/core/chief-orchestrator-directive.md
+      - WORKSPACE/memory/runtime/operations/ORG_REGISTRY.md
+  security_governor:
+    display_name: Chief Security Governor
+    policy_reads:
+      - POLICY_ROOT/core/security-prompts.md
+      - WORKSPACE/memory/runtime/operations/SECURITY_ALERT_REGISTER.md

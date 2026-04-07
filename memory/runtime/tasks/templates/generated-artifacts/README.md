@@ -6,7 +6,7 @@ These templates cover runtime artifacts that policies/scripts expect agents to g
 
 - `policies/core/deployment-handoff.md`
 - `policies/core/pipeline-runbook.md`
-- `policies/core/runtime/agent/memory/governance/source/artifacts-and-archival-memory.md`
+- `workspace/memory/governance/source/artifacts-and-archival-memory.md`
 - `policies/core/scripts/start_pipeline.py`
 - `policies/core/scripts/init_operations_stubs.py`
 - `scripts/core/materialize_rem_operations.sh`
@@ -33,5 +33,5 @@ These templates cover runtime artifacts that policies/scripts expect agents to g
 ## Deployment Command
 
 ```bash
-./policies/core/runtime/agent/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
+./workspace/memory/runtime/tasks/scripts/deploy-operations-artifacts.sh
 ```
