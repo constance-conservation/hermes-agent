@@ -30,6 +30,19 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Prefer this checkout (or ``HERMES_AGENT_REPO``) for ``import agent`` — beats an older
+# ``hermes-agent`` wheel on sys.path that would otherwise shadow ``agent.pipeline_models``.
+_cli_dir = Path(__file__).resolve().parent
+_agent_source_root = _cli_dir
+_env_repo = os.environ.get("HERMES_AGENT_REPO", "").strip()
+if _env_repo:
+    _erp = Path(_env_repo).expanduser().resolve()
+    if (_erp / "agent" / "pipeline_models.py").is_file():
+        _agent_source_root = _erp
+_root_s = str(_agent_source_root)
+if _root_s not in sys.path:
+    sys.path.insert(0, _root_s)
+
 # Suppress startup messages for clean CLI experience
 os.environ["HERMES_QUIET"] = "1"  # Our own modules
 
@@ -5891,9 +5904,10 @@ class HermesCLI:
                 "expect GPT-5 shortcuts + OpenRouter browse + Choose-Router before pipeline rows."
             )
             _cprint(
-                f"  {_DIM}If line 1 is only your config primary with no shortcuts, this process is not "
-                f"running this checkout: use `{_RST}./venv/bin/python -m hermes_cli.main tui{_DIM}` "
-                f"(or `scripts/hermes`) from the updated repo, not an old global `hermes`.{_RST}"
+                f"  {_DIM}If line 1 is only your config primary with no shortcuts, Python is importing "
+                f"an old `agent` package. Fix: `{_RST}export HERMES_AGENT_REPO=/path/to/hermes-agent{_DIM}` "
+                f"then restart, or `{_RST}pip install -e .{_DIM}` in your clone, or run "
+                f"`{_RST}./venv/bin/python -m hermes_cli.main tui{_DIM}` from the updated repo.{_RST}"
             )
             for i, e in enumerate(entries, start=1):
                 if e.get("kind") == "action":

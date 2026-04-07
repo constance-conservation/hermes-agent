@@ -68,8 +68,33 @@ def _require_tty(command_name: str) -> None:
         sys.exit(1)
 
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+def _resolve_hermes_project_root() -> Path:
+    """Return the git-style checkout root (``pyproject.toml`` + ``agent/``), not bare site-packages.
+
+    Plain ``pip install hermes-agent`` (non-editable) places ``hermes_cli`` under
+    ``site-packages``; ``Path(__file__).parent.parent`` is then ``site-packages``, which
+    is correct for imports but is **not** the operator's git clone. Set
+    ``HERMES_AGENT_REPO`` to your checkout so ``import agent`` and ``PROJECT_ROOT``
+    (scripts, ``hermes update``, droplet hop) use the same tree as ``cli.py``.
+    """
+    env_repo = os.environ.get("HERMES_AGENT_REPO", "").strip()
+    if env_repo:
+        p = Path(env_repo).expanduser().resolve()
+        if p.is_dir() and (p / "pyproject.toml").is_file() and (p / "agent" / "pipeline_models.py").is_file():
+            return p
+    here = Path(__file__).resolve()
+    inner = here.parent.parent
+    if (
+        here.parent.name == "hermes_cli"
+        and (inner / "pyproject.toml").is_file()
+        and (inner / "agent" / "pipeline_models.py").is_file()
+    ):
+        return inner
+    return inner
+
+
+# Checkout (or install site root) first on path — ``HERMES_AGENT_REPO`` wins when set.
+PROJECT_ROOT = _resolve_hermes_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
