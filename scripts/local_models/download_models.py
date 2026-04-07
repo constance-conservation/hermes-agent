@@ -161,6 +161,12 @@ def main() -> int:
         action="store_true",
         help="Do not rsync local_models/hub to the droplet after successful verified downloads.",
     )
+    ap.add_argument(
+        "--skip-size-check",
+        action="store_true",
+        help="Skip HF API repo-info size lookup (avoids slow/memory-hungry metadata fetch on large repos). "
+             "All repos in the manifest are downloaded regardless of budget. Recommended on VPS.",
+    )
     args = ap.parse_args()
 
     import yaml
@@ -178,7 +184,6 @@ def main() -> int:
         max_workers = int(raw.get("max_workers", 4))
     repos_cfg = raw.get("repos") or []
 
-    api = HfApi()
     items: list[tuple[str, int, int]] = []
     for i, row in enumerate(repos_cfg):
         if isinstance(row, str):
@@ -190,16 +195,26 @@ def main() -> int:
             continue
         if not rid:
             continue
-        sz = _bytes_for_repo(api, rid)
-        if sz is None:
-            items.append((rid, -1, pri))
-        else:
-            items.append((rid, sz, pri))
+        items.append((rid, pri))
 
-    known = [(a, b, c) for a, b, c in items if b >= 0]
-    unknown = [(a, b, c) for a, b, c in items if b < 0]
-    chosen, skipped_budget = _greedy_pack(known, budget_bytes)
-    skipped: list[tuple[str, int, int]] = list(skipped_budget) + list(unknown)
+    if args.skip_size_check:
+        # Skip the slow/memory-heavy HF API metadata fetch; download all repos directly.
+        chosen = [(rid, -1, pri) for rid, pri in items]
+        skipped: list[tuple[str, int, int]] = []
+        print(
+            f"--skip-size-check: downloading {len(chosen)} repo(s) without budget check",
+            flush=True,
+        )
+    else:
+        api = HfApi()
+        sized_items: list[tuple[str, int, int]] = []
+        for rid, pri in items:
+            sz = _bytes_for_repo(api, rid)
+            sized_items.append((rid, sz if sz is not None else -1, pri))
+        known = [(a, b, c) for a, b, c in sized_items if b >= 0]
+        unknown = [(a, b, c) for a, b, c in sized_items if b < 0]
+        chosen, skipped_budget = _greedy_pack(known, budget_bytes)
+        skipped = list(skipped_budget) + list(unknown)
 
     SKIPPED.write_text(
         json.dumps(
