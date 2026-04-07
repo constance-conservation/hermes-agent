@@ -126,6 +126,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "credential_pool": primary.get("credential_pool"),
             },
             "label": None,
+            "skip_per_turn_tier_routing": False,
             "signature": (
                 primary.get("model"),
                 primary.get("provider"),
@@ -162,6 +163,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
                 "credential_pool": primary.get("credential_pool"),
             },
             "label": None,
+            "skip_per_turn_tier_routing": False,
             "signature": (
                 primary.get("model"),
                 primary.get("provider"),
@@ -183,6 +185,7 @@ def resolve_turn_route(user_message: str, routing_config: Optional[Dict[str, Any
             "args": list(runtime.get("args") or []),
         },
         "label": f"smart route → {route.get('model')} ({runtime.get('provider')})",
+        "skip_per_turn_tier_routing": False,
         "signature": (
             route.get("model"),
             runtime.get("provider"),

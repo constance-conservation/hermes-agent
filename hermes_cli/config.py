@@ -1898,12 +1898,10 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     norm = [str(x).strip() for x in mids if str(x).strip()]
                     if gem4 in norm:
                         continue
-                    # Prepend Gemma-4 API id when tier was Qwen-only (v21 default) or empty.
-                    if not norm or norm == ["Qwen/QwQ-32B"]:
-                        kr["tiers"] = tiers  # ensure we write back same list ref
+                    # Prepend Gemma-4 API id when tier matched v21 Qwen-only default.
+                    if norm == ["Qwen/QwQ-32B"]:
                         t["models"] = [gem4] + norm
                         changed = True
-                        break
             fmr["kimi_router"] = kr
 
             if changed:

@@ -40,9 +40,32 @@ def test_build_chain_kimi_then_optional_gemini():
     assert len(ch) == 2
     assert ch[0]["hf_router"] is True
     assert ch[0]["model"] == "org/router"
-    assert ch[0].get("router_provider") == "huggingface"
+    assert ch[0].get("router_provider") == "gemini"
     assert len(ch[0]["hf_router_tiers"]) == 1
+    assert "gemma-4-31b-it" in (ch[0].get("gemini_native_tier_models") or [])
     assert ch[1]["provider"] == "gemini"
+
+
+def test_filtered_tiers_preserve_gemini_native_models(monkeypatch):
+    monkeypatch.setattr(
+        "agent.free_model_routing.filter_hub_model_ids_by_local_state",
+        lambda ids, enabled=True: [x for x in ids if "Qwen" not in x],
+    )
+    cfg = {
+        "free_model_routing": {
+            "enabled": True,
+            "filter_free_tier_models_by_local_hub": True,
+            "kimi_router": {
+                "router_model": "gemma-4-31b-it",
+                "tiers": [{"id": "local", "models": ["gemma-4-31b-it", "Qwen/QwQ-32B"]}],
+            },
+        }
+    }
+    ch = build_free_fallback_chain(cfg)
+    assert ch
+    flat = [m for t in ch[0]["hf_router_tiers"] for m in t["models"]]
+    assert "gemma-4-31b-it" in flat
+    assert "Qwen/QwQ-32B" not in flat
 
 
 def test_build_chain_router_provider_gemini():

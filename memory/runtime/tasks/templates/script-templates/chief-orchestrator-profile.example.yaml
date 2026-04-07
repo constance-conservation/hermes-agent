@@ -19,6 +19,10 @@
 #   per channel in this file). Concrete slugs live only in `hermes_token_governance.runtime.yaml`.
 # - Each user turn can log "Token governance: this turn Tier X → …" when `dynamic_tier_routing`
 #   is enabled, or when the main model is `tier:dynamic`.
+# - **Consultant escalation (tiers E/F):** with `consultant_routing.enabled: true` in that YAML,
+#   Hermes runs router → internal challenger → **Chief JSON approval** (logged to
+#   workspace/operations/consultant_deliberations.jsonl). Premium paid models are used only when
+#   that pipeline approves; disable with `HERMES_CONSULTANT_ROUTING_DISABLE=1`.
 #
 # `scripts/core/agent-droplet` uses the workstation sticky profile name on the VPS (HERMES_HOME=.../profiles/<name>);
 # if sticky is default/missing it uses chief-orchestrator. Trailing `droplet` on the CLI is not a profile.
@@ -46,9 +50,9 @@ agent:
     # Router LLM: tier pick from ``free_model_routing.kimi_router`` (default: gemma-4-31b-it via Gemini API).
     # Set GEMINI_API_KEY / GOOGLE_API_KEY for routing; HF_TOKEN only if you use router_provider: huggingface.
     use_free_model_routing: true
-    # Optional: pin a hub id before the free_model_routing chain (same provider as main HF path):
+    # Optional: pin a hub id before the free_model_routing chain (HF OpenAI-compatible path):
     # router_provider: huggingface
-    # router_model: MiniMaxAI/MiniMax-M2.5
+    # router_model: org/some-hf-repo
   org_automation:
     enabled: true
 
@@ -104,20 +108,22 @@ delegation:
   model: tier:dynamic
 
 # Free-model pipeline when paid/OpenRouter paths fail (do not set legacy ``fallback_model`` here —
-# it overrides this entire chain). Order: Kimi tiered router → optional Gemini.
+# it overrides this entire chain). Order: Gemma-4 tier router (Gemini API) → optional Gemini.
 # Gemma on Gemini API: https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api
 free_model_routing:
   enabled: true
-  # Tier router: gemma-4-31b-it on Google AI picks between MiniMax and gpt-oss served locally (see local_models/).
+  # Tier router: gemma-4-31b-it on Google AI picks Gemma-4 (same API id) or Qwen when downloaded locally.
   kimi_router:
     router_provider: gemini
     router_model: gemma-4-31b-it
+    gemini_native_tier_models:
+      - gemma-4-31b-it
     tiers:
       - id: local
-        description: "Locally served HF checkpoints (HERMES_LOCAL_INFERENCE_BASE_URL)"
+        description: "Gemma-4 (Gemini API) or Qwen (local hub + HERMES_LOCAL_INFERENCE_BASE_URL)"
         models:
-          - MiniMaxAI/MiniMax-M2.5
-          - openai/gpt-oss-120b
+          - gemma-4-31b-it
+          - Qwen/QwQ-32B
   optional_gemini:
     enabled: true
     model: gemma-4-31b-it

@@ -88,6 +88,8 @@ dynamic_fallback_long_tier: D
 # Operators are not prompted; disable with HERMES_CONSULTANT_ROUTING_DISABLE=1.
 consultant_routing:
   enabled: true
+  # Premium tiers (E/F): internal challenger + Chief JSON approval in agent/consultant_routing.py
+  # (logged to consultant_deliberations.jsonl). Paid tier_models[F] is used only when Chief approves.
   # hybrid: deterministic baseline + router LLM (router may upgrade; cannot downgrade below baseline).
   # llm: router may also downgrade vs baseline. deterministic: skip router (legacy).
   mode: hybrid

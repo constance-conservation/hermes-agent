@@ -178,13 +178,14 @@ def test_classify_keyword_security_skips_llm():
     assert "keyword" in reason.lower()
 
 
-def test_call_profile_router_llm_uses_kimi_tier_pick(monkeypatch):
+def test_call_profile_router_llm_uses_hf_tier_pick(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
     from agent import profile_router as pr
 
     fake_fmr = {
         "enabled": True,
         "kimi_router": {
+            "router_provider": "huggingface",
             "router_model": "moonshotai/Kimi-K2-Thinking",
             "tiers": [
                 {"id": "general", "description": "g", "models": ["some/hub-id"]},

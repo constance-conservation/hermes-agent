@@ -4971,6 +4971,10 @@ class AIAgent:
                         router_model=_router,
                         candidates=_flat,
                     )
+        _gn = fb.get("gemini_native_tier_models")
+        _gn_set = frozenset(_gn) if isinstance(_gn, list) else frozenset()
+        if fb_model in _gn_set:
+            fb_provider = "gemini"
         if not fb_provider or not fb_model:
             return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # skip invalid, try next
 

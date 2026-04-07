@@ -15,10 +15,13 @@ free_model_routing:
   kimi_router:
     router_provider: gemini
     router_model: gemma-4-31b-it
+    gemini_native_tier_models:
+      - gemma-4-31b-it
     tiers:
       - id: local
-        description: "Qwen (local vLLM/TGI); Gemma-4 via router + optional_gemini (Gemini API)"
+        description: "Gemma-4 (Gemini API id) or Qwen when served locally"
         models:
+          - gemma-4-31b-it
           - Qwen/QwQ-32B
   optional_gemini:
     enabled: true

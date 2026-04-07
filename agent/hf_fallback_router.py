@@ -1,9 +1,11 @@
-"""Kimi tier routing on the Hugging Face hub OpenAI-compatible API (router.huggingface.co).
+"""Tier routing: pick one HF hub model id from configured tiers.
+
+- ``resolve_hf_routed_model`` — Hugging Face ``router.huggingface.co`` OpenAI-compatible API.
+- ``resolve_gemini_routed_model`` — same JSON contract via Google AI (e.g. ``gemma-4-31b-it``).
 
 Model IDs come from configuration (``free_model_routing`` / ``fallback_providers``).
 
-Set ``HERMES_HF_ROUTER_DISABLE=1`` to skip the Kimi tiered router and use that
-entry's ``model`` field as-is.
+Set ``HERMES_HF_ROUTER_DISABLE=1`` to skip the tiered router and use that entry's ``model`` field as-is.
 """
 
 from __future__ import annotations

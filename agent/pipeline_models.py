@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from agent.free_model_routing import normalize_kimi_tiers
+from agent.free_model_routing import gemini_native_tier_model_set, normalize_kimi_tiers
 from agent.local_inference import filter_hub_model_ids_by_local_state
 
 
@@ -32,6 +32,13 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
         seen_hf.add(mid)
         out.append({"model": mid, "source": source, "provider_kind": "huggingface"})
 
+    def _add_gemini(model_id: str, source: str) -> None:
+        mid = _strip(model_id)
+        if not mid or mid in seen_gemini:
+            return
+        seen_gemini.add(mid)
+        out.append({"model": mid, "source": source, "provider_kind": "gemini"})
+
     mc = config.get("model")
     if isinstance(mc, dict):
         primary = _strip(mc.get("default") or mc.get("model"))
@@ -52,9 +59,13 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
 
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):
+        f_native = gemini_native_tier_model_set(fmr)
         rm = _strip(kr.get("router_model"))
         if rm:
-            _add_hf(rm, "free_model_routing.kimi_router (router)")
+            if rm in f_native:
+                _add_gemini(rm, "free_model_routing.kimi_router (router)")
+            else:
+                _add_hf(rm, "free_model_routing.kimi_router (router)")
 
         tiers = normalize_kimi_tiers(kr.get("tiers"))
         hub_filter = bool(fmr.get("filter_free_tier_models_by_local_hub", True))
@@ -64,9 +75,14 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
             label = f"routing tier {tid}"
             if desc:
                 label = f"{label}: {desc}"
-            raw_models = [ _strip(x) for x in (tier.get("models") or []) if _strip(x) ]
-            for mid in filter_hub_model_ids_by_local_state(raw_models, enabled=hub_filter):
-                _add_hf(mid, label)
+            raw_models = [_strip(x) for x in (tier.get("models") or []) if _strip(x)]
+            hub_only = [m for m in raw_models if m not in f_native]
+            filtered_hub = filter_hub_model_ids_by_local_state(hub_only, enabled=hub_filter)
+            for mid in raw_models:
+                if mid in f_native:
+                    _add_gemini(mid, label)
+                elif mid in filtered_hub:
+                    _add_hf(mid, label)
 
     og = fmr.get("optional_gemini") or {}
     if isinstance(og, dict) and og.get("enabled"):

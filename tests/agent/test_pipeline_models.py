@@ -28,13 +28,13 @@ def test_collect_pipeline_models_order_and_dedupe():
     }
     rows = collect_pipeline_models(cfg)
     models = [r["model"] for r in rows]
-    # Primary first; Qwen hub id once (tier dedupe); router; tier other; gemini
+    # Primary first; router (gemma-4 = gemini); Qwen + tier other; optional_gemini dedupes gemma-4
     assert models[0] == "anthropic/claude-sonnet-4"
     assert models.count("Qwen/QwQ-32B") == 1
     assert "gemma-4-31b-it" in models
     assert "org/other" in models
-    assert models[-1] == "gemma-4-31b-it"
-    assert rows[-1]["provider_kind"] == "gemini"
+    g4 = [r for r in rows if r["model"] == "gemma-4-31b-it"]
+    assert g4 and all(r["provider_kind"] == "gemini" for r in g4)
 
 
 def test_collect_pipeline_models_disabled():

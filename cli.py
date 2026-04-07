@@ -6417,6 +6417,11 @@ class HermesCLI:
         ):
             return None
 
+        # Re-apply each turn: a persisted AIAgent skips _init_agent on later messages, but
+        # ``/models`` must disable tier:dynamic routing for every one-shot turn (not only the first).
+        if self.agent is not None:
+            self.agent._skip_per_turn_tier_routing = bool(turn_route.get("skip_per_turn_tier_routing"))
+
         self._status_bar_model_override = None
 
         # Pre-process images through the vision tool (Gemini Flash) so the
@@ -8616,6 +8621,10 @@ def main(
                     route_label=turn_route["label"],
                     skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 ):
+                    if cli.agent is not None:
+                        cli.agent._skip_per_turn_tier_routing = bool(
+                            turn_route.get("skip_per_turn_tier_routing")
+                        )
                     cli.agent.quiet_mode = True
                     result = cli.agent.run_conversation(
                         user_message=query,

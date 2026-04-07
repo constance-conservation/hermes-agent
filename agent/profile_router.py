@@ -342,12 +342,12 @@ def _call_profile_router_llm(
 
     1. Optional pinned ``router_provider``/``router_model`` if both are set to
        ``huggingface`` + a hub id (tried first; on failure, continue).
-    2. ``free_model_routing.kimi_router`` — router picks one hub id from *tiers* (HF API or
-       ``router_provider: gemini`` + ``router_model`` e.g. ``gemma-4-31b-it``), then that
+    2. ``free_model_routing.kimi_router`` — router picks one hub id from *tiers*
+       (``router_provider: gemini`` + ``gemma-4-31b-it``, or legacy HF router API), then that
        hub model runs the JSON classification (local OpenAI base if configured).
 
-    Credentials: HF token for ``huggingface`` router; ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY``
-    for ``gemini`` router; pinned HF hub calls still need an HF token.
+    Credentials: ``GEMINI_API_KEY`` / ``GOOGLE_API_KEY`` for ``gemini`` router; HF token for
+    ``huggingface`` router; pinned HF hub calls still need an HF token.
     """
     from agent.auxiliary_client import call_llm
 
@@ -379,7 +379,7 @@ def _call_profile_router_llm(
 
     from hermes_cli.config import load_config
 
-    from agent.free_model_routing import normalize_kimi_tiers
+    from agent.free_model_routing import gemini_native_tier_model_set, normalize_kimi_tiers
     from agent.hf_fallback_router import resolve_gemini_routed_model, resolve_hf_routed_model
 
     cfg = load_config()
@@ -408,7 +408,7 @@ def _call_profile_router_llm(
     kr = fmr.get("kimi_router") if isinstance(fmr.get("kimi_router"), dict) else {}
     router_model = str(kr.get("router_model") or "").strip()
     tiers = normalize_kimi_tiers(kr.get("tiers"))
-    router_prov = str(kr.get("router_provider") or "huggingface").strip().lower()
+    router_prov = str(kr.get("router_provider") or "gemini").strip().lower()
     if router_model and tiers:
         if router_prov == "gemini":
             gem = (
@@ -429,10 +429,13 @@ def _call_profile_router_llm(
                 )
                 _set_router_telemetry("gemini_tier_pick", picked)
                 logger.info(
-                    "profile_router: Gemini router model=%s → picked hub id=%s for classification JSON",
+                    "profile_router: Gemini router model=%s → picked id=%s for classification JSON",
                     router_model,
                     picked,
                 )
+                _native = gemini_native_tier_model_set(fmr if isinstance(fmr, dict) else {})
+                if picked in _native:
+                    return call_llm(provider="gemini", model=picked, **kwargs)
                 return call_llm(provider="huggingface", model=picked, **kwargs)
             except Exception as exc:
                 logger.warning("profile_router: Gemini tier pick failed: %s", exc)
@@ -451,15 +454,15 @@ def _call_profile_router_llm(
                     router_model=router_model,
                     tiers=tiers,
                 )
-                _set_router_telemetry("hf_kimi_tier_pick", picked)
+                _set_router_telemetry("hf_tier_pick", picked)
                 logger.info(
-                    "profile_router: Kimi router model=%s → picked hub id=%s for classification JSON",
+                    "profile_router: HF tier router model=%s → picked hub id=%s for classification JSON",
                     router_model,
                     picked,
                 )
                 return call_llm(provider="huggingface", model=picked, **kwargs)
             except Exception as exc:
-                logger.warning("profile_router: Kimi tier pick failed: %s", exc)
+                logger.warning("profile_router: HF tier router pick failed: %s", exc)
 
     raise RuntimeError(
         "profile_router: set free_model_routing.kimi_router (router_model + tiers), "
