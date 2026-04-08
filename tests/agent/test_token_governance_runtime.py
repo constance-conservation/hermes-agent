@@ -413,3 +413,47 @@ def test_inherit_token_governance_noop_when_child_already_has_cfg():
     child._token_governance_cfg = {"enabled": True, "tier_models": {}}
     inherit_token_governance_from_parent(child, parent)
     assert child._token_governance_cfg == {"enabled": True, "tier_models": {}}
+
+
+def test_inherit_falls_back_to_disk_when_parent_has_no_cached_cfg(gov_env, monkeypatch):
+    """Parent may lack _token_governance_cfg; still load from HERMES_HOME file for the child."""
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "enabled": True,
+                "dynamic_tier_routing": True,
+                "tier_models": {"E": "gpt-5.4", "F": "gpt-5.3-codex"},
+                "openai_primary_mode": {"enabled": True, "default_model": "gpt-5.4"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    parent = type("_P", (), {})()
+    child = type("_C", (), {})()
+    child.model = "tier:dynamic"
+    child._token_governance_cfg = None
+    with patch(
+        "agent.token_governance_runtime.resolve_openai_primary_mode",
+        return_value=({}, {"enabled": True}),
+    ):
+        inherit_token_governance_from_parent(child, parent)
+    assert child._token_governance_cfg.get("enabled") is True
+    assert child._token_governance_cfg.get("tier_models", {}).get("E") == "gpt-5.4"
+
+
+def test_opm_clamp_replaces_google_gemini_tier_slug():
+    from agent import token_governance_runtime as tgr
+
+    agent = object()
+    with patch(
+        "agent.token_governance_runtime.resolve_openai_primary_mode",
+        return_value=(
+            {"default_model": "gpt-5.4", "codex_model": "gpt-5.3-codex"},
+            {"enabled": True},
+        ),
+    ):
+        out = tgr._opm_clamp_tier_resolved_model(
+            agent, "google/gemini-2.5-flash", "summarize", {"enabled": True}
+        )
+    assert out == "gpt-5.4"

@@ -331,7 +331,7 @@ def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
     """
     if getattr(child, "_token_governance_cfg", None) is not None:
         return
-    pc = getattr(parent, "_token_governance_cfg", None)
+    pc = getattr(parent, "_token_governance_cfg", None) or load_runtime_config()
     if not pc:
         return
     child._token_governance_cfg = pc
@@ -344,6 +344,63 @@ def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
         _is_tier_placeholder = True
     child._model_is_tier_routed = _is_tier_placeholder
     child._last_opm_meta = _opm_meta
+
+
+def _opm_clamp_tier_resolved_model(
+    agent: Any,
+    mid: str,
+    user_message: str,
+    opm_meta: Dict[str, Any],
+) -> str:
+    """Under OPM, never keep a per-turn pick on Gemma, Gemini API slugs, or other free stacks.
+
+    Misconfigured ``tier_models``, blocklist replacements, or missed tier upgrades can
+    still yield ``gemma-4-31b-it`` / ``google/gemini-*``. Without this clamp,
+    ``_reconcile_runtime_after_tier_model_change`` may leave the Gemini snapshot
+    while the model id is wrong, or keep the subagent on a free tier despite OPM.
+    """
+    if not mid or not (opm_meta or {}).get("enabled", False):
+        return mid
+    mlow = str(mid).lower()
+    try:
+        from agent.subprocess_governance import classify_model_cost
+
+        cost = classify_model_cost(mid)
+    except Exception:
+        cost = "paid"
+    google_stack = "gemma" in mlow or "gemini" in mlow
+    if cost != "free" and not google_stack:
+        return mid
+    try:
+        opm_cfg, _ = resolve_openai_primary_mode(agent)
+        coding = any(
+            kw in (user_message or "").lower()
+            for kw in (
+                "code",
+                "implement",
+                "debug",
+                "refactor",
+                "function",
+                "class",
+                "script",
+                "test",
+                "fix",
+                "bug",
+                "error",
+                "compile",
+                "build",
+                "deploy",
+            )
+        )
+        repl = str(
+            (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
+        ).strip()
+        if repl:
+            logger.info("openai_primary_mode: clamping tier-mapped model %r → %r", mid, repl)
+            return repl
+    except Exception:
+        logger.debug("openai_primary_mode tier clamp failed", exc_info=True)
+    return mid
 
 
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
@@ -552,6 +609,9 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
             {"tier": str(tier), "deterministic_tier": str(deterministic_tier)},
         )
         # endregion
+        return
+    mid = _opm_clamp_tier_resolved_model(agent, str(mid), user_message, _opm_meta)
+    if not mid:
         return
     changed = mid != agent.model
     if changed:
