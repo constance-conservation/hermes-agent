@@ -1056,6 +1056,51 @@ def _resolve_delegation_credentials(
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
 
+    # OpenAI primary mode baseline for delegations:
+    # when no explicit delegation model/provider/base_url is set, delegate with
+    # native OpenAI GPT defaults (E/F) instead of silently inheriting a cheap model.
+    if not configured_model and not configured_provider and not configured_base_url:
+        try:
+            from agent.token_governance_runtime import load_runtime_config
+            from agent.openai_native_runtime import native_openai_runtime_tuple
+
+            rt_cfg = load_runtime_config() or {}
+            opm = rt_cfg.get("openai_primary_mode") or {}
+            if opm.get("enabled", False):
+                tup = native_openai_runtime_tuple()
+                if tup:
+                    bu, ak = tup
+                    txt = (prompt_for_tier or "").lower()
+                    coding = any(
+                        k in txt
+                        for k in (
+                            "code",
+                            "implement",
+                            "debug",
+                            "refactor",
+                            "function",
+                            "class",
+                            "script",
+                            "test",
+                            "bug",
+                            "compile",
+                        )
+                    )
+                    mid = str(
+                        opm.get("codex_model") if coding else opm.get("default_model")
+                    ).strip() or ("gpt-5.3-codex" if coding else "gpt-5.4")
+                    return {
+                        "model": mid,
+                        "provider": "custom",
+                        "base_url": bu,
+                        "api_key": ak,
+                        "api_mode": "codex_responses",
+                        "command": None,
+                        "args": [],
+                    }
+        except Exception:
+            pass
+
     # Gemma routing hard rule:
     # If Gemma is selected for delegation and no explicit provider/base_url was
     # requested, prefer direct Gemini API first. OpenRouter is a paid last resort.

@@ -742,6 +742,44 @@ class TestDelegationCredentialResolution(unittest.TestCase):
         self.assertIsNone(creds["model"])
         self.assertIsNone(creds["provider"])
 
+    @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
+    @patch("agent.token_governance_runtime.load_runtime_config")
+    def test_openai_primary_mode_defaults_delegation_to_gpt(self, mock_load_rt, mock_native):
+        parent = _make_mock_parent(depth=0)
+        cfg = {"model": "", "provider": ""}
+        mock_load_rt.return_value = {
+            "openai_primary_mode": {
+                "enabled": True,
+                "default_model": "gpt-5.4",
+                "codex_model": "gpt-5.3-codex",
+            }
+        }
+        mock_native.return_value = ("https://api.openai.com/v1", "openai-key")
+
+        creds = _resolve_delegation_credentials(cfg, parent, prompt_for_tier="summarize this")
+        self.assertEqual(creds["model"], "gpt-5.4")
+        self.assertEqual(creds["provider"], "custom")
+        self.assertEqual(creds["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(creds["api_key"], "openai-key")
+
+    @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
+    @patch("agent.token_governance_runtime.load_runtime_config")
+    def test_openai_primary_mode_defaults_code_delegation_to_codex(self, mock_load_rt, mock_native):
+        parent = _make_mock_parent(depth=0)
+        cfg = {"model": "", "provider": ""}
+        mock_load_rt.return_value = {
+            "openai_primary_mode": {
+                "enabled": True,
+                "default_model": "gpt-5.4",
+                "codex_model": "gpt-5.3-codex",
+            }
+        }
+        mock_native.return_value = ("https://api.openai.com/v1", "openai-key")
+
+        creds = _resolve_delegation_credentials(cfg, parent, prompt_for_tier="implement and debug this function")
+        self.assertEqual(creds["model"], "gpt-5.3-codex")
+        self.assertEqual(creds["provider"], "custom")
+
 
 class TestDelegationProviderIntegration(unittest.TestCase):
     """Integration tests: delegation config → _run_single_child → AIAgent construction."""

@@ -299,8 +299,16 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
             return False
 
         allowed = opm.get("allowed_subprocess_models") or []
-        mid = (model_id or "").strip().lower()
-        if not any(str(a).strip().lower() == mid for a in allowed):
+
+        def _core_model(mid: str) -> str:
+            m = (mid or "").strip().lower()
+            if m.startswith("openai/"):
+                return m.split("/", 1)[1]
+            return m
+
+        mid = _core_model(model_id)
+        allowed_core = {_core_model(str(a)) for a in allowed if str(a).strip()}
+        if mid not in allowed_core:
             return False
 
         if opm.get("require_direct_openai", True) and parent_agent is not None:
@@ -309,7 +317,11 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
             # Must be native api.openai.com and never OpenRouter.
             if "openrouter" in bu:
                 return False
-            if "api.openai.com" not in bu and prov not in ("openai", "openai-codex", "custom"):
+            # For custom/openai/openai-codex providers, enforce OpenAI host explicitly.
+            if prov in ("custom", "openai", "openai-codex"):
+                if "api.openai.com" not in bu:
+                    return False
+            elif "api.openai.com" not in bu:
                 return False
         return True
     except Exception:
