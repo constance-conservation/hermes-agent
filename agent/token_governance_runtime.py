@@ -317,8 +317,42 @@ def apply_token_governance_runtime(agent: Any) -> None:
     )
 
 
+def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
+    """Copy parent's loaded runtime governance onto the child when the child missed it.
+
+    ``AIAgent.__init__`` calls ``apply_token_governance_runtime``, which no-ops when
+    ``load_runtime_config()`` is empty. That happens for delegated children when
+    ``HERMES_HOME`` points at a profile without
+    ``workspace/operations/hermes_token_governance.runtime.yaml`` (notably
+    ``delegate_task(..., hermes_profile=…)``). The parent chief often still has a
+    cached ``_token_governance_cfg`` from its own home. Without inheriting it,
+    ``apply_per_turn_tier_model`` exits immediately and the child can remain on a
+    free Gemini tier despite OpenAI-primary mode on the parent.
+    """
+    if getattr(child, "_token_governance_cfg", None) is not None:
+        return
+    pc = getattr(parent, "_token_governance_cfg", None)
+    if not pc:
+        return
+    child._token_governance_cfg = pc
+    from agent.tier_model_routing import TIER_SENTINEL_RE, is_tier_dynamic
+
+    _raw = (getattr(child, "model", None) or "").strip()
+    _is_tier_placeholder = is_tier_dynamic(_raw) or bool(TIER_SENTINEL_RE.match(_raw))
+    _, _opm_meta = resolve_openai_primary_mode(child)
+    if _opm_meta.get("enabled", False):
+        _is_tier_placeholder = True
+    child._model_is_tier_routed = _is_tier_placeholder
+    child._last_opm_meta = _opm_meta
+
+
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
+    # Prime OPM metadata for main_turn_selection traces even when we return early below.
+    try:
+        _, agent._last_opm_meta = resolve_openai_primary_mode(agent)
+    except Exception:
+        agent._last_opm_meta = getattr(agent, "_last_opm_meta", None) or {}
     # `/models` pipeline selection: honor user pick for this turn (see run_agent.AIAgent).
     if getattr(agent, "_skip_per_turn_tier_routing", False):
         # region agent log
@@ -406,8 +440,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     audit: dict = {}
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
-    _opm, _opm_meta = resolve_openai_primary_mode(agent)
-    agent._last_opm_meta = _opm_meta
+    _opm_meta = getattr(agent, "_last_opm_meta", None) or {}
     if _opm_meta.get("enabled", False) and tier in ("A", "B", "C"):
         _is_coding = any(
             kw in (user_message or "").lower()

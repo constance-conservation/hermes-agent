@@ -314,6 +314,13 @@ def _build_child_agent(
     # Set delegation depth so children can't spawn grandchildren
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
 
+    try:
+        from agent.token_governance_runtime import inherit_token_governance_from_parent
+
+        inherit_token_governance_from_parent(child, parent_agent)
+    except Exception:
+        logger.debug("inherit_token_governance_from_parent failed", exc_info=True)
+
     # Stash build params so subprocess governance can rebuild with a free model if blocked
     child._delegate_meta = {
         "task_index": task_index,

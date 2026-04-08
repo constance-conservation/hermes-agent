@@ -5,10 +5,13 @@ from __future__ import annotations
 import pytest
 import yaml
 
+from unittest.mock import patch
+
 from agent.token_governance_runtime import (
     RUNTIME_FILENAME,
     apply_per_turn_tier_model,
     apply_token_governance_runtime,
+    inherit_token_governance_from_parent,
     load_runtime_config,
     resolve_tier_strings_in_config,
 )
@@ -376,3 +379,37 @@ def test_openai_primary_mode_enforced_after_consultant_routing(gov_env, monkeypa
     a._model_is_tier_routed = True
     apply_per_turn_tier_model(a, "summarize this quickly")
     assert a.model == "gpt-5.4"
+
+
+def test_inherit_token_governance_from_parent_opm_forces_tier_routed():
+    """Child with no cached cfg inherits parent's runtime dict so OPM can uplift tiers."""
+    parent = type("_P", (), {})()
+    parent._token_governance_cfg = {
+        "enabled": True,
+        "dynamic_tier_routing": True,
+        "tier_models": {"E": "openai/gpt-5.4"},
+        "openai_primary_mode": {"enabled": True},
+    }
+    child = type("_C", (), {})()
+    child.model = "gemini/gemma-4-31b-it"
+    child._token_governance_cfg = None
+    child._model_is_tier_routed = False
+
+    with patch(
+        "agent.token_governance_runtime.resolve_openai_primary_mode",
+        return_value=({}, {"enabled": True, "source": "parent_cached"}),
+    ):
+        inherit_token_governance_from_parent(child, parent)
+
+    assert child._token_governance_cfg is parent._token_governance_cfg
+    assert child._model_is_tier_routed is True
+    assert child._last_opm_meta["enabled"] is True
+
+
+def test_inherit_token_governance_noop_when_child_already_has_cfg():
+    parent = type("_P", (), {})()
+    parent._token_governance_cfg = {"enabled": True}
+    child = type("_C", (), {})()
+    child._token_governance_cfg = {"enabled": True, "tier_models": {}}
+    inherit_token_governance_from_parent(child, parent)
+    assert child._token_governance_cfg == {"enabled": True, "tier_models": {}}
