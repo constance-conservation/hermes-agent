@@ -57,9 +57,33 @@ def is_consultant_tier_model(model_id: str) -> bool:
     return any(s in mid for s in _CONSULTANT_TIER_SUBSTRINGS)
 
 
+def _opm_allows_subprocess_model(proposed_model: str, parent_agent: Any) -> bool:
+    """True when openai_primary_mode is on and *proposed_model* is in the allowlist."""
+    try:
+        from agent.openai_primary_mode import resolve_openai_primary_mode
+
+        opm, opm_meta = resolve_openai_primary_mode(parent_agent)
+        if not opm_meta.get("enabled", False):
+            return False
+        allowed = opm.get("allowed_subprocess_models") or []
+
+        def _core(mid: str) -> str:
+            m = (mid or "").strip().lower()
+            if m.startswith("openai/"):
+                return m.split("/", 1)[1]
+            return m
+
+        mid = _core(proposed_model)
+        allowed_core = {_core(str(a)) for a in allowed if str(a).strip()}
+        return mid in allowed_core
+    except Exception:
+        return False
+
+
 def gate_delegate_model(
     proposed_model: str,
     parent_model: str,
+    parent_agent: Any = None,
 ) -> Tuple[str, str]:
     """Enforce model gating for delegated agents.
 
@@ -78,16 +102,7 @@ def gate_delegate_model(
     if is_consultant_tier_model(proposed_model):
         # When OPM is active, GPT models in allowed_subprocess_models are exempt
         # from consultant-tier blocking (they ARE the baseline, not consultants).
-        _skip_block = False
-        try:
-            from agent.openai_primary_mode import resolve_openai_primary_mode
-            _opm, _opm_meta = resolve_openai_primary_mode()
-            if _opm_meta.get("enabled", False):
-                _allowed = {s.strip().lower() for s in (_opm.get("allowed_subprocess_models") or [])}
-                if (proposed_model or "").strip().lower() in _allowed:
-                    _skip_block = True
-        except Exception:
-            pass
+        _skip_block = _opm_allows_subprocess_model(proposed_model, parent_agent)
         if not _skip_block:
             free = default_free_subprocess_model_id()
             # region agent log
@@ -104,6 +119,10 @@ def gate_delegate_model(
     child_cost = _COST_RANK.get(classify_model_cost(proposed_model), 2)
 
     if child_cost > parent_cost:
+        # Parent may be on a free/cheap tier (gemma) while OPM still mandates GPT delegates.
+        if parent_agent is not None and _opm_allows_subprocess_model(proposed_model, parent_agent):
+            return proposed_model, "approved (openai_primary_mode subprocess baseline)"
+
         free = default_free_subprocess_model_id()
         # region agent log
         _dbg98(

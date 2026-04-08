@@ -56,6 +56,20 @@ class TestGateDelegateModel:
         assert model != "anthropic/claude-sonnet-4-6"
         assert "downgraded" in reason or "expensive" in reason
 
+    def test_opm_keeps_gpt_child_when_parent_is_free_tier(self):
+        """Regression: cheap parent model must not logically veto OPM GPT subprocesses."""
+        parent = object()
+        with patch(
+            "agent.openai_primary_mode.resolve_openai_primary_mode",
+            return_value=(
+                {"enabled": True, "allowed_subprocess_models": ["gpt-5.4", "openai/gpt-5.4"]},
+                {"enabled": True, "source": "runtime_yaml"},
+            ),
+        ):
+            model, reason = gate_delegate_model("gpt-5.4", "gemma-4-31b-it", parent)
+        assert model == "gpt-5.4"
+        assert "openai_primary_mode" in reason
+
 
 class TestReviewDelegationContext:
     def test_empty_goal_skipped(self):

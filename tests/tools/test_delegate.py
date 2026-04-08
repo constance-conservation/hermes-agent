@@ -26,6 +26,7 @@ from tools.delegate_tool import (
     hand_off_to_profile,
     _build_child_agent,
     _build_child_system_prompt,
+    _delegation_creds_need_opm_uplift,
     _strip_blocked_tools,
     _resolve_delegation_credentials,
 )
@@ -49,6 +50,29 @@ def _make_mock_parent(depth=0):
     parent._active_children = []
     parent._active_children_lock = threading.Lock()
     return parent
+
+
+class TestDelegationCredsOpmUplift(unittest.TestCase):
+    def test_detects_gemini_gemma_stack(self):
+        self.assertTrue(
+            _delegation_creds_need_opm_uplift(
+                {"model": "gemma-4-31b-it", "provider": "gemini", "base_url": "https://generativelanguage.googleapis.com"}
+            )
+        )
+
+    def test_skips_native_openai_gpt(self):
+        self.assertFalse(
+            _delegation_creds_need_opm_uplift(
+                {
+                    "model": "gpt-5.4",
+                    "provider": "custom",
+                    "base_url": "https://api.openai.com/v1",
+                }
+            )
+        )
+
+    def test_empty_model_needs_uplift(self):
+        self.assertTrue(_delegation_creds_need_opm_uplift({"model": None, "provider": None, "base_url": None}))
 
 
 class TestDelegateRequirements(unittest.TestCase):

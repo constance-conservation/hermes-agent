@@ -211,6 +211,43 @@ def _build_child_progress_callback(task_index: int, parent_agent, task_count: in
     return _callback
 
 
+def _delegation_creds_need_opm_uplift(creds: Optional[dict]) -> bool:
+    """True when delegation credentials point at a free / Gemma / Gemini stack OPM should replace.
+
+    OpenAI-primary mode is meant to keep subprocesses on native GPT, not Gemma or
+    zero-cost stacks, even when ``delegation.provider`` is ``gemini``/OpenRouter or
+    the model slug is a non-gemma free tier (local hub, etc.).
+    """
+    if not creds:
+        return True
+    m = str((creds or {}).get("model") or "").strip().lower()
+    p = str((creds or {}).get("provider") or "").strip().lower()
+    bu = str((creds or {}).get("base_url") or "").strip()
+    bu_l = bu.lower()
+    if bu and "api.openai.com" in bu_l:
+        if m.startswith("gpt-") or m.startswith("openai/gpt-"):
+            return False
+    if not m:
+        return True
+    try:
+        from agent.subprocess_governance import classify_model_cost
+
+        if classify_model_cost(m, provider=p, base_url=bu) == "free":
+            return True
+    except Exception:
+        pass
+    if m in ("gemma-4-31b-it", "gemma-4", "google/gemma-4-31b-it") or m.endswith("/gemma-4-31b-it"):
+        return True
+    if "gemma-4-31b" in m or m.startswith("google/gemma-"):
+        return True
+    if p == "gemini":
+        return True
+    if "openrouter" in p or "openrouter.ai" in bu_l:
+        if "gemma" in m or m == "openrouter/auto" or m.startswith("google/gemma"):
+            return True
+    return False
+
+
 def _build_child_agent(
     task_index: int,
     goal: str,
@@ -575,7 +612,9 @@ def _run_single_child(
         from agent.delegation_review import gate_delegate_model, review_delegation_context
 
         _gated_model, _gate_reason = gate_delegate_model(
-            child_model, getattr(parent_agent, "model", "") if parent_agent else "",
+            child_model,
+            getattr(parent_agent, "model", "") if parent_agent else "",
+            parent_agent,
         )
         if _gated_model != child_model:
             _emit = getattr(parent_agent, "_emit_status", None) if parent_agent else None
@@ -867,13 +906,7 @@ def delegate_task(
             if not _opm_meta.get("enabled", False):
                 return creds
 
-            _m = (str((creds or {}).get("model") or "")).strip().lower()
-            _is_gemma = (
-                not _m
-                or _m in ("gemma-4-31b-it", "gemma-4", "google/gemma-4-31b-it")
-                or _m.endswith("/gemma-4-31b-it")
-            )
-            if not _is_gemma:
+            if not _delegation_creds_need_opm_uplift(creds):
                 return creds
 
             _coding = any(
