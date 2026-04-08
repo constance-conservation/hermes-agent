@@ -312,6 +312,15 @@ For example, a topic with `skill: arxiv` will have the arxiv skill pre-loaded wh
 Topics created outside of the config (e.g., by manually calling the Telegram API) are discovered automatically when a `forum_topic_created` service message arrives. You can also add topics to the config while the gateway is running — they'll be picked up on the next cache miss.
 :::
 
+### Forum supergroups (programmatic topic management)
+
+There are no Bot API “scopes” like Slack OAuth. In a **forum-enabled supergroup**, promote the bot to **administrator** and grant **manage topics** (and any other rights you need). The gateway’s `TelegramAdapter` exposes:
+
+- `forum_topic_create` — same as `createForumTopic` (DMs or supergroups)
+- `forum_topic_edit`, `forum_topic_delete`, `forum_topic_close`, `forum_topic_reopen`
+
+Use these from custom tools or gateway code; Hermes does not assign Telegram permissions from code.
+
 ## Recent Bot API Features
 
 - **Bot API 9.4 (Feb 2026):** Private Chat Topics — bots can create forum topics in 1-on-1 DM chats via `createForumTopic`. See [Private Chat Topics](#private-chat-topics-bot-api-94) above.

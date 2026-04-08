@@ -72,6 +72,10 @@ it will only work in DMs. These are the most commonly missed scopes.
 | Scope | Purpose |
 |-------|---------|
 | `groups:read` | List and get info about private channels |
+| `channels:manage` | Create, rename, and archive **public** channels (used by `SlackAdapter.create_channel` / `rename_channel` / `archive_channel`) |
+| `groups:write` | Create and manage **private** channels the bot is allowed to manage |
+
+After adding channel-management scopes, **reinstall the app** to the workspace and refresh `SLACK_BOT_TOKEN` in `~/.hermes/.env`.
 
 ---
 

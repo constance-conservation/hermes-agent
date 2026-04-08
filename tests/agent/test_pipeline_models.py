@@ -24,7 +24,7 @@ def test_collect_pipeline_models_order_and_dedupe():
                     {
                         "id": "general",
                         "description": "General",
-                        "models": ["Qwen/QwQ-32B", "org/other"],
+                        "models": ["org/local-32b", "org/other"],
                     },
                 ],
             },
@@ -36,9 +36,9 @@ def test_collect_pipeline_models_order_and_dedupe():
     }
     rows = collect_pipeline_models(cfg)
     models = [r["model"] for r in rows]
-    # Primary first; router (gemma-4 = gemini); Qwen + tier other; optional_gemini dedupes gemma-4
+    # Primary first; router (gemma-4-31b-it = gemini); local tier + other; optional_gemini dedupes
     assert models[0] == "anthropic/claude-sonnet-4"
-    assert models.count("Qwen/QwQ-32B") == 1
+    assert models.count("org/local-32b") == 1
     assert "gemma-4-31b-it" in models
     assert "org/other" in models
     g4 = [r for r in rows if r["model"] == "gemma-4-31b-it"]
@@ -85,7 +85,7 @@ def test_collect_pipeline_models_skips_blocklisted_ids():
                 "tiers": [
                     {
                         "id": "t",
-                        "models": ["Qwen/Qwen2.5-7B", "moonshotai/kimi-k2.5"],
+                        "models": ["org/local-7b", "moonshotai/kimi-k2.5"],
                     },
                 ],
             },
@@ -95,7 +95,7 @@ def test_collect_pipeline_models_skips_blocklisted_ids():
     models = [r["model"] for r in rows]
     assert "moonshotai/kimi-k2.5" not in models
     assert "deepseek/deepseek-chat" not in models
-    assert "Qwen/Qwen2.5-7B" in models
+    assert "org/local-7b" in models
 
 
 def test_collect_models_menu_entries_includes_actions_and_shortcuts():

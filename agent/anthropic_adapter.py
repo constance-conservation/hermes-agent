@@ -801,7 +801,7 @@ def normalize_model_name(model: str, preserve_dots: bool = False) -> str:
     - Strips 'anthropic/' prefix (OpenRouter format, case-insensitive)
     - Converts dots to hyphens in version numbers (OpenRouter uses dots,
       Anthropic uses hyphens: claude-opus-4.6 → claude-opus-4-6), unless
-      preserve_dots is True (e.g. for Alibaba/DashScope: qwen3.5-plus).
+      preserve_dots is True (e.g. for Alibaba/DashScope model IDs with dots).
     """
     lower = model.lower()
     if lower.startswith("anthropic/"):
@@ -1231,7 +1231,7 @@ def build_anthropic_kwargs(
     system prompt prefix, tool name prefixing, and prompt sanitization.
 
     When *preserve_dots* is True, model name dots are not converted to hyphens
-    (for Alibaba/DashScope anthropic-compatible endpoints: qwen3.5-plus).
+    (for Alibaba/DashScope anthropic-compatible endpoints with dotted model IDs).
     """
     system, anthropic_messages = convert_messages_to_anthropic(messages)
     anthropic_tools = convert_tools_to_anthropic(tools) if tools else []

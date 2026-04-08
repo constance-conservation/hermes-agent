@@ -175,7 +175,7 @@ def _find_mlx_lm_executable() -> Optional[str]:
 
 
 def ensure_local_inference_server_running(
-    hub_id: str = "Qwen/QwQ-32B",
+    hub_id: str = "google/gemma-2-9b-it",
     *,
     port: Optional[int] = None,
     start_timeout: int = 90,
@@ -229,11 +229,11 @@ def ensure_local_inference_server_running(
     if not Path(model_path).is_dir() and model_path == hub_id:
         return False
 
-    log_path = Path(model_path).parent / "qwen_server.log"
+    log_path = Path(model_path).parent / "local_inference_server.log"
 
     if not quiet:
         print(
-            f"\n🤖  Starting local Qwen inference server (port {port})…"
+            f"\n🤖  Starting local inference server (port {port})…"
             f"\n    Model: {Path(model_path).name}"
             f"\n    Log:   {log_path}"
             f"\n    This stays running for the duration of your Hermes session.\n",

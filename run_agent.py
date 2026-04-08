@@ -103,6 +103,7 @@ from agent.prompt_builder import build_skills_system_prompt, build_context_files
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.provider_health import ProviderHealthTracker
 from agent.cost_monitor import CostMonitor
+from agent.openai_primary_mode import resolve_openai_primary_mode
 from agent.routing_trace import emit_routing_decision_trace
 from agent.display import (
     KawaiiSpinner, build_tool_preview as _build_tool_preview,
@@ -7038,13 +7039,14 @@ class AIAgent:
             from agent.token_governance_runtime import apply_per_turn_tier_model
 
             apply_per_turn_tier_model(self, user_message)
+            _opm_meta = getattr(self, "_last_opm_meta", None) or {}
             emit_routing_decision_trace(
                 stage="main_turn_selection",
                 chosen_model=str(self.model or ""),
                 chosen_provider=str(self.provider or ""),
                 reason_code="post_per_turn_tier_routing",
-                opm_enabled=False,
-                opm_source="",
+                opm_enabled=bool(_opm_meta.get("enabled", False)),
+                opm_source=str(_opm_meta.get("source", "")),
                 tier_source="run_conversation",
                 skip_flags={
                     "skip_per_turn": bool(getattr(self, "_skip_per_turn_tier_routing", False)),

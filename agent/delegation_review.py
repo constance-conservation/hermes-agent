@@ -13,9 +13,28 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+_DEBUG_LOG_PATH = "/Users/agent-os/hermes-agent/.cursor/debug-98bb66.log"
+
+
+def _dbg98(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
+    try:
+        payload = {
+            "sessionId": "98bb66",
+            "runId": "gemma-debug-1",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 _COST_RANK = {
     "free": 0,
@@ -47,21 +66,72 @@ def gate_delegate_model(
     Returns ``(approved_model, reason)`` — the model may be downgraded.
     """
     from agent.subprocess_governance import classify_model_cost, default_free_subprocess_model_id
+    # region agent log
+    _dbg98(
+        "H4",
+        "agent/delegation_review.py:gate_delegate_model",
+        "gate delegate model entry",
+        {"proposed_model": str(proposed_model or ""), "parent_model": str(parent_model or "")},
+    )
+    # endregion
 
     if is_consultant_tier_model(proposed_model):
-        free = default_free_subprocess_model_id()
-        return free, f"consultant model {proposed_model!r} blocked for delegates; using {free}"
+        # When OPM is active, GPT models in allowed_subprocess_models are exempt
+        # from consultant-tier blocking (they ARE the baseline, not consultants).
+        _skip_block = False
+        try:
+            from agent.openai_primary_mode import resolve_openai_primary_mode
+            _opm, _opm_meta = resolve_openai_primary_mode()
+            if _opm_meta.get("enabled", False):
+                _allowed = {s.strip().lower() for s in (_opm.get("allowed_subprocess_models") or [])}
+                if (proposed_model or "").strip().lower() in _allowed:
+                    _skip_block = True
+        except Exception:
+            pass
+        if not _skip_block:
+            free = default_free_subprocess_model_id()
+            # region agent log
+            _dbg98(
+                "H4",
+                "agent/delegation_review.py:gate_delegate_model",
+                "consultant tier blocked",
+                {"proposed_model": str(proposed_model or ""), "fallback_model": str(free or "")},
+            )
+            # endregion
+            return free, f"consultant model {proposed_model!r} blocked for delegates; using {free}"
 
     parent_cost = _COST_RANK.get(classify_model_cost(parent_model), 2)
     child_cost = _COST_RANK.get(classify_model_cost(proposed_model), 2)
 
     if child_cost > parent_cost:
         free = default_free_subprocess_model_id()
+        # region agent log
+        _dbg98(
+            "H4",
+            "agent/delegation_review.py:gate_delegate_model",
+            "delegate cost downgraded",
+            {
+                "proposed_model": str(proposed_model or ""),
+                "parent_model": str(parent_model or ""),
+                "fallback_model": str(free or ""),
+                "child_cost": int(child_cost),
+                "parent_cost": int(parent_cost),
+            },
+        )
+        # endregion
         return free, (
             f"delegate model {proposed_model!r} more expensive than parent "
             f"{parent_model!r}; downgraded to {free}"
         )
 
+    # region agent log
+    _dbg98(
+        "H4",
+        "agent/delegation_review.py:gate_delegate_model",
+        "delegate model approved",
+        {"proposed_model": str(proposed_model or ""), "parent_model": str(parent_model or "")},
+    )
+    # endregion
     return proposed_model, "approved"
 
 

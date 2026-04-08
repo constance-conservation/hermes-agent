@@ -26,10 +26,9 @@ GITHUB_MODELS_CATALOG_URL = COPILOT_MODELS_URL
 
 # (model_id, display description shown in menus)
 OPENROUTER_MODELS: list[tuple[str, str]] = [
-    ("openrouter/auto",                 "OpenRouter auto-routing"),
-    ("anthropic/claude-opus-4.6",       "recommended"),
+    ("openrouter/auto",                 "recommended"),
+    ("anthropic/claude-opus-4.6",       ""),
     ("anthropic/claude-sonnet-4.6",     ""),
-    ("qwen/qwen3.6-plus-preview:free", "free"),
     ("anthropic/claude-sonnet-4.5",     ""),
     ("anthropic/claude-haiku-4.5",      ""),
     ("openai/gpt-5.4",                  ""),
@@ -40,8 +39,6 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("google/gemini-3-flash-preview",   ""),
     ("google/gemini-3.1-pro-preview",     ""),
     ("google/gemini-3.1-flash-lite-preview",   ""),
-    ("qwen/qwen3.5-plus-02-15",         ""),
-    ("qwen/qwen3.5-35b-a3b",            ""),
     ("stepfun/step-3.5-flash",          ""),
     ("z-ai/glm-5",                      ""),
     ("z-ai/glm-5-turbo",                ""),
@@ -58,7 +55,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "openrouter/auto",
         "anthropic/claude-opus-4.6",
         "anthropic/claude-sonnet-4.6",
-        "qwen/qwen3.6-plus-preview:free",
         "anthropic/claude-sonnet-4.5",
         "anthropic/claude-haiku-4.5",
         "openai/gpt-5.4",
@@ -69,8 +65,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "google/gemini-3-flash-preview",
         "google/gemini-3.1-pro-preview",
         "google/gemini-3.1-flash-lite-preview",
-        "qwen/qwen3.5-plus-02-15",
-        "qwen/qwen3.5-35b-a3b",
         "stepfun/step-3.5-flash",
         "z-ai/glm-5",
         "z-ai/glm-5-turbo",
@@ -198,7 +192,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2.5",
         "kimi-k2-thinking",
         "kimi-k2",
-        "qwen3-coder",
         "big-pickle",
     ],
     "opencode-go": [
@@ -228,15 +221,12 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "google/gemini-3-flash-preview",
     ],
     # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
-    # Supports Qwen models + third-party providers (GLM, Kimi, MiniMax).
+    # Supports third-party providers (GLM, Kimi, MiniMax) on coding-intl.
     # Users with classic DashScope keys should override DASHSCOPE_BASE_URL
     # to https://dashscope-intl.aliyuncs.com/compatible-mode/v1 (OpenAI-compat)
     # or https://dashscope-intl.aliyuncs.com/apps/anthropic (Anthropic-compat).
     "alibaba": [
-        "qwen3.5-plus",
-        "qwen3-coder-plus",
-        "qwen3-coder-next",
-        # Third-party models available on coding-intl
+        # Third-party models available on coding-intl (DashScope)
         "glm-5",
         "glm-4.7",
         "kimi-k2.5",
@@ -244,8 +234,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     ],
     # Curated HF model list — only agentic models that map to OpenRouter defaults.
     "huggingface": [
-        "Qwen/Qwen3.5-397B-A17B",
-        "Qwen/Qwen3.5-35B-A3B",
         "deepseek-ai/DeepSeek-V3.2",
         "moonshotai/Kimi-K2.5",
         "MiniMaxAI/MiniMax-M2.5",
@@ -311,7 +299,6 @@ _PROVIDER_ALIASES = {
     "kilo-gateway": "kilocode",
     "dashscope": "alibaba",
     "aliyun": "alibaba",
-    "qwen": "alibaba",
     "alibaba-cloud": "alibaba",
     "hf": "huggingface",
     "hugging-face": "huggingface",
@@ -409,8 +396,8 @@ def parse_model_input(raw: str, current_provider: str) -> tuple[str, str]:
         model_part = stripped[colon + 1:].strip()
         if provider_part and model_part and provider_part in _KNOWN_PROVIDER_NAMES:
             # Support custom:name:model triple syntax for named custom
-            # providers.  ``custom:local:qwen`` → ("custom:local", "qwen").
-            # Single colon ``custom:qwen`` → ("custom", "qwen") as before.
+            # providers.  Multi-colon custom targets map to (provider, model)
+            # (e.g. ``custom:local:llama`` → ("custom:local", "llama")).
             if provider_part == "custom" and ":" in model_part:
                 second_colon = model_part.find(":")
                 custom_name = model_part[:second_colon].strip()
@@ -986,7 +973,7 @@ def opencode_model_api_mode(provider_id: Optional[str], model_id: Optional[str])
     - Claude models on Zen use ``/v1/messages``
     - MiniMax models on Go use ``/v1/messages``
     - GLM / Kimi on Go use ``/v1/chat/completions``
-    - Other Zen models (Gemini, GLM, Kimi, MiniMax, Qwen, etc.) use
+    - Other Zen models (Gemini, GLM, Kimi, MiniMax, etc.) use
       ``/v1/chat/completions``
 
     This follows the published OpenCode docs for Zen and Go endpoints.

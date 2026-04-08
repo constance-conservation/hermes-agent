@@ -20,7 +20,7 @@ Resolution order for vision/multimodal tasks (auto mode):
   3. Nous Portal
   4. Codex OAuth (gpt-5.3-codex supports vision via Responses API)
   5. Native Anthropic
-  6. Custom endpoint (for local vision models: Qwen-VL, LLaVA, Pixtral, etc.)
+  6. Custom endpoint (for local vision models: LLaVA, Pixtral, etc.)
   7. None
 
 Per-task provider overrides (e.g. AUXILIARY_VISION_PROVIDER,
@@ -1821,7 +1821,7 @@ def extract_content_or_reasoning(response) -> str:
     """Extract content from an LLM response, falling back to reasoning fields.
 
     Mirrors the main agent loop's behavior when a reasoning model (DeepSeek-R1,
-    Qwen-QwQ, etc.) returns ``content=None`` with reasoning in structured fields.
+    reasoning-focused models) returns ``content=None`` with reasoning in structured fields.
 
     Resolution order:
       1. ``message.content`` — strip inline think/reasoning blocks, check for

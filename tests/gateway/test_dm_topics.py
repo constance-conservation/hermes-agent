@@ -485,3 +485,29 @@ def test_build_message_event_no_auto_skill_without_thread():
     event = adapter._build_message_event(msg, MessageType.TEXT)
 
     assert event.auto_skill is None
+
+
+@pytest.mark.asyncio
+async def test_forum_topic_public_wrappers_delegate_to_bot():
+    """forum_topic_* methods should call the underlying Bot API."""
+    adapter = _make_adapter()
+    adapter._bot = AsyncMock()
+    adapter._bot.edit_forum_topic = AsyncMock()
+    adapter._bot.delete_forum_topic = AsyncMock()
+    adapter._bot.close_forum_topic = AsyncMock()
+    adapter._bot.reopen_forum_topic = AsyncMock()
+
+    assert await adapter.forum_topic_edit(-100, 42, name="T") is True
+    adapter._bot.edit_forum_topic.assert_called_once()
+
+    assert await adapter.forum_topic_delete(-100, 42) is True
+    assert await adapter.forum_topic_close(-100, 42) is True
+    assert await adapter.forum_topic_reopen(-100, 42) is True
+
+
+@pytest.mark.asyncio
+async def test_forum_topic_edit_requires_name_or_icon():
+    adapter = _make_adapter()
+    adapter._bot = AsyncMock()
+    assert await adapter.forum_topic_edit(-100, 1) is False
+    adapter._bot.edit_forum_topic.assert_not_called()

@@ -20,7 +20,7 @@ from hermes_constants import OPENROUTER_MODELS_URL
 logger = logging.getLogger(__name__)
 
 # Provider names that can appear as a "provider:" prefix before a model ID.
-# Only these are stripped — Ollama-style "model:tag" colons (e.g. "qwen3.5:27b")
+# Only these are stripped — Ollama-style "model:tag" colons are preserved
 # are preserved so the full model name reaches cache lookups and server queries.
 _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "openrouter", "nous", "openai-codex", "copilot", "copilot-acp",
@@ -30,7 +30,7 @@ _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     # Common aliases
     "glm", "z-ai", "z.ai", "zhipu", "github", "github-copilot",
     "github-models", "kimi", "moonshot", "claude", "deep-seek",
-    "opencode", "zen", "go", "vercel", "kilo", "dashscope", "aliyun", "qwen",
+    "opencode", "zen", "go", "vercel", "kilo", "dashscope", "aliyun",
 })
 
 
@@ -44,8 +44,7 @@ def _strip_provider_prefix(model: str) -> str:
     """Strip a recognised provider prefix from a model string.
 
     ``"local:my-model"`` → ``"my-model"``
-    ``"qwen3.5:27b"``   → ``"qwen3.5:27b"``  (unchanged — not a provider prefix)
-    ``"qwen:0.5b"``     → ``"qwen:0.5b"``    (unchanged — Ollama model:tag)
+    ``"model:27b"``     → ``"model:27b"``      (unchanged — Ollama model:tag)
     ``"deepseek:latest"``→ ``"deepseek:latest"``(unchanged — Ollama model:tag)
     """
     if ":" not in model or model.startswith("http"):
@@ -105,8 +104,6 @@ DEFAULT_CONTEXT_LENGTHS = {
     "deepseek": 128000,
     # Meta
     "llama": 131072,
-    # Qwen
-    "qwen": 131072,
     # MiniMax
     "minimax": 204800,
     # GLM
@@ -114,8 +111,6 @@ DEFAULT_CONTEXT_LENGTHS = {
     # Kimi
     "kimi": 262144,
     # Hugging Face Inference Providers — model IDs use org/name format
-    "Qwen/Qwen3.5-397B-A17B": 131072,
-    "Qwen/Qwen3.5-35B-A3B": 131072,
     "deepseek-ai/DeepSeek-V3.2": 65536,
     "moonshotai/Kimi-K2.5": 262144,
     "moonshotai/Kimi-K2-Thinking": 262144,
@@ -606,7 +601,7 @@ def _query_local_context_length(model: str, base_url: str) -> Optional[int]:
     import httpx
 
     # Strip recognised provider prefix (e.g., "local:model-name" → "model-name").
-    # Ollama "model:tag" colons (e.g. "qwen3.5:27b") are intentionally preserved.
+    # Ollama "model:tag" colons are intentionally preserved.
     model = _strip_provider_prefix(model)
 
     # Strip /v1 suffix to get the server root

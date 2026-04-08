@@ -59,7 +59,7 @@ def switch_model(
 
     Args:
         raw_input: The user's model input (e.g. "claude-sonnet-4",
-            "zai:glm-5", "custom:local:qwen").
+            "zai:glm-5", "custom:local:model").
         current_provider: The currently active provider.
         current_base_url: The currently active base URL (used for
             is_custom detection).

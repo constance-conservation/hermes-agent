@@ -80,6 +80,9 @@ def test_hermes_slack_manifest_dict_shape():
     assert slash[0]["command"] == "/hermes"
     assert any(e.get("command") == "/hermes-help" for e in slash)
     assert len(slash) >= 30
+    bot_scopes = set(m["oauth_config"]["scopes"]["bot"])
+    assert "channels:manage" in bot_scopes
+    assert "groups:write" in bot_scopes
 
 
 def test_slack_command_manifest_validate_dispatch(monkeypatch):

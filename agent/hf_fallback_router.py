@@ -16,6 +16,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from agent.tier_model_routing import canonical_gemma_model_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +49,7 @@ def resolve_gemini_routed_model(
 
     Uses ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY``. Same JSON shape as the HF router path.
     """
+    router_model = canonical_gemma_model_id((router_model or "").strip())
     if os.environ.get("HERMES_HF_ROUTER_DISABLE", "").strip().lower() in ("1", "true", "yes"):
         return first_tier_hub_fallback(tiers, router_model)
 
@@ -125,6 +128,7 @@ def resolve_hf_routed_model(
     *tiers* is the normalized list from ``free_model_routing.normalize_kimi_tiers``.
     On failure, returns the first model of the first tier (if any), else *router_model*.
     """
+    router_model = canonical_gemma_model_id((router_model or "").strip())
     if os.environ.get("HERMES_HF_ROUTER_DISABLE", "").strip().lower() in ("1", "true", "yes"):
         flat = _flatten_tier_models(tiers)
         return flat[0] if flat else router_model
@@ -216,7 +220,7 @@ def _parse_tier_model_json(
     mid = data.get("model")
     if not isinstance(mid, str) or not mid.strip():
         return None
-    mid = mid.strip()
+    mid = canonical_gemma_model_id(mid.strip())
     if mid not in flat:
         return None
     tier_i = data.get("tier")

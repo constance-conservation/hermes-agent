@@ -6,11 +6,24 @@ import pytest
 
 from agent.tier_model_routing import (
     BUILTIN_TIER_MODELS,
+    canonical_gemma_model_id,
     effective_tier_models,
     infer_tier_letter_for_model,
+    normalize_tier_models,
     resolve_tier_dynamic_model,
     select_tier_for_message,
 )
+
+
+def test_canonical_gemma_model_id_maps_bare_gemma_4():
+    assert canonical_gemma_model_id("gemma-4") == "gemma-4-31b-it"
+    assert canonical_gemma_model_id("GEMMA-4") == "gemma-4-31b-it"
+    assert canonical_gemma_model_id("gemma-4-31b-it") == "gemma-4-31b-it"
+    assert canonical_gemma_model_id("") == ""
+
+
+def test_normalize_tier_models_rewrites_bare_gemma_4():
+    assert normalize_tier_models({"A": "gemma-4"})["A"] == "gemma-4-31b-it"
 
 
 def _base_cfg(**overrides):

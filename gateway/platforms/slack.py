@@ -183,6 +183,9 @@ class SlackAdapter(BasePlatformAdapter):
       - File/image/audio attachments
       - Slash commands (/hermes and /hermes-<subcommand>)
       - Typing indicators (not natively supported by Slack bots)
+      - Optional Web API helpers for channel lifecycle (create / rename / archive) when
+        the Slack app includes ``channels:manage`` (public) and ``groups:write``
+        (private) bot scopes — reinstall the app after changing scopes.
     """
 
     MAX_MESSAGE_LENGTH = 39000  # Slack API allows 40,000 chars; leave margin
@@ -462,6 +465,116 @@ class SlackAdapter(BasePlatformAdapter):
         if team_id and team_id in self._team_clients:
             return self._team_clients[team_id]
         return self._app.client  # fallback to primary
+
+    def _web_client_for_workspace(
+        self,
+        *,
+        channel_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ) -> Optional[AsyncWebClient]:
+        """Resolve ``AsyncWebClient`` for Slack Web API calls.
+
+        - If ``channel_id`` is set, uses the mapped workspace for that channel.
+        - Else if ``team_id`` is set and known, uses that workspace's client.
+        - Else if exactly one workspace is registered, uses that client.
+        - With multiple workspaces and no ``team_id``, returns ``None`` (caller must
+          pass ``team_id`` for create-channel-style calls).
+        """
+        if not self._app:
+            return None
+        if channel_id:
+            return self._get_client(channel_id)
+        if team_id and team_id in self._team_clients:
+            return self._team_clients[team_id]
+        n = len(self._team_clients)
+        if n == 1:
+            return next(iter(self._team_clients.values()))
+        if n == 0:
+            return self._app.client
+        logger.warning(
+            "[Slack] Multiple workspaces configured — pass team_id for this API call "
+            "(auth.test team_id from the target workspace)."
+        )
+        return None
+
+    @staticmethod
+    def _slack_api_dict(resp: Any) -> Dict[str, Any]:
+        """Normalize slack_sdk ``SlackResponse`` to a plain dict."""
+        if resp is None:
+            return {"ok": False, "error": "empty_response"}
+        data = getattr(resp, "data", None)
+        if isinstance(data, dict):
+            return data
+        try:
+            return dict(resp)  # type: ignore[arg-type]
+        except Exception:
+            return {"ok": False, "error": "unexpected_response"}
+
+    async def create_channel(
+        self,
+        name: str,
+        *,
+        is_private: bool = False,
+        team_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a public or private channel (``conversations.create``).
+
+        Requires **channels:manage** (public) or **groups:write** (private) on the
+        bot token. When multiple bot workspaces are configured, pass ``team_id``.
+
+        Returns Slack API JSON (``ok``, ``channel``, ``error``, ...).
+        """
+        client = self._web_client_for_workspace(team_id=team_id)
+        if not client:
+            return {
+                "ok": False,
+                "error": "ambiguous_workspace" if len(self._team_clients) > 1 else "not_connected",
+            }
+        try:
+            kwargs: Dict[str, Any] = {"name": name, "is_private": is_private}
+            if team_id:
+                kwargs["team_id"] = team_id
+            resp = await client.conversations_create(**kwargs)
+            return self._slack_api_dict(resp)
+        except Exception as e:
+            logger.error("[Slack] conversations.create failed: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
+
+    async def rename_channel(
+        self,
+        channel_id: str,
+        name: str,
+        team_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Rename a channel (``conversations.rename``). Requires **channels:manage** / **groups:write**."""
+        client = self._web_client_for_workspace(channel_id=channel_id, team_id=team_id)
+        if not client:
+            return {"ok": False, "error": "not_connected"}
+        try:
+            resp = await client.conversations_rename(channel=channel_id, name=name)
+            return self._slack_api_dict(resp)
+        except Exception as e:
+            logger.error("[Slack] conversations.rename failed: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
+
+    async def archive_channel(
+        self,
+        channel_id: str,
+        team_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Archive a channel (``conversations.archive``) — Slack's usual \"delete\" for channels.
+
+        Requires **channels:manage** / **groups:write** as appropriate.
+        """
+        client = self._web_client_for_workspace(channel_id=channel_id, team_id=team_id)
+        if not client:
+            return {"ok": False, "error": "not_connected"}
+        try:
+            resp = await client.conversations_archive(channel=channel_id)
+            return self._slack_api_dict(resp)
+        except Exception as e:
+            logger.error("[Slack] conversations.archive failed: %s", e, exc_info=True)
+            return {"ok": False, "error": str(e)}
 
     def _slack_notify_mention_prefix(
         self,

@@ -1355,3 +1355,42 @@ class TestProgressMessageThread:
             "so each @mention starts its own thread"
         )
         assert msg_event.message_id == "2000000000.000001"
+
+
+# ---------------------------------------------------------------------------
+# Channel lifecycle (Web API helpers; requires channels:manage / groups:write)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_slack_create_channel_ok(adapter):
+    adapter._team_clients = {"T1": adapter._app.client}
+    adapter._app.client.conversations_create = AsyncMock(
+        return_value=MagicMock(data={"ok": True, "channel": {"id": "CNEW", "name": "new-channel"}})
+    )
+    r = await adapter.create_channel("new-channel", is_private=False, team_id="T1")
+    assert r.get("ok") is True
+    assert r.get("channel", {}).get("id") == "CNEW"
+    adapter._app.client.conversations_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_slack_create_channel_ambiguous_workspace(adapter):
+    c1 = MagicMock()
+    c2 = MagicMock()
+    adapter._team_clients = {"T1": c1, "T2": c2}
+    r = await adapter.create_channel("x")
+    assert r.get("ok") is False
+    assert r.get("error") == "ambiguous_workspace"
+
+
+@pytest.mark.asyncio
+async def test_slack_archive_channel_uses_workspace(adapter):
+    adapter._channel_team["C123"] = "T9"
+    adapter._team_clients["T9"] = adapter._app.client
+    adapter._app.client.conversations_archive = AsyncMock(
+        return_value=MagicMock(data={"ok": True})
+    )
+    r = await adapter.archive_channel("C123")
+    assert r.get("ok") is True
+    adapter._app.client.conversations_archive.assert_called_once_with(channel="C123")

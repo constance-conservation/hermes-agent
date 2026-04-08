@@ -17,9 +17,10 @@ def test_local_override_when_in_state(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:8000")
     monkeypatch.setenv("HERMES_LOCAL_MODEL_STATE", str(hub / "state.json"))
     monkeypatch.setenv("HERMES_LOCAL_INFERENCE_API_KEY", "x")
-    base, key = li.local_inference_override_for_hub_model("org/model-a")
+    base, key, served = li.local_inference_override_for_hub_model("org/model-a")
     assert base.endswith("/v1")
     assert key == "x"
+    assert served == "org/model-a"
 
 
 def test_no_override_without_env():
@@ -34,15 +35,15 @@ def test_filter_hub_model_ids_keeps_downloaded(tmp_path, monkeypatch):
     hub = tmp_path / "local_models" / "hub"
     hub.mkdir(parents=True)
     (hub / "state.json").write_text(
-        json.dumps({"downloaded": ["Qwen/QwQ-32B"]}),
+        json.dumps({"downloaded": ["org/local-32b"]}),
         encoding="utf-8",
     )
     monkeypatch.setenv("HERMES_LOCAL_MODEL_STATE", str(hub / "state.json"))
     out = li.filter_hub_model_ids_by_local_state(
-        ["Qwen/QwQ-32B", "google/missing"],
+        ["org/local-32b", "google/missing"],
         enabled=True,
     )
-    assert out == ["Qwen/QwQ-32B"]
+    assert out == ["org/local-32b"]
 
 
 def test_filter_hub_model_ids_no_state_noop(tmp_path, monkeypatch):

@@ -31,6 +31,24 @@ from agent.routing_trace import emit_routing_decision_trace
 
 # Serialize delegate_task when switching HERMES_HOME for a child profile (process-global env).
 _HERMES_PROFILE_DELEGATE_LOCK = threading.RLock()
+_DEBUG_LOG_PATH = "/Users/agent-os/hermes-agent/.cursor/debug-98bb66.log"
+
+
+def _dbg98(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
+    try:
+        payload = {
+            "sessionId": "98bb66",
+            "runId": "gemma-debug-1",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 
 # Tools that children must never have access to
@@ -251,6 +269,19 @@ def _build_child_agent(
     effective_api_mode = override_api_mode or getattr(parent_agent, "api_mode", None)
     effective_acp_command = getattr(parent_agent, "acp_command", None)
     effective_acp_args = list(getattr(parent_agent, "acp_args", []) or [])
+    # region agent log
+    _dbg98(
+        "H2",
+        "tools/delegate_tool.py:_build_child_agent",
+        "child effective runtime before spawn",
+        {
+            "effective_model": str(effective_model or ""),
+            "effective_provider": str(effective_provider or ""),
+            "has_override_provider": bool(override_provider),
+            "has_override_base_url": bool(override_base_url),
+        },
+    )
+    # endregion
 
     child = AIAgent(
         base_url=effective_base_url,
@@ -567,6 +598,18 @@ def _run_single_child(
             f"[Delegate] Task: {goal[:60]} -> {child_model} ({_cost_cls})",
             "delegation",
         )
+    # region agent log
+    _dbg98(
+        "H4",
+        "tools/delegate_tool.py:_run_single_child",
+        "child about to run",
+        {
+            "child_model": str(child_model or ""),
+            "child_provider": str(getattr(child, "provider", "") or ""),
+            "cost_class": str(_cost_cls),
+        },
+    )
+    # endregion
 
     try:
         # ── Delegation watchdog: periodic heartbeat + forced wrap-up ───────
@@ -984,6 +1027,18 @@ def delegate_task(
         except ValueError as exc:
             return json.dumps({"error": str(exc)})
         creds = _enforce_opm_baseline(creds, t.get("goal", ""))
+        # region agent log
+        _dbg98(
+            "H2",
+            "tools/delegate_tool.py:delegate_task(single)",
+            "final creds before child build",
+            {
+                "model": str((creds or {}).get("model") or ""),
+                "provider": str((creds or {}).get("provider") or ""),
+                "has_base_url": bool((creds or {}).get("base_url")),
+            },
+        )
+        # endregion
         try:
             with _hermes_profile_env(hp):
                 child = _build_child_agent(
@@ -1013,6 +1068,19 @@ def delegate_task(
                 except ValueError as exc:
                     return json.dumps({"error": str(exc)})
                 creds = _enforce_opm_baseline(creds, t.get("goal", ""))
+                # region agent log
+                _dbg98(
+                    "H2",
+                    "tools/delegate_tool.py:delegate_task(batch)",
+                    "final creds before child build",
+                    {
+                        "task_index": i,
+                        "model": str((creds or {}).get("model") or ""),
+                        "provider": str((creds or {}).get("provider") or ""),
+                        "has_base_url": bool((creds or {}).get("base_url")),
+                    },
+                )
+                # endregion
                 child = _build_child_agent(
                     task_index=i, goal=t["goal"], context=t.get("context"),
                     toolsets=t.get("toolsets") or toolsets, model=creds["model"],
@@ -1179,6 +1247,18 @@ def _resolve_delegation_credentials(
     configured_provider = str(cfg.get("provider") or "").strip() or None
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
+    # region agent log
+    _dbg98(
+        "H1",
+        "tools/delegate_tool.py:_resolve_delegation_credentials",
+        "delegation credential resolution entry",
+        {
+            "configured_model": str(configured_model or ""),
+            "configured_provider": str(configured_provider or ""),
+            "has_configured_base_url": bool(configured_base_url),
+        },
+    )
+    # endregion
 
     _cmid = (configured_model or "").strip().lower()
     _is_gemma_configured = (
@@ -1195,6 +1275,18 @@ def _resolve_delegation_credentials(
             from agent.openai_native_runtime import native_openai_runtime_tuple
 
             opm, opm_meta = resolve_openai_primary_mode(parent_agent)
+            # region agent log
+            _dbg98(
+                "H1",
+                "tools/delegate_tool.py:_resolve_delegation_credentials",
+                "resolved OPM for delegation",
+                {
+                    "opm_enabled": bool(opm_meta.get("enabled", False)),
+                    "opm_source": str(opm_meta.get("source", "")),
+                    "requested_model": str(configured_model or ""),
+                },
+            )
+            # endregion
             if opm_meta.get("enabled", False):
                 tup = None
                 # If parent already runs on direct OpenAI, reuse that runtime.
@@ -1254,6 +1346,14 @@ def _resolve_delegation_credentials(
                         session_id=str(getattr(parent_agent, "session_id", "") or ""),
                         emit_status=getattr(parent_agent, "_emit_status", None),
                     )
+                    # region agent log
+                    _dbg98(
+                        "H1",
+                        "tools/delegate_tool.py:_resolve_delegation_credentials",
+                        "opm default delegation selected",
+                        {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
+                    )
+                    # endregion
                     return out
         except Exception:
             pass
@@ -1292,6 +1392,14 @@ def _resolve_delegation_credentials(
                     emit_status=getattr(parent_agent, "_emit_status", None),
                     session_id=str(getattr(parent_agent, "session_id", "") or ""),
                 )
+                # region agent log
+                _dbg98(
+                    "H2",
+                    "tools/delegate_tool.py:_resolve_delegation_credentials",
+                    "gemma branch selected direct gemini",
+                    {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
+                )
+                # endregion
                 return out
         except Exception:
             pass
@@ -1323,6 +1431,14 @@ def _resolve_delegation_credentials(
                     emit_status=getattr(parent_agent, "_emit_status", None),
                     session_id=str(getattr(parent_agent, "session_id", "") or ""),
                 )
+                # region agent log
+                _dbg98(
+                    "H2",
+                    "tools/delegate_tool.py:_resolve_delegation_credentials",
+                    "gemma branch selected openrouter fallback",
+                    {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
+                )
+                # endregion
                 return out
         except Exception:
             pass
@@ -1358,6 +1474,14 @@ def _resolve_delegation_credentials(
 
     if not configured_provider:
         # No provider override — child inherits everything from parent
+        # region agent log
+        _dbg98(
+            "H2",
+            "tools/delegate_tool.py:_resolve_delegation_credentials",
+            "no configured provider; inheriting parent runtime",
+            {"configured_model": str(configured_model or "")},
+        )
+        # endregion
         return {
             "model": configured_model,
             "provider": None,
@@ -1405,6 +1529,14 @@ def _resolve_delegation_credentials(
         emit_status=getattr(parent_agent, "_emit_status", None),
         session_id=str(getattr(parent_agent, "session_id", "") or ""),
     )
+    # region agent log
+    _dbg98(
+        "H2",
+        "tools/delegate_tool.py:_resolve_delegation_credentials",
+        "configured provider runtime selected",
+        {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
+    )
+    # endregion
     return out
 
 

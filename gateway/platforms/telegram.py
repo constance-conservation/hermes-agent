@@ -107,12 +107,18 @@ def _strip_mdv2(text: str) -> str:
 class TelegramAdapter(BasePlatformAdapter):
     """
     Telegram bot adapter.
-    
+
     Handles:
     - Receiving messages from users and groups
     - Sending responses with Telegram markdown
-    - Forum topics (thread_id support)
+    - Forum topics (thread_id support) — DMs (Bot API 9.4+) and forum supergroups
     - Media messages
+
+    Forum topic **create / edit / delete / close / reopen** use the Bot API; there are
+    no OAuth scopes. Grant the bot **administrator** rights in a forum supergroup and
+    enable **manage topics** (and related toggles) as needed — Hermes cannot set those
+    server-side; use ``forum_topic_create`` / ``forum_topic_edit`` / etc. on this adapter
+    or call the same methods from custom tools.
     """
     
     # Telegram message limits
@@ -344,6 +350,136 @@ class TelegramAdapter(BasePlatformAdapter):
                     self.name, name, chat_id, e,
                 )
             return None
+
+    async def forum_topic_create(
+        self,
+        chat_id: int,
+        name: str,
+        *,
+        icon_color: Optional[int] = None,
+        icon_custom_emoji_id: Optional[str] = None,
+    ) -> Optional[int]:
+        """Create a forum topic in a private chat or forum-enabled supergroup.
+
+        Returns ``message_thread_id`` on success. Delegates to the same logic as
+        configured DM topics (see :meth:`_create_dm_topic`).
+        """
+        return await self._create_dm_topic(
+            chat_id=chat_id,
+            name=name,
+            icon_color=icon_color,
+            icon_custom_emoji_id=icon_custom_emoji_id,
+        )
+
+    async def forum_topic_edit(
+        self,
+        chat_id: int,
+        message_thread_id: int,
+        *,
+        name: Optional[str] = None,
+        icon_custom_emoji_id: Optional[str] = None,
+    ) -> bool:
+        """Edit a forum topic name/icon (``editForumTopic``)."""
+        if not self._bot:
+            return False
+        if name is None and icon_custom_emoji_id is None:
+            logger.warning(
+                "[%s] forum_topic_edit requires at least one of name or icon_custom_emoji_id",
+                self.name,
+            )
+            return False
+        try:
+            kwargs: Dict[str, Any] = {
+                "chat_id": chat_id,
+                "message_thread_id": message_thread_id,
+            }
+            if name is not None:
+                kwargs["name"] = name
+            if icon_custom_emoji_id is not None:
+                kwargs["icon_custom_emoji_id"] = icon_custom_emoji_id
+            await self._bot.edit_forum_topic(**kwargs)
+            return True
+        except Exception as e:
+            logger.warning(
+                "[%s] edit_forum_topic failed chat=%s thread=%s: %s",
+                self.name,
+                chat_id,
+                message_thread_id,
+                e,
+            )
+            return False
+
+    async def forum_topic_delete(
+        self,
+        chat_id: int,
+        message_thread_id: int,
+    ) -> bool:
+        """Delete a forum topic (``deleteForumTopic``)."""
+        if not self._bot:
+            return False
+        try:
+            await self._bot.delete_forum_topic(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                "[%s] delete_forum_topic failed chat=%s thread=%s: %s",
+                self.name,
+                chat_id,
+                message_thread_id,
+                e,
+            )
+            return False
+
+    async def forum_topic_close(
+        self,
+        chat_id: int,
+        message_thread_id: int,
+    ) -> bool:
+        """Close a forum topic (``closeForumTopic``)."""
+        if not self._bot:
+            return False
+        try:
+            await self._bot.close_forum_topic(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                "[%s] close_forum_topic failed chat=%s thread=%s: %s",
+                self.name,
+                chat_id,
+                message_thread_id,
+                e,
+            )
+            return False
+
+    async def forum_topic_reopen(
+        self,
+        chat_id: int,
+        message_thread_id: int,
+    ) -> bool:
+        """Reopen a forum topic (``reopenForumTopic``)."""
+        if not self._bot:
+            return False
+        try:
+            await self._bot.reopen_forum_topic(
+                chat_id=chat_id,
+                message_thread_id=message_thread_id,
+            )
+            return True
+        except Exception as e:
+            logger.warning(
+                "[%s] reopen_forum_topic failed chat=%s thread=%s: %s",
+                self.name,
+                chat_id,
+                message_thread_id,
+                e,
+            )
+            return False
 
     def _persist_dm_topic_thread_id(self, chat_id: int, topic_name: str, thread_id: int) -> None:
         """Save a newly created thread_id back into config.yaml so it persists across restarts."""
