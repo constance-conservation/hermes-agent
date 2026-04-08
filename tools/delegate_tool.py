@@ -1056,10 +1056,17 @@ def _resolve_delegation_credentials(
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
 
+    _cmid = (configured_model or "").strip().lower()
+    _is_gemma_configured = (
+        _cmid in ("gemma-4-31b-it", "gemma-4")
+        or _cmid.endswith("/gemma-4-31b-it")
+    )
+
     # OpenAI primary mode baseline for delegations:
     # when no explicit delegation model/provider/base_url is set, delegate with
     # native OpenAI GPT defaults (E/F) instead of silently inheriting a cheap model.
-    if not configured_model and not configured_provider and not configured_base_url:
+    # Also override stale Gemma delegation defaults when OPM is on.
+    if (not configured_model or _is_gemma_configured) and not configured_provider and not configured_base_url:
         try:
             from agent.token_governance_runtime import load_runtime_config
             from agent.openai_native_runtime import native_openai_runtime_tuple
@@ -1225,18 +1232,22 @@ def _load_config() -> dict:
     of the entry point (CLI, gateway, cron).
     """
     try:
+        from hermes_cli.config import load_config
+        full = load_config()
+        cfg = full.get("delegation", {})
+        if cfg:
+            return cfg
+    except Exception:
+        pass
+    # Fallback for CLI-only transient overrides when persistent config load is unavailable.
+    try:
         from cli import CLI_CONFIG
         cfg = CLI_CONFIG.get("delegation", {})
         if cfg:
             return cfg
     except Exception:
         pass
-    try:
-        from hermes_cli.config import load_config
-        full = load_config()
-        return full.get("delegation", {})
-    except Exception:
-        return {}
+    return {}
 
 
 # ---------------------------------------------------------------------------

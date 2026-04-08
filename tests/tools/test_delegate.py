@@ -780,6 +780,28 @@ class TestDelegationCredentialResolution(unittest.TestCase):
         self.assertEqual(creds["model"], "gpt-5.3-codex")
         self.assertEqual(creds["provider"], "custom")
 
+    @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
+    @patch("hermes_cli.config.load_config")
+    @patch("agent.token_governance_runtime.load_runtime_config")
+    def test_openai_primary_mode_overrides_stale_gemma_delegation_default(
+        self, mock_load_rt, mock_load_cfg, mock_native
+    ):
+        parent = _make_mock_parent(depth=0)
+        cfg = {"model": "gemma-4-31b-it", "provider": "", "base_url": ""}
+        mock_load_rt.return_value = {}
+        mock_load_cfg.return_value = {
+            "openai_primary_mode": {
+                "enabled": True,
+                "default_model": "gpt-5.4",
+                "codex_model": "gpt-5.3-codex",
+            }
+        }
+        mock_native.return_value = ("https://api.openai.com/v1", "openai-key")
+
+        creds = _resolve_delegation_credentials(cfg, parent, prompt_for_tier="summarize this")
+        self.assertEqual(creds["model"], "gpt-5.4")
+        self.assertEqual(creds["provider"], "custom")
+
 
 class TestDelegationProviderIntegration(unittest.TestCase):
     """Integration tests: delegation config → _run_single_child → AIAgent construction."""
