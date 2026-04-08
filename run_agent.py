@@ -539,8 +539,9 @@ class AIAgent:
             from agent.openai_primary_mode import opm_blocks_gemma
             from agent.tier_model_routing import canonical_gemma_model_id
 
-            # Do not canonicalize to Gemma-4-31b when OpenAI-primary mode forbids Gemma.
-            if opm_blocks_gemma(None):
+            # Do not canonicalize to Gemma-4-31b when OPM forbids Gemma. Use *opm_merge_parent*
+            # (chief) when set so delegated children see OPM before self._opm_merge_parent is stored.
+            if opm_blocks_gemma(opm_merge_parent):
                 self.model = str(model).strip()
             else:
                 self.model = canonical_gemma_model_id(model)

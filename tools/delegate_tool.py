@@ -35,6 +35,54 @@ from agent.openai_primary_mode import (
 )
 from agent.routing_trace import emit_routing_decision_trace
 
+
+def _opm_delegation_target_model(parent_agent, goal_or_prompt_text: str) -> str:
+    """Default or codex GPT slug from merged OPM (same heuristic as delegation baseline)."""
+    opm, _ = resolve_openai_primary_mode(parent_agent)
+    txt = (goal_or_prompt_text or "").lower()
+    coding = any(
+        k in txt
+        for k in (
+            "code",
+            "implement",
+            "debug",
+            "refactor",
+            "function",
+            "class",
+            "script",
+            "test",
+            "bug",
+            "compile",
+        )
+    )
+    return (
+        str(opm.get("codex_model") if coding else opm.get("default_model")).strip()
+        or ("gpt-5.3-codex" if coding else "gpt-5.4")
+    )
+
+
+def _try_delegation_gemini_non_gemma_creds(parent_agent) -> Optional[dict]:
+    """Direct Gemini runtime with :func:`opm_non_gemma_replacement_model` (no Gemma)."""
+    try:
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        rt = resolve_runtime_provider(requested="gemini")
+        if not (rt.get("api_key") or "").strip():
+            return None
+        nm = opm_non_gemma_replacement_model(parent_agent)
+        return {
+            "model": nm,
+            "provider": rt.get("provider"),
+            "base_url": rt.get("base_url"),
+            "api_key": rt.get("api_key"),
+            "api_mode": rt.get("api_mode"),
+            "command": rt.get("command"),
+            "args": list(rt.get("args") or []),
+        }
+    except Exception:
+        return None
+
+
 # Serialize delegate_task when switching HERMES_HOME for a child profile (process-global env).
 _HERMES_PROFILE_DELEGATE_LOCK = threading.RLock()
 _DEBUG_LOG_PATH = "/Users/agent-os/hermes-agent/.cursor/debug-98bb66.log"
@@ -1336,13 +1384,18 @@ def _resolve_delegation_credentials(
     Raises ValueError with a user-friendly message on credential failure.
     """
     configured_model = str(cfg.get("model") or "").strip() or None
+    _tier_opm_uplifted_to_gpt = False
     if configured_model:
         from agent.tier_model_routing import is_tier_dynamic, resolve_tier_dynamic_model
 
         if is_tier_dynamic(configured_model):
-            rm = resolve_tier_dynamic_model(prompt_for_tier, None)
+            gov = getattr(parent_agent, "_token_governance_cfg", None)
+            rm = resolve_tier_dynamic_model(prompt_for_tier, gov)
             if rm:
                 configured_model = rm
+            if opm_blocks_gemma(parent_agent) and is_gemma_model_id(str(configured_model or "")):
+                configured_model = _opm_delegation_target_model(parent_agent, prompt_for_tier)
+                _tier_opm_uplifted_to_gpt = True
     configured_provider = str(cfg.get("provider") or "").strip() or None
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
@@ -1360,16 +1413,19 @@ def _resolve_delegation_credentials(
     # endregion
 
     _cmid = (configured_model or "").strip().lower()
-    _is_gemma_configured = (
-        _cmid in ("gemma-4-31b-it", "gemma-4")
-        or _cmid.endswith("/gemma-4-31b-it")
-    )
+    _is_gemma_configured = is_gemma_model_id(_cmid)
 
     # OpenAI primary mode baseline for delegations:
     # when no explicit delegation model/provider/base_url is set, delegate with
     # native OpenAI GPT defaults (E/F) instead of silently inheriting a cheap model.
     # Also override stale Gemma delegation defaults when OPM is on.
-    if (not configured_model or _is_gemma_configured) and not configured_provider and not configured_base_url:
+    # ``_tier_opm_uplifted_to_gpt``: tier:dynamic resolved to Gemma then rewritten — still
+    # need native OpenAI creds (otherwise we would inherit parent's non-OpenAI runtime).
+    if (
+        (not configured_model or _is_gemma_configured or _tier_opm_uplifted_to_gpt)
+        and not configured_provider
+        and not configured_base_url
+    ):
         try:
             from agent.openai_native_runtime import native_openai_runtime_tuple
 
@@ -1453,6 +1509,46 @@ def _resolve_delegation_credentials(
                     )
                     # endregion
                     return out
+                # OPM on but no native OpenAI tuple: never fall through to Gemma delegation.
+                gem = _try_delegation_gemini_non_gemma_creds(parent_agent)
+                if gem:
+                    emit_routing_decision_trace(
+                        stage="delegation_credentials_resolution",
+                        chosen_model=str(gem.get("model") or ""),
+                        chosen_provider=str(gem.get("provider") or ""),
+                        reason_code="opm_delegate_no_native_openai_use_non_gemma_gemini",
+                        opm_enabled=True,
+                        opm_source=str(opm_meta.get("source", "")),
+                        tier_source="delegation_baseline",
+                        fallback_activated=True,
+                        explicit_user_model=False,
+                        profile=str(getattr(parent_agent, "profile", "") or ""),
+                        session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                    )
+                    return gem
+                mid0 = _opm_delegation_target_model(parent_agent, prompt_for_tier)
+                emit_routing_decision_trace(
+                    stage="delegation_credentials_resolution",
+                    chosen_model=str(mid0),
+                    chosen_provider="",
+                    reason_code="opm_delegate_no_native_openai_model_only",
+                    opm_enabled=True,
+                    opm_source=str(opm_meta.get("source", "")),
+                    tier_source="delegation_baseline",
+                    fallback_activated=True,
+                    explicit_user_model=False,
+                    profile=str(getattr(parent_agent, "profile", "") or ""),
+                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                )
+                return {
+                    "model": mid0,
+                    "provider": None,
+                    "base_url": None,
+                    "api_key": None,
+                    "api_mode": None,
+                    "command": None,
+                    "args": [],
+                }
         except Exception:
             pass
 
@@ -1460,8 +1556,13 @@ def _resolve_delegation_credentials(
     # If Gemma is selected for delegation and no explicit provider/base_url was
     # requested, prefer direct Gemini API first. OpenRouter is a paid last resort.
     _cmid = (configured_model or "").strip().lower()
-    _is_gemma = _cmid in ("gemma-4-31b-it", "gemma-4") or _cmid.endswith("/gemma-4-31b-it")
-    if _is_gemma and not configured_provider and not configured_base_url:
+    _is_gemma = is_gemma_model_id(_cmid)
+    if (
+        _is_gemma
+        and not configured_provider
+        and not configured_base_url
+        and not opm_blocks_gemma(parent_agent)
+    ):
         from agent.tier_model_routing import canonical_gemma_model_id
         from hermes_cli.runtime_provider import resolve_runtime_provider
 

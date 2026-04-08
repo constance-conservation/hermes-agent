@@ -871,6 +871,34 @@ class TestDelegationCredentialResolution(unittest.TestCase):
         self.assertEqual(creds["model"], "gpt-5.4")
         self.assertEqual(creds["provider"], "custom")
 
+    @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
+    @patch("agent.token_governance_runtime.load_runtime_config")
+    def test_openai_primary_mode_rewrites_tier_dynamic_gemma_to_gpt(
+        self, mock_load_rt, mock_native
+    ):
+        """tier:dynamic resolving to Gemma must become native GPT delegation under OPM."""
+        parent = _make_mock_parent(depth=0)
+        parent._token_governance_cfg = {
+            "enabled": True,
+            "openai_primary_mode": {
+                "enabled": True,
+                "default_model": "gpt-5.4",
+                "codex_model": "gpt-5.3-codex",
+            },
+            "tier_models": {"B": "gemma-4-31b-it"},
+        }
+        mock_load_rt.return_value = {}
+        mock_native.return_value = ("https://api.openai.com/v1", "openai-key")
+        cfg = {"model": "tier:dynamic", "provider": ""}
+        creds = _resolve_delegation_credentials(
+            cfg,
+            parent,
+            prompt_for_tier="summarize the attached document briefly",
+        )
+        self.assertEqual(creds["model"], "gpt-5.4")
+        self.assertEqual(creds["provider"], "custom")
+        self.assertEqual(creds["base_url"], "https://api.openai.com/v1")
+
 
 class TestDelegationProviderIntegration(unittest.TestCase):
     """Integration tests: delegation config → _run_single_child → AIAgent construction."""
