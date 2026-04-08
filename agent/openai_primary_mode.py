@@ -2,10 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+import contextlib
+import os
+import threading
+from typing import Any, Dict, Optional, Tuple
 
 from agent.disallowed_model_family import model_id_contains_disallowed_family
 from utils import is_truthy_value
+
+# Serialize temporary HERMES_HOME overrides during OPM resolution (nested anchor calls).
+_OPM_RESOLVE_HOME_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def _push_hermes_home_for_opm_resolve(home: str):
+    h = (home or "").strip()
+    if not h:
+        yield
+        return
+    with _OPM_RESOLVE_HOME_LOCK:
+        old = os.environ.get("HERMES_HOME")
+        try:
+            os.environ["HERMES_HOME"] = h
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("HERMES_HOME", None)
+            else:
+                os.environ["HERMES_HOME"] = old
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -40,14 +64,8 @@ def _opm_merge_parent_anchor(parent_agent: Any) -> Any:
         return None
 
 
-def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Return merged OPM config + source metadata.
-
-    Precedence (highest last):
-    1. ``config.yaml`` (baseline)
-    2. runtime governance YAML (field-by-field override)
-    3. live parent-agent governance cache (field-by-field override)
-    """
+def _resolve_openai_primary_mode_impl(parent_agent: Any = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Inner OPM merge; run with ``HERMES_HOME`` already pinned when needed."""
     cfg_root: Dict[str, Any] = {}
     rt_root: Dict[str, Any] = {}
     parent_root: Dict[str, Any] = {}
@@ -112,6 +130,29 @@ def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any
         "require_direct_openai": bool(merged.get("require_direct_openai", True)),
     }
     return merged, meta
+
+
+def resolve_openai_primary_mode(
+    parent_agent: Any = None,
+    *,
+    config_hermes_home: Optional[str] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Return merged OPM config + source metadata.
+
+    Precedence (highest last):
+    1. ``config.yaml`` (baseline)
+    2. runtime governance YAML (field-by-field override)
+    3. live parent-agent governance cache (field-by-field override)
+
+    When *config_hermes_home* is set, ``load_config`` / ``load_runtime_config`` read that
+    home instead of the process ``HERMES_HOME``. Used for subprocess governance while
+    ``delegate_task(..., hermes_profile=…)`` temporarily points the process at another profile.
+    """
+    ch = (config_hermes_home or "").strip()
+    if ch:
+        with _push_hermes_home_for_opm_resolve(ch):
+            return _resolve_openai_primary_mode_impl(parent_agent)
+    return _resolve_openai_primary_mode_impl(parent_agent)
 
 
 def opm_enabled(agent: Any = None) -> bool:

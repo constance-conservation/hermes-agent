@@ -576,6 +576,19 @@ class AIAgent:
         # Chief/parent agent for OPM resolution when this instance is a delegated subagent
         # (hermes_profile / delegate_task child with a different HERMES_HOME).
         self._opm_merge_parent = opm_merge_parent
+        # Hermes home of the session chief (gateway / CLI), not the temporary profile used
+        # while building a delegate_task child — subprocess OPM reads config from here.
+        try:
+            from hermes_constants import get_hermes_home as _launch_gh
+
+            if self._opm_merge_parent is not None:
+                self._delegate_launch_hermes_home = getattr(
+                    self._opm_merge_parent, "_delegate_launch_hermes_home", None
+                ) or str(_launch_gh())
+            else:
+                self._delegate_launch_hermes_home = str(_launch_gh())
+        except Exception:
+            self._delegate_launch_hermes_home = None
         # Store effective base URL for feature detection (prompt caching, reasoning, etc.)
         self.base_url = base_url or ""
         provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None

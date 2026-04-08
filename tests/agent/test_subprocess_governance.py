@@ -118,6 +118,52 @@ def test_openai_primary_mode_rejects_custom_non_openai_base(monkeypatch):
     assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent) is False
 
 
+def test_openai_primary_mode_subprocess_pins_chief_hermes_home_under_profile_env(
+    monkeypatch, tmp_path,
+):
+    """delegate_task(hermes_profile=…) sets process HERMES_HOME to the child profile; OPM for the
+    subprocess gate must still read the session chief's config.yaml."""
+    from agent import subprocess_governance as sg
+
+    chief_home = tmp_path / "chief"
+    child_home = tmp_path / "project-lead"
+    chief_home.mkdir()
+    child_home.mkdir()
+    (chief_home / "config.yaml").write_text(
+        "openai_primary_mode:\n"
+        "  enabled: true\n"
+        "  allowed_subprocess_models: [gpt-5.4]\n"
+        "  require_direct_openai: true\n",
+        encoding="utf-8",
+    )
+    (child_home / "config.yaml").write_text(
+        "openai_primary_mode:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("HERMES_HOME", str(child_home))
+    monkeypatch.setattr(
+        "agent.openai_native_runtime.native_openai_runtime_tuple",
+        lambda: ("https://api.openai.com/v1", "key"),
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    parent = SimpleNamespace(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        provider="gemini",
+        _delegate_launch_hermes_home=str(chief_home),
+        _token_governance_cfg=None,
+    )
+    assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent) is True
+
+    parent_no_pin = SimpleNamespace(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        provider="gemini",
+        _token_governance_cfg=None,
+    )
+    assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent_no_pin) is False
+
+
 def test_openai_primary_mode_loads_profile_dotenv_before_native_openai_check(
     monkeypatch, tmp_path
 ):

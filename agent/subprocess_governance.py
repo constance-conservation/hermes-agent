@@ -354,7 +354,13 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
     permitted in subprocesses IF routed directly from OpenAI (not OpenRouter).
     """
     try:
-        opm, opm_meta = resolve_openai_primary_mode(parent_agent)
+        _launch_home = (
+            getattr(parent_agent, "_delegate_launch_hermes_home", None) if parent_agent else None
+        )
+        opm, opm_meta = resolve_openai_primary_mode(
+            parent_agent,
+            config_hermes_home=_launch_home if (_launch_home or "").strip() else None,
+        )
         if not opm.get("enabled", False):
             return False
 
