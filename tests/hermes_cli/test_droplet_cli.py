@@ -3,6 +3,17 @@
 import pytest
 
 
+def test_rewrite_mistaken_profile_droplet_argv():
+    from hermes_cli.main import _rewrite_mistaken_profile_droplet_argv
+
+    assert _rewrite_mistaken_profile_droplet_argv(["-p", "droplet"]) == ["droplet"]
+    assert _rewrite_mistaken_profile_droplet_argv(["--profile", "Droplet"]) == ["droplet"]
+    assert _rewrite_mistaken_profile_droplet_argv(["--profile=droplet"]) == ["droplet"]
+    assert _rewrite_mistaken_profile_droplet_argv(["-p", "droplet", "tui"]) == ["tui", "droplet"]
+    assert _rewrite_mistaken_profile_droplet_argv(["chat"]) is None
+    assert _rewrite_mistaken_profile_droplet_argv(["-p", "chief-orchestrator", "tui"]) is None
+
+
 def test_strip_trailing_droplet_hop_argv():
     from hermes_cli.main import _strip_trailing_droplet_hop_argv
 
@@ -17,13 +28,15 @@ def test_strip_trailing_droplet_hop_argv():
 def test_validate_profile_name_rejects_droplet():
     from hermes_cli.profiles import validate_profile_name
 
-    with pytest.raises(ValueError, match="VPS hop"):
+    with pytest.raises(ValueError, match="SSH"):
         validate_profile_name("droplet")
+    with pytest.raises(ValueError, match="SSH"):
+        validate_profile_name("Droplet")
 
 
 def test_resolve_profile_env_droplet_rejected_at_validate(tmp_path, monkeypatch):
     from hermes_cli.profiles import resolve_profile_env
 
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
-    with pytest.raises(ValueError, match="VPS hop"):
+    with pytest.raises(ValueError, match="SSH"):
         resolve_profile_env("droplet")

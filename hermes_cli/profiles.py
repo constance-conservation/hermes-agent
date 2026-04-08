@@ -235,10 +235,16 @@ def validate_profile_name(name: str) -> None:
     """Raise ``ValueError`` if *name* is not a valid profile identifier."""
     if name == "default":
         return  # special alias for ~/.hermes
-    if name == "droplet":
+    if name.strip().lower() == "droplet":
         raise ValueError(
-            "'droplet' is not allowed as a profile name — it is the VPS hop command. "
-            "Run: hermes droplet"
+            "'droplet' is reserved for the VPS hop (SSH), not a Hermes profile.\n"
+            "Do not use: hermes -p droplet  or  hermes profile use droplet\n"
+            "Use instead:\n"
+            "  hermes tui droplet          # interactive TUI on the server\n"
+            "  hermes chat droplet\n"
+            "  hermes droplet\n"
+            "To use a named profile on the server, pass it before the hop, e.g.:\n"
+            "  hermes -p chief-orchestrator tui droplet"
         )
     if not _PROFILE_ID_RE.match(name):
         raise ValueError(

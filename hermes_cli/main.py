@@ -98,6 +98,38 @@ PROJECT_ROOT = _resolve_hermes_project_root()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _rewrite_mistaken_profile_droplet_argv(argv: list) -> Optional[list]:
+    """Turn ``-p droplet`` / ``--profile=droplet`` into a real VPS hop (``droplet`` last).
+
+    Operators often assume ``droplet`` is a profile. It is not — it must be the final
+    argv token for SSH delegation. Rewriting here lets ``hermes -p droplet`` behave
+    like ``hermes droplet`` after the usual trailing-``droplet`` strip + exec.
+    """
+    if not argv:
+        return None
+    out = list(argv)
+    changed = False
+    i = 0
+    while i < len(out):
+        if out[i] in ("-p", "--profile") and i + 1 < len(out):
+            if out[i + 1].strip().lower() == "droplet":
+                del out[i : i + 2]
+                changed = True
+                continue
+        if out[i].startswith("--profile="):
+            val = out[i].split("=", 1)[1]
+            if val.strip().lower() == "droplet":
+                del out[i]
+                changed = True
+                continue
+        i += 1
+    if not changed:
+        return None
+    if not out or out[-1] != "droplet":
+        out.append("droplet")
+    return out
+
+
 def _strip_trailing_droplet_hop_argv(argv: list) -> Optional[list]:
     """If argv ends with the VPS hop token ``droplet``, return argv without it.
 
@@ -187,7 +219,7 @@ def _apply_profile_override() -> None:
 
     if profile_name is not None:
         # "droplet" is the VPS hop suffix (hermes doctor droplet), not a profile name.
-        if profile_name.strip() == "droplet":
+        if profile_name.strip().lower() == "droplet":
             print(
                 "Warning: ~/.hermes/active_profile contained 'droplet' — that is not a profile. "
                 "Use: hermes <command> … droplet   (droplet must be the last argument). "
@@ -227,6 +259,9 @@ def _apply_profile_override() -> None:
 
 # ``hermes droplet`` via the pip/console entry point (no repo ``scripts/core/hermes`` shim):
 # delegate before profile pre-parse so this is never mistaken for ``-p droplet``.
+_p_droplet_fix = _rewrite_mistaken_profile_droplet_argv(list(sys.argv[1:]))
+if _p_droplet_fix is not None:
+    sys.argv = [sys.argv[0]] + _p_droplet_fix
 _drop_argv = _strip_trailing_droplet_hop_argv(sys.argv[1:])
 _agent_droplet = PROJECT_ROOT / "scripts" / "core" / "agent-droplet"
 _delegate_droplet = bool(_drop_argv is not None and _agent_droplet.is_file())
@@ -1065,7 +1100,7 @@ def select_provider_and_model(args=None):
         ("opencode-zen", "OpenCode Zen (35+ curated models, pay-as-you-go)"),
         ("opencode-go", "OpenCode Go (open models, $10/month subscription)"),
         ("ai-gateway", "AI Gateway (Vercel — 200+ models, pay-per-use)"),
-        ("alibaba", "Alibaba Cloud / DashScope Coding (Qwen + multi-provider)"),
+        ("alibaba", "Alibaba Cloud / DashScope Coding (multi-provider)"),
         ("huggingface", "Hugging Face Inference Providers (20+ open models)"),
         ("gemini", "Google Gemini (AI Studio API key — free tier)"),
     ]
