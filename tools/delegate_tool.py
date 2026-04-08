@@ -320,6 +320,18 @@ def _build_child_agent(
     )
     # endregion
 
+    # OpenAI-primary mode: do not attach the global free_model_routing fallback chain
+    # to subprocesses. Otherwise a transient GPT failure triggers
+    # ``_try_activate_fallback()`` and swaps the subagent to Gemma/Gemini tier
+    # even though delegation credentials were intentionally upgraded to GPT.
+    _opm_child_kwargs: Dict[str, Any] = {}
+    try:
+        _, _opm_fb_meta = resolve_openai_primary_mode(parent_agent)
+        if _opm_fb_meta.get("enabled", False):
+            _opm_child_kwargs["fallback_model"] = []
+    except Exception:
+        pass
+
     child = AIAgent(
         base_url=effective_base_url,
         api_key=effective_api_key,
@@ -347,6 +359,7 @@ def _build_child_agent(
         provider_sort=parent_agent.provider_sort,
         tool_progress_callback=child_progress_cb,
         iteration_budget=None,  # fresh budget per subagent
+        **_opm_child_kwargs,
     )
     # Set delegation depth so children can't spawn grandchildren
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
