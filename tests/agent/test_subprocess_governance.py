@@ -69,6 +69,40 @@ def test_openai_primary_mode_rejects_openrouter_parent(monkeypatch):
     assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent) is False
 
 
+def test_openai_primary_mode_allows_gateway_stub_parent_with_runtime_openai_not_env(
+    monkeypatch, tmp_path,
+):
+    """RouterDelegateParentStub holds api.openai.com + key on the object; env may be empty."""
+    from agent import subprocess_governance as sg
+
+    chief = tmp_path / "chief"
+    chief.mkdir()
+    (chief / "config.yaml").write_text(
+        "openai_primary_mode:\n"
+        "  enabled: true\n"
+        "  allowed_subprocess_models: []\n"
+        "  require_direct_openai: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(chief))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY_DROPLET", raising=False)
+    monkeypatch.setattr(
+        "agent.openai_native_runtime.native_openai_runtime_tuple",
+        lambda: None,
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    parent = SimpleNamespace(
+        base_url="https://api.openai.com/v1",
+        provider="custom",
+        api_key="sk-on-stub-only",
+        _delegate_launch_hermes_home=str(chief),
+        _token_governance_cfg=None,
+    )
+    assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent) is True
+
+
 def test_openai_primary_mode_allows_other_gpt_slugs_when_opm_native_available(monkeypatch):
     """Any ``gpt-*`` OpenAI API slug is allowed under OPM when keys exist (not only E/F consultants)."""
     from agent import subprocess_governance as sg

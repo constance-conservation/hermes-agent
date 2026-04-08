@@ -52,6 +52,8 @@ class RouterDelegateParentStub:
 
     __slots__ = (
         "_delegate_depth",
+        "_delegate_launch_hermes_home",
+        "_token_governance_cfg",
         "enabled_toolsets",
         "model",
         "provider",
@@ -94,6 +96,19 @@ class RouterDelegateParentStub:
         on_delegate_child_model: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._delegate_depth = 0
+        # Match AIAgent: chief Hermes home before delegate_task switches HERMES_HOME to child profile.
+        try:
+            from hermes_constants import get_hermes_home
+
+            self._delegate_launch_hermes_home = str(get_hermes_home())
+        except Exception:
+            self._delegate_launch_hermes_home = ""
+        try:
+            from agent.token_governance_runtime import load_runtime_config
+
+            self._token_governance_cfg = load_runtime_config()
+        except Exception:
+            self._token_governance_cfg = None
         self.enabled_toolsets = list(enabled_toolsets or [])
         self.model = model
         self.provider = runtime.get("provider")

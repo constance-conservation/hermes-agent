@@ -375,6 +375,24 @@ def request_operator_approval(
 # Policy enforcement entry point (called from delegate_tool.py)
 # ---------------------------------------------------------------------------
 
+def _parent_agent_carries_native_openai_runtime(parent_agent: Any) -> bool:
+    """True when the launching agent already holds api.openai.com + API key (e.g. gateway stub)."""
+    if parent_agent is None:
+        return False
+    pbu = (getattr(parent_agent, "base_url", None) or "").strip().lower()
+    pkey = (getattr(parent_agent, "api_key", None) or "").strip()
+    if not pkey and hasattr(parent_agent, "_client_kwargs"):
+        ck = getattr(parent_agent, "_client_kwargs", None) or {}
+        if isinstance(ck, dict):
+            pkey = str(ck.get("api_key") or "").strip()
+    ppr = (getattr(parent_agent, "provider", None) or "").strip().lower()
+    if not pkey or "api.openai.com" not in pbu:
+        return False
+    if ppr in ("", "custom", "openai", "openai-codex"):
+        return True
+    return False
+
+
 def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> bool:
     """Check if model is allowed by the openai_primary_mode feature flag.
 
@@ -416,7 +434,9 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
             _refresh_openai_credentials_for_subprocess(parent_agent)
             from agent.openai_native_runtime import native_openai_runtime_tuple
 
-            if not native_openai_runtime_tuple():
+            if not native_openai_runtime_tuple() and not _parent_agent_carries_native_openai_runtime(
+                parent_agent
+            ):
                 emit_routing_decision_trace(
                     stage="subprocess_governance_gate",
                     chosen_model=str(model_id or ""),
