@@ -7039,6 +7039,12 @@ class AIAgent:
             from agent.token_governance_runtime import apply_per_turn_tier_model
 
             apply_per_turn_tier_model(self, user_message)
+            try:
+                from agent.token_governance_runtime import enforce_opm_runtime_after_per_turn_routing
+
+                enforce_opm_runtime_after_per_turn_routing(self, user_message)
+            except Exception:
+                logger.debug("enforce_opm_runtime_after_per_turn_routing failed", exc_info=True)
             _opm_meta = getattr(self, "_last_opm_meta", None) or {}
             emit_routing_decision_trace(
                 stage="main_turn_selection",

@@ -11,6 +11,7 @@ from agent.token_governance_runtime import (
     RUNTIME_FILENAME,
     apply_per_turn_tier_model,
     apply_token_governance_runtime,
+    enforce_opm_runtime_after_per_turn_routing,
     inherit_token_governance_from_parent,
     load_runtime_config,
     resolve_tier_strings_in_config,
@@ -457,3 +458,35 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
             agent, "google/gemini-2.5-flash", "summarize", {"enabled": True}
         )
     assert out == "gpt-5.4"
+
+
+def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
+    """Even when apply_per_turn exited early, run_conversation enforcement can fix Gemma."""
+
+    class _StubAgent:
+        def __init__(self):
+            self.model = "gemma-4-31b-it"
+            self.provider = "gemini"
+            self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+            self._reconcile_called = False
+
+        def _reconcile_runtime_after_tier_model_change(self):
+            self._reconcile_called = True
+
+    agent = _StubAgent()
+    with (
+        patch(
+            "agent.token_governance_runtime.resolve_openai_primary_mode",
+            return_value=(
+                {"default_model": "gpt-5.4", "codex_model": "gpt-5.3-codex"},
+                {"enabled": True, "source": "test"},
+            ),
+        ),
+        patch(
+            "agent.openai_native_runtime.native_openai_runtime_tuple",
+            return_value=("https://api.openai.com/v1", "sk-test"),
+        ),
+    ):
+        enforce_opm_runtime_after_per_turn_routing(agent, "summarize the doc")
+    assert agent.model == "gpt-5.4"
+    assert agent._reconcile_called is True

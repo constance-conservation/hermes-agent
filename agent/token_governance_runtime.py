@@ -403,6 +403,87 @@ def _opm_clamp_tier_resolved_model(
     return mid
 
 
+def _opm_turn_needs_native_openai_fix(agent: Any, mid: str) -> bool:
+    """True when this turn should be forced onto native OpenAI under OPM."""
+    m = (mid or "").strip()
+    if not m:
+        return True
+    low = m.lower()
+    if "gemma" in low or "gemini" in low:
+        return True
+    try:
+        from agent.subprocess_governance import classify_model_cost
+
+        p = str(getattr(agent, "provider", None) or "")
+        bu = str(getattr(agent, "base_url", None) or "")
+        if classify_model_cost(m, provider=p, base_url=bu) == "free":
+            return True
+    except Exception:
+        pass
+    try:
+        from agent.openai_native_runtime import is_native_openai_consultant_model_id
+
+        if is_native_openai_consultant_model_id(m):
+            bu = (getattr(agent, "base_url", None) or "").lower()
+            if "api.openai.com" not in bu:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def enforce_opm_runtime_after_per_turn_routing(agent: Any, user_message: str) -> None:
+    """Last-line OPM enforcement after :func:`apply_per_turn_tier_model`.
+
+    Catches early returns inside per-turn routing (``_model_is_tier_routed`` off,
+    no runtime cfg on first init path, etc.), wrong HTTP stack for a GPT slug, or
+    any remaining Gemma / Gemini / free model id before the first LLM call.
+    """
+    try:
+        _, meta = resolve_openai_primary_mode(agent)
+        if not meta.get("enabled", False):
+            return
+        from agent.openai_native_runtime import native_openai_runtime_tuple
+
+        if not native_openai_runtime_tuple():
+            return
+        cur = (getattr(agent, "model", None) or "").strip()
+        if not _opm_turn_needs_native_openai_fix(agent, cur):
+            return
+        opm_cfg, _ = resolve_openai_primary_mode(agent)
+        coding = any(
+            kw in (user_message or "").lower()
+            for kw in (
+                "code",
+                "implement",
+                "debug",
+                "refactor",
+                "function",
+                "class",
+                "script",
+                "test",
+                "fix",
+                "bug",
+                "error",
+                "compile",
+                "build",
+                "deploy",
+            )
+        )
+        new_mid = str(
+            (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
+        ).strip()
+        if not new_mid:
+            return
+        logger.info("openai_primary_mode: turn enforcement %r → %r", cur or "(empty)", new_mid)
+        agent.model = new_mid
+        reb = getattr(agent, "_reconcile_runtime_after_tier_model_change", None)
+        if callable(reb):
+            reb()
+    except Exception:
+        logger.debug("enforce_opm_runtime_after_per_turn_routing failed", exc_info=True)
+
+
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
     # Prime OPM metadata for main_turn_selection traces even when we return early below.
