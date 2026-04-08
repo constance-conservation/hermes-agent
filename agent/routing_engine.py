@@ -272,11 +272,25 @@ def _call_routing_llm(system: str, user: str) -> str:
 
 
 def _get_openai_primary_mode() -> Optional[dict]:
-    """Return openai_primary_mode config dict if enabled, else None."""
+    """Return openai_primary_mode config dict if enabled, else None.
+
+    Checks both config.yaml and the runtime governance YAML since
+    the flag may live in either location.
+    """
+    # Check config.yaml first
     try:
         from hermes_cli.config import load_config
         cfg = load_config() or {}
         opm = cfg.get("openai_primary_mode") or {}
+        if opm.get("enabled", False):
+            return opm
+    except Exception:
+        pass
+    # Check runtime governance YAML (where it's typically deployed)
+    try:
+        from agent.token_governance_runtime import load_runtime_config
+        rt = load_runtime_config() or {}
+        opm = rt.get("openai_primary_mode") or {}
         if opm.get("enabled", False):
             return opm
     except Exception:

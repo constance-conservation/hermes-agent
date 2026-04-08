@@ -131,6 +131,16 @@ def apply_token_governance_runtime(agent: Any) -> None:
 
     agent._token_governance_cfg = cfg
 
+    # Remember whether the config-supplied model was a tier placeholder.
+    # If it was NOT (user set a concrete model like "gpt-5.4"), per-turn
+    # tier routing must not override it.
+    _raw_model = (agent.model or "").strip()
+    _is_tier_placeholder = (
+        is_tier_dynamic(_raw_model)
+        or bool(TIER_SENTINEL_RE.match(_raw_model))
+    )
+    agent._model_is_tier_routed = _is_tier_placeholder
+
     # Resolve tier: sentinel on agent.model before blocklist logic (fixed letter → slug).
     # tier:dynamic is left as-is until apply_per_turn_tier_model (per user message).
     if agent.model and TIER_SENTINEL_RE.match(str(agent.model).strip()):
@@ -258,6 +268,10 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     # Stay on the active provider/model while provider fallback is pinned (e.g. rate limits).
     if getattr(agent, "_fallback_activated", False):
         return
+    # If the user set a concrete model in config (not tier:X / tier:dynamic),
+    # do not override it with per-turn routing. This ensures /model switches persist.
+    if not getattr(agent, "_model_is_tier_routed", True):
+        return
     from agent.consultant_routing import (
         consultant_routing_enabled,
         format_status_line,
@@ -286,6 +300,21 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     deterministic_tier = select_tier_for_message(user_message, cfg)
     tier = deterministic_tier
     audit: dict = {}
+
+    # openai_primary_mode: override low-cost deterministic tier with E/F
+    _opm = cfg.get("openai_primary_mode") or {}
+    if _opm.get("enabled", False) and tier in ("A", "B", "C"):
+        _is_coding = any(
+            kw in (user_message or "").lower()
+            for kw in ("code", "implement", "debug", "refactor", "function",
+                       "class", "script", "test", "fix", "bug", "error",
+                       "compile", "build", "deploy")
+        )
+        tier = "F" if _is_coding else "E"
+        logger.info(
+            "openai_primary_mode: overriding deterministic tier %s → %s",
+            deterministic_tier, tier,
+        )
 
     # Detect push-back and repeated-failure signals for escalation.
     pushback = is_pushback_message(user_message)
@@ -329,7 +358,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
         setattr(agent, "_routing_detected_background_task", True)
         logger.info(
             "routing_engine: background task detected — chief orchestrator should be consulted "
-            "before launching subprocess; only free local models (gemma-4, qwen) permitted "
+            "before launching subprocess; only free local models (gemma-4-31b-it or local inference) permitted "
             "without explicit operator approval"
         )
         emit = getattr(agent, "_emit_status", None)
