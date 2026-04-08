@@ -6,6 +6,22 @@ without risk of circular imports.
 
 import os
 from pathlib import Path
+from typing import Any, Optional
+
+
+def _sanitized_hermes_home_env() -> Optional[str]:
+    """Return HERMES_HOME from the environment if it is a sane path string.
+
+    Rejects poisoned values (e.g. ``unittest.mock`` string reps accidentally set on
+    ``os.environ``), which would otherwise create ``<MagicMock ...>`` directories.
+    """
+    raw = os.getenv("HERMES_HOME")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s or s.startswith("<") or "MagicMock" in s:
+        return None
+    return s
 
 
 def get_hermes_home() -> Path:
@@ -14,7 +30,44 @@ def get_hermes_home() -> Path:
     Reads HERMES_HOME env var, falls back to ~/.hermes.
     This is the single source of truth — all other copies should import this.
     """
-    return Path(os.getenv("HERMES_HOME", Path.home() / ".hermes"))
+    s = _sanitized_hermes_home_env()
+    if s:
+        return Path(s).expanduser()
+    return Path(Path.home() / ".hermes").expanduser()
+
+
+def safe_hermes_home_directory(value: Any) -> Optional[str]:
+    """If *value* is a real existing directory path, return its resolved string; else None.
+
+    Use before ``load_hermes_dotenv(hermes_home=…)`` or temporarily setting
+    ``HERMES_HOME`` from ``parent_agent._delegate_launch_hermes_home``. Rejects
+    ``MagicMock`` / non-string / non-directory values so tests cannot create bogus
+    path components under the repo.
+    """
+    if value is None:
+        return None
+    try:
+        from unittest.mock import MagicMock, Mock, NonCallableMagicMock, NonCallableMock
+
+        if isinstance(value, (MagicMock, Mock, NonCallableMagicMock, NonCallableMock)):
+            return None
+    except Exception:
+        pass
+    if not isinstance(value, (str, os.PathLike)):
+        return None
+    try:
+        s = os.fspath(value).strip()
+    except Exception:
+        return None
+    if not s or s.startswith("<") or "MagicMock" in s:
+        return None
+    try:
+        p = Path(s).expanduser()
+        if p.is_dir():
+            return str(p.resolve())
+    except OSError:
+        return None
+    return None
 
 
 def get_optional_skills_dir(default: Path | None = None) -> Path:

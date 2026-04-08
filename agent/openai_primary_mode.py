@@ -15,8 +15,10 @@ _OPM_RESOLVE_HOME_LOCK = threading.RLock()
 
 
 @contextlib.contextmanager
-def _push_hermes_home_for_opm_resolve(home: str):
-    h = (home or "").strip()
+def _push_hermes_home_for_opm_resolve(home: Any):
+    from hermes_constants import safe_hermes_home_directory
+
+    h = safe_hermes_home_directory(home)
     if not h:
         yield
         return
@@ -148,7 +150,9 @@ def resolve_openai_primary_mode(
     home instead of the process ``HERMES_HOME``. Used for subprocess governance while
     ``delegate_task(..., hermes_profile=…)`` temporarily points the process at another profile.
     """
-    ch = (config_hermes_home or "").strip()
+    from hermes_constants import safe_hermes_home_directory
+
+    ch = safe_hermes_home_directory(config_hermes_home)
     if ch:
         with _push_hermes_home_for_opm_resolve(ch):
             return _resolve_openai_primary_mode_impl(parent_agent)
@@ -166,9 +170,11 @@ def resolve_openai_primary_mode_for_session_agent(
     """
     if parent_agent is None:
         return resolve_openai_primary_mode(None)
+    from hermes_constants import safe_hermes_home_directory
+
     pin = getattr(parent_agent, "_delegate_launch_hermes_home", None)
-    ps = str(pin).strip() if pin else ""
-    return resolve_openai_primary_mode(parent_agent, config_hermes_home=ps or None)
+    ps = safe_hermes_home_directory(pin)
+    return resolve_openai_primary_mode(parent_agent, config_hermes_home=ps)
 
 
 def opm_enabled_for_session_agent(agent: Any = None) -> bool:

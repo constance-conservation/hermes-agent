@@ -53,18 +53,15 @@ def refresh_openai_dotenv_for_agent_context(parent_agent: Any = None) -> None:
     :func:`native_openai_runtime_tuple` when enforcing OPM / delegation credentials.
     """
     try:
-        from pathlib import Path
-
         from hermes_cli.env_loader import load_hermes_dotenv
-        from hermes_constants import get_hermes_home
+        from hermes_constants import get_hermes_home, safe_hermes_home_directory
 
         if parent_agent is not None:
-            lh = getattr(parent_agent, "_delegate_launch_hermes_home", None)
-            if lh is not None:
-                s = str(lh).strip()
-                # unittest.mock values string-rep as ``<MagicMock ...>`` — never use as a path.
-                if s and not s.startswith("<") and Path(s).is_dir():
-                    load_hermes_dotenv(hermes_home=s)
+            lh = safe_hermes_home_directory(
+                getattr(parent_agent, "_delegate_launch_hermes_home", None)
+            )
+            if lh:
+                load_hermes_dotenv(hermes_home=lh)
         load_hermes_dotenv(hermes_home=get_hermes_home())
     except Exception:
         pass

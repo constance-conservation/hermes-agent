@@ -403,12 +403,16 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
     - An explicit entry in ``allowed_subprocess_models`` when that list is non-empty.
     """
     try:
+        from hermes_constants import safe_hermes_home_directory
+
         _launch_home = (
-            getattr(parent_agent, "_delegate_launch_hermes_home", None) if parent_agent else None
+            safe_hermes_home_directory(getattr(parent_agent, "_delegate_launch_hermes_home", None))
+            if parent_agent
+            else None
         )
         opm, opm_meta = resolve_openai_primary_mode(
             parent_agent,
-            config_hermes_home=_launch_home if (_launch_home or "").strip() else None,
+            config_hermes_home=_launch_home,
         )
         if not opm.get("enabled", False):
             return False
