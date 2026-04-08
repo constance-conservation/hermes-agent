@@ -246,6 +246,26 @@ def _drop_plain_hf_without_router(entries: List[Dict[str, Any]]) -> List[Dict[st
     return [e for e in entries if not _is_plain_hf_without_router(e)]
 
 
+def _opm_finalize_fallback_chain(chain: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Under ``openai_primary_mode.enabled``, drop Gemma entries; inject one non-Gemma hop if empty."""
+    try:
+        from agent.openai_primary_mode import (
+            filter_fallback_chain_strip_gemma,
+            opm_blocks_gemma,
+            opm_non_gemma_replacement_model,
+        )
+
+        if not opm_blocks_gemma():
+            return chain
+        filtered = filter_fallback_chain_strip_gemma(chain)
+        if filtered:
+            return filtered
+        aux = opm_non_gemma_replacement_model()
+        return [{"provider": "gemini", "model": aux, "only_rate_limit": False}]
+    except Exception:
+        return chain
+
+
 def resolve_fallback_providers(config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Resolve ``fallback_providers`` with ``free_model_routing`` when appropriate.
 
@@ -272,11 +292,11 @@ def resolve_fallback_providers(config: Optional[Dict[str, Any]]) -> List[Dict[st
         cleaned = [x for x in fp if isinstance(x, dict) and x.get("provider") and x.get("model")]
         cleaned = _drop_plain_hf_without_router(cleaned)
         if not cleaned:
-            return synth
-        return cleaned
+            return _opm_finalize_fallback_chain(synth)
+        return _opm_finalize_fallback_chain(cleaned)
     fm = config.get("fallback_model")
     if isinstance(fm, dict) and fm.get("provider") and fm.get("model"):
         if _is_plain_hf_without_router(fm):
-            return synth
-        return [fm]
-    return synth
+            return _opm_finalize_fallback_chain(synth)
+        return _opm_finalize_fallback_chain([fm])
+    return _opm_finalize_fallback_chain(synth)

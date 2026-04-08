@@ -233,6 +233,8 @@ DEFAULT_CONFIG = {
         "codex_model": "gpt-5.3-codex",
         "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex"],
         "require_direct_openai": True,
+        # When enabled, auxiliary/review/fallback paths never use Gemma; override if needed (must not contain "gemma").
+        "non_gemma_auxiliary_model": "",
     },
     "cost_governance": {
         "daily_budget_usd": 10.0,

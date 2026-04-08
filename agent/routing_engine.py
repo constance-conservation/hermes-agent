@@ -427,12 +427,20 @@ def review_agent_summary(
 
     try:
         from agent.auxiliary_client import call_llm
+        from agent.openai_primary_mode import opm_blocks_gemma, opm_non_gemma_replacement_model
 
+        _m = "gemma-4-31b-it"
+        _p = "gemini"
+        if opm_blocks_gemma(None):
+            _m = opm_non_gemma_replacement_model(None)
+            _low = _m.lower()
+            if "gpt-" in _low or _low.startswith("gpt"):
+                _p = "openai"
         raw = call_llm(
             prompt=user_msg,
             system=_REVIEW_SYSTEM,
-            model="gemma-4-31b-it",
-            provider="gemini",
+            model=_m,
+            provider=_p,
             max_tokens=60,
             temperature=0.0,
         )

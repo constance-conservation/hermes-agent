@@ -5,8 +5,8 @@ Before a delegated agent runs, this module:
 2. Ensures delegated agents use cheaper-or-equal models vs the parent.
 3. Blocks consultant-tier models for delegated agents.
 
-All review calls use the free model (gemma-4-31b-it via Gemini API) to
-keep overhead at zero cost.
+Review calls use Gemma on Gemini API when allowed; with
+``openai_primary_mode.enabled``, Gemma is never used (non-Gemma auxiliary model).
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ def gate_delegate_model(
         # from consultant-tier blocking (they ARE the baseline, not consultants).
         _skip_block = _opm_allows_subprocess_model(proposed_model, parent_agent)
         if not _skip_block:
-            free = default_free_subprocess_model_id()
+            free = default_free_subprocess_model_id(parent_agent)
             # region agent log
             _dbg98(
                 "H4",
@@ -123,7 +123,7 @@ def gate_delegate_model(
         if parent_agent is not None and _opm_allows_subprocess_model(proposed_model, parent_agent):
             return proposed_model, "approved (openai_primary_mode subprocess baseline)"
 
-        free = default_free_subprocess_model_id()
+        free = default_free_subprocess_model_id(parent_agent)
         # region agent log
         _dbg98(
             "H4",
@@ -158,6 +158,7 @@ def review_delegation_context(
     goal: str,
     context: Optional[str],
     proposed_model: str,
+    parent_agent: Any = None,
 ) -> Dict[str, Any]:
     """Quick review of delegation context using the free model.
 
@@ -187,11 +188,19 @@ def review_delegation_context(
 
     try:
         from agent.auxiliary_client import call_llm
+        from agent.openai_primary_mode import opm_blocks_gemma, opm_non_gemma_replacement_model
 
+        _review_model = "gemma-4-31b-it"
+        _review_provider = "gemini"
+        if opm_blocks_gemma(parent_agent):
+            _review_model = opm_non_gemma_replacement_model(parent_agent)
+            _low = _review_model.lower()
+            if "gpt-" in _low or _low.startswith("gpt"):
+                _review_provider = "openai"
         raw = call_llm(
             prompt=prompt,
-            model="gemma-4-31b-it",
-            provider="gemini",
+            model=_review_model,
+            provider=_review_provider,
             max_tokens=80,
             temperature=0.0,
         )

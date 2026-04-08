@@ -535,9 +535,14 @@ class AIAgent:
         if model is None:
             self.model = None
         else:
+            from agent.openai_primary_mode import opm_blocks_gemma
             from agent.tier_model_routing import canonical_gemma_model_id
 
-            self.model = canonical_gemma_model_id(model)
+            # Do not canonicalize to Gemma-4-31b when OpenAI-primary mode forbids Gemma.
+            if opm_blocks_gemma(None):
+                self.model = str(model).strip()
+            else:
+                self.model = canonical_gemma_model_id(model)
         # CLI /models → Choose-Router: force consultant router LLM stack for the session.
         self._router_session_override = (
             dict(router_session_override) if isinstance(router_session_override, dict) else None
@@ -605,6 +610,28 @@ class AIAgent:
             apply_token_governance_runtime(self)
         except Exception:
             logger.debug("token_governance_runtime apply failed", exc_info=True)
+
+        # OpenAI-primary mode: never run Gemma (canonical slug, tier picks, or misconfig).
+        try:
+            from agent.openai_primary_mode import (
+                is_gemma_model_id,
+                opm_blocks_gemma,
+                opm_non_gemma_replacement_model,
+                resolve_openai_primary_mode,
+            )
+
+            if self.model and opm_blocks_gemma(self) and is_gemma_model_id(self.model):
+                opm_cfg, _ = resolve_openai_primary_mode(self)
+                repl = str(opm_cfg.get("default_model") or "").strip()
+                if not repl or is_gemma_model_id(repl):
+                    repl = opm_non_gemma_replacement_model(self)
+                self.model = repl
+                if not self.quiet_mode:
+                    print(
+                        f"openai_primary_mode: Gemma is disabled — using primary model {self.model!r}"
+                    )
+        except Exception:
+            logger.debug("openai_primary_mode Gemma primary rewrite failed", exc_info=True)
 
         # Pre-warm OpenRouter model metadata cache in a background thread.
         # fetch_model_metadata() is cached for 1 hour; this avoids a blocking
@@ -5022,6 +5049,20 @@ class AIAgent:
             fb_provider = "gemini"
         if not fb_provider or not fb_model:
             return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # skip invalid, try next
+
+        try:
+            from agent.openai_primary_mode import opm_blocks_gemma, is_gemma_model_id
+
+            if opm_blocks_gemma(self) and is_gemma_model_id(fb_model):
+                logging.warning(
+                    "openai_primary_mode: skipping Gemma fallback %r — trying next chain entry",
+                    fb_model,
+                )
+                return self._try_activate_fallback(
+                    triggered_by_rate_limit=triggered_by_rate_limit
+                )
+        except Exception:
+            logger.debug("opm Gemma fallback gate failed", exc_info=True)
 
         # Use centralized router for client construction.
         # raw_codex=True because the main agent needs direct responses.stream()

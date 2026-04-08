@@ -20,6 +20,52 @@ def test_normalize_kimi_tiers_list_of_dicts():
     assert t[1]["models"] == ["m3"]
 
 
+def test_resolve_fallback_providers_strips_gemma_when_opm_enabled(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "openai_primary_mode": {"enabled": True},
+            "free_model_routing": {
+                "enabled": True,
+                "filter_free_tier_models_by_local_hub": False,
+                "kimi_router": {
+                    "router_model": "gemma-4-31b-it",
+                    "tiers": [{"id": "t", "models": ["gemma-4-31b-it"]}],
+                },
+                "openrouter_last_resort": {"enabled": False},
+            },
+        },
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+    monkeypatch.setattr(
+        "agent.openai_native_runtime.native_openai_runtime_tuple",
+        lambda: None,
+    )
+    from hermes_cli.config import load_config
+
+    out = resolve_fallback_providers(load_config())
+    assert out
+    assert all("gemma" not in str(e.get("model") or "").lower() for e in out)
+
+
+def test_resolve_fallback_providers_empty_when_opm_suppresses_native(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "openai_primary_mode": {"enabled": True},
+            "free_model_routing": {"enabled": True},
+        },
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+    monkeypatch.setattr(
+        "agent.openai_native_runtime.native_openai_runtime_tuple",
+        lambda: ("https://api.openai.com/v1", "k"),
+    )
+    from hermes_cli.config import load_config
+
+    assert resolve_fallback_providers(load_config()) == []
+
+
 def test_top_level_tiers_preferred_over_legacy_kimi_router():
     cfg = {
         "free_model_routing": {

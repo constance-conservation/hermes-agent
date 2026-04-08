@@ -497,7 +497,7 @@ def _run_single_child(
                 and child is not None
                 and parent_agent is not None
             ):
-                fb_model = default_free_subprocess_model_id()
+                fb_model = default_free_subprocess_model_id(parent_agent)
                 if (
                     fb_model
                     and is_free_subprocess_model(fb_model)
@@ -622,7 +622,9 @@ def _run_single_child(
                 _emit(f"[Delegate] {_gate_reason}", "delegation_review")
             logger.info("delegation gating: %s", _gate_reason)
 
-        _review = review_delegation_context(goal, _kwargs.get("context"), child_model)
+        _review = review_delegation_context(
+            goal, _kwargs.get("context"), child_model, parent_agent
+        )
         if _review.get("improved_context"):
             _extra = _review["improved_context"]
             goal = f"{goal}\n\nAdditional guidance: {_extra}"

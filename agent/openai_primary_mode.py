@@ -83,6 +83,66 @@ def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any
     return merged, meta
 
 
+def is_gemma_model_id(model_id: str) -> bool:
+    """True for any Gemma-family id (never used when openai_primary_mode is enabled)."""
+    m = (model_id or "").strip().lower()
+    return bool(m) and "gemma" in m
+
+
+def opm_blocks_gemma(agent: Any = None) -> bool:
+    """When OpenAI-primary mode is enabled (merged config), Gemma must never run."""
+    try:
+        opm, _ = resolve_openai_primary_mode(agent)
+        return bool(opm.get("enabled"))
+    except Exception:
+        return False
+
+
+def opm_non_gemma_replacement_model(agent: Any = None) -> str:
+    """Cheap non-Gemma id for auxiliary calls and last-resort fallbacks under OPM.
+
+    Config override: ``openai_primary_mode.non_gemma_auxiliary_model`` (must not contain ``gemma``).
+    Default: ``google/gemini-2.5-flash`` on the Gemini API (not Gemma).
+    """
+    try:
+        opm, _ = resolve_openai_primary_mode(agent)
+        raw = str(opm.get("non_gemma_auxiliary_model") or "").strip()
+        if raw and not is_gemma_model_id(raw):
+            return raw
+    except Exception:
+        pass
+    return "google/gemini-2.5-flash"
+
+
+def filter_fallback_chain_strip_gemma(chain: Any) -> list:
+    """Drop fallback dicts that only exist to serve Gemma (model slug or tier router)."""
+    if not isinstance(chain, list):
+        return []
+    out: list = []
+    for e in chain:
+        if not isinstance(e, dict):
+            continue
+        mid = str(e.get("model") or "").strip()
+        if is_gemma_model_id(mid):
+            continue
+        if e.get("gemini_tier_router") or e.get("hf_router"):
+            if is_gemma_model_id(mid):
+                continue
+            tiers = e.get("gemini_tier_router_tiers") or e.get("hf_router_tiers") or []
+            flat: list[str] = []
+            if isinstance(tiers, list):
+                for t in tiers:
+                    if isinstance(t, dict):
+                        for x in t.get("models") or []:
+                            flat.append(str(x).strip().lower())
+            if flat and all(is_gemma_model_id(x) for x in flat if x):
+                continue
+        if e.get("openrouter_last_resort") and is_gemma_model_id(mid):
+            continue
+        out.append(e)
+    return out
+
+
 def opm_suppresses_free_model_fallback(agent: Any = None) -> bool:
     """True when OpenAI-primary mode is on and native OpenAI API credentials exist.
 

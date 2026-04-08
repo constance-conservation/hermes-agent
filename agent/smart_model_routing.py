@@ -85,6 +85,14 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
     if not provider or not model:
         return None
 
+    try:
+        from agent.openai_primary_mode import opm_blocks_gemma, is_gemma_model_id
+
+        if opm_blocks_gemma() and is_gemma_model_id(model):
+            return None
+    except Exception:
+        pass
+
     text = (user_message or "").strip()
     if not text:
         return None

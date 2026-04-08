@@ -375,8 +375,15 @@ def _call_profile_router_llm(
     router_model = str(kr.get("router_model") or "gemma-4-31b-it").strip()
 
     from agent.tier_model_routing import canonical_gemma_model_id
+    from agent.openai_primary_mode import (
+        is_gemma_model_id,
+        opm_blocks_gemma,
+        opm_non_gemma_replacement_model,
+    )
 
     router_model = canonical_gemma_model_id(router_model)
+    if opm_blocks_gemma(None) and is_gemma_model_id(router_model):
+        router_model = opm_non_gemma_replacement_model(None)
 
     gem = (
         os.environ.get("GEMINI_API_KEY")

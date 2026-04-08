@@ -39,7 +39,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.openai_primary_mode import (
+    is_gemma_model_id,
+    opm_blocks_gemma,
+    opm_non_gemma_replacement_model,
+    resolve_openai_primary_mode,
+)
 from agent.routing_trace import emit_routing_decision_trace
 
 logger = logging.getLogger(__name__)
@@ -130,12 +135,31 @@ def is_free_subprocess_model(model_id: str) -> bool:
     return classify_model_cost(model_id) == "free"
 
 
-def default_free_subprocess_model_id() -> str:
+def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     """Model id used when auto-falling back from a blocked paid subprocess model.
 
     Reads ``free_model_routing.gemini_native_tier_models[0]`` from config when present,
     else ``gemma-4-31b-it`` (Gemma-4 on Gemini API — classified as *free* for subprocess policy).
+
+    When ``openai_primary_mode.enabled``, never returns a Gemma id (allowed subprocess /
+    default_model / non-Gemma auxiliary).
     """
+    try:
+        if opm_blocks_gemma(parent_agent):
+            opm_cfg, _ = resolve_openai_primary_mode(parent_agent)
+            allowed = opm_cfg.get("allowed_subprocess_models") or []
+            if isinstance(allowed, list):
+                for a in allowed:
+                    s = str(a).strip()
+                    if s and not is_gemma_model_id(s):
+                        return s
+            for key in ("default_model", "codex_model"):
+                s = str(opm_cfg.get(key) or "").strip()
+                if s and not is_gemma_model_id(s):
+                    return s
+            return opm_non_gemma_replacement_model(parent_agent)
+    except Exception:
+        pass
     try:
         from hermes_cli.config import load_config
 
@@ -143,11 +167,17 @@ def default_free_subprocess_model_id() -> str:
         fmr = (cfg or {}).get("free_model_routing") or {}
         gn = fmr.get("gemini_native_tier_models") or []
         if isinstance(gn, list) and gn:
-            mid = str(gn[0]).strip()
-            if mid:
-                return mid
+            for entry in gn:
+                mid = str(entry).strip()
+                if mid and (not opm_blocks_gemma(parent_agent) or not is_gemma_model_id(mid)):
+                    return mid
     except Exception:
         pass
+    if opm_blocks_gemma(parent_agent):
+        try:
+            return opm_non_gemma_replacement_model(parent_agent)
+        except Exception:
+            return "google/gemini-2.5-flash"
     return "gemma-4-31b-it"
 
 

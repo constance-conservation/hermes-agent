@@ -1,4 +1,7 @@
 from agent.openai_primary_mode import (
+    filter_fallback_chain_strip_gemma,
+    is_gemma_model_id,
+    opm_blocks_gemma,
     opm_suppresses_free_model_fallback,
     resolve_openai_primary_mode,
 )
@@ -87,6 +90,38 @@ def test_opm_precedence_parent_over_runtime_over_config(monkeypatch):
     # Field-level merge should preserve codex model from lower layers.
     assert opm["codex_model"] == "cfg-codex"
     assert meta["source"] == "parent_cached"
+
+
+def test_is_gemma_model_id():
+    assert is_gemma_model_id("gemma-4-31b-it")
+    assert is_gemma_model_id("google/gemma-4-31b-it")
+    assert not is_gemma_model_id("google/gemini-2.5-flash")
+    assert not is_gemma_model_id("")
+
+
+def test_opm_blocks_gemma_follows_enabled_flag(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+    assert opm_blocks_gemma() is True
+
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": False}},
+    )
+    assert opm_blocks_gemma() is False
+
+
+def test_filter_fallback_chain_strip_gemma():
+    chain = [
+        {"provider": "gemini", "model": "gemma-4-31b-it"},
+        {"provider": "gemini", "model": "google/gemini-2.5-flash"},
+    ]
+    out = filter_fallback_chain_strip_gemma(chain)
+    assert len(out) == 1
+    assert "gemini-2.5" in out[0]["model"]
 
 
 def test_opm_runtime_overrides_config_field_by_field(monkeypatch):

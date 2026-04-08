@@ -1,6 +1,26 @@
 from types import SimpleNamespace
 
 
+def test_default_free_subprocess_model_never_gemma_when_opm_enabled(monkeypatch):
+    from agent import subprocess_governance as sg
+
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "openai_primary_mode": {
+                "enabled": True,
+                "allowed_subprocess_models": ["gpt-5.4"],
+                "default_model": "gpt-5.4",
+            },
+            "free_model_routing": {"gemini_native_tier_models": ["gemma-4-31b-it"]},
+        },
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+    mid = sg.default_free_subprocess_model_id(None)
+    assert "gemma" not in mid.lower()
+    assert mid == "gpt-5.4"
+
+
 def test_openai_primary_mode_allows_runtime_yaml_config(monkeypatch):
     from agent import subprocess_governance as sg
 
