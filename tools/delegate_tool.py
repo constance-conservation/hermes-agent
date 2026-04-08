@@ -390,9 +390,25 @@ def _run_single_child(
             parent_agent=parent_agent,
         )
         if not _gov_approved:
+            # When OpenAI-primary mode is on, never auto-fallback to Gemma for
+            # denied paid delegates. Keep GPT baseline semantics by blocking.
+            _opm_on = False
+            try:
+                from hermes_cli.config import load_config as _lc
+                _rt_cfg = getattr(parent_agent, "_token_governance_cfg", None) or {}
+                if not isinstance(_rt_cfg, dict):
+                    _rt_cfg = {}
+                _cfg = _lc() or {}
+                _opm = _rt_cfg.get("openai_primary_mode") or _cfg.get("openai_primary_mode") or {}
+                _opm_on = bool(_opm.get("enabled", False))
+            except Exception:
+                _opm_on = False
+
             # Auto-fallback: rerun with configured free model (gemma-4-31b-it on Gemini API)
             # instead of blocking and forcing the parent to deliberate / ask for approval.
             if (
+                not _opm_on
+                and
                 _free_fallback_depth < 1
                 and str(_gov_reason).startswith("denied_paid_model")
                 and child is not None

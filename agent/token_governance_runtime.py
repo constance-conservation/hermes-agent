@@ -139,6 +139,11 @@ def apply_token_governance_runtime(agent: Any) -> None:
         is_tier_dynamic(_raw_model)
         or bool(TIER_SENTINEL_RE.match(_raw_model))
     )
+    # With OpenAI-primary mode enabled, keep per-turn routing active even if
+    # model.default is currently a concrete slug (legacy/stale profile config).
+    _opm_cfg = (cfg.get("openai_primary_mode") or {}) if isinstance(cfg, dict) else {}
+    if _opm_cfg.get("enabled", False):
+        _is_tier_placeholder = True
     agent._model_is_tier_routed = _is_tier_placeholder
 
     # Resolve tier: sentinel on agent.model before blocklist logic (fixed letter → slug).
