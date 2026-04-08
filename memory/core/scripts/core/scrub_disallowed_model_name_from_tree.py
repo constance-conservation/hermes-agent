@@ -47,6 +47,11 @@ def _should_scan(path: Path) -> bool:
         return True
     if n == ".hermes_history":
         return True
+    # Rotated logs: gateway.log.1, app.log.2, etc.
+    if ".log." in n and n.split(".")[-1].isdigit():
+        return True
+    if n.startswith("gateway.log"):
+        return True
     return False
 
 
