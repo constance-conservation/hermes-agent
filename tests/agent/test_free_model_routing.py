@@ -24,6 +24,7 @@ def test_top_level_tiers_preferred_over_legacy_kimi_router():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "filter_free_tier_models_by_local_hub": False,
             "tiers": [{"id": "top", "models": ["org/top"]}],
             "kimi_router": {
                 "router_model": "gemma-4-31b-it",
@@ -33,7 +34,7 @@ def test_top_level_tiers_preferred_over_legacy_kimi_router():
     }
     ch = build_free_fallback_chain(cfg)
     assert ch
-    flat = [m for t in ch[0]["hf_router_tiers"] for m in t["models"]]
+    flat = [m for t in ch[0]["gemini_tier_router_tiers"] for m in t["models"]]
     assert "org/top" in flat
     assert "org/legacy" not in flat
 
@@ -52,14 +53,14 @@ def test_fallback_tier_when_all_hub_models_filtered(monkeypatch):
             "kimi_router": {
                 "router_provider": "gemini",
                 "router_model": "gemma-4-31b-it",
-                "tiers": [{"id": "local", "models": ["Qwen/QwQ-32B"]}],
+                "tiers": [{"id": "local", "models": ["org/local-32b"]}],
             },
         }
     }
     ch = build_free_fallback_chain(cfg)
     assert ch
-    assert ch[0].get("hf_router") is True
-    flat = [m for t in ch[0]["hf_router_tiers"] for m in t["models"]]
+    assert ch[0].get("gemini_tier_router") is True
+    flat = [m for t in ch[0]["gemini_tier_router_tiers"] for m in t["models"]]
     assert "gemma-4-31b-it" in flat
 
 
@@ -68,7 +69,7 @@ def test_build_chain_kimi_then_optional_gemini():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "org/router",
+                "router_model": "gemma-4-31b-it",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
             },
             "optional_gemini": {
@@ -81,10 +82,10 @@ def test_build_chain_kimi_then_optional_gemini():
     }
     ch = build_free_fallback_chain(cfg)
     assert len(ch) == 2
-    assert ch[0]["hf_router"] is True
-    assert ch[0]["model"] == "org/router"
-    assert ch[0].get("router_provider") == "gemini"
-    assert len(ch[0]["hf_router_tiers"]) == 1
+    assert ch[0]["gemini_tier_router"] is True
+    assert ch[0]["provider"] == "gemini"
+    assert ch[0]["model"] == "gemma-4-31b-it"
+    assert len(ch[0]["gemini_tier_router_tiers"]) == 1
     assert "gemma-4-31b-it" in (ch[0].get("gemini_native_tier_models") or [])
     assert ch[1]["provider"] == "gemini"
 
@@ -92,7 +93,7 @@ def test_build_chain_kimi_then_optional_gemini():
 def test_filtered_tiers_preserve_gemini_native_models(monkeypatch):
     monkeypatch.setattr(
         "agent.free_model_routing.filter_hub_model_ids_by_local_state",
-        lambda ids, enabled=True: [x for x in ids if "Qwen" not in x],
+        lambda ids, enabled=True: [x for x in ids if "org/local" not in x],
     )
     cfg = {
         "free_model_routing": {
@@ -100,15 +101,15 @@ def test_filtered_tiers_preserve_gemini_native_models(monkeypatch):
             "filter_free_tier_models_by_local_hub": True,
             "kimi_router": {
                 "router_model": "gemma-4-31b-it",
-                "tiers": [{"id": "local", "models": ["gemma-4-31b-it", "Qwen/QwQ-32B"]}],
+                "tiers": [{"id": "local", "models": ["gemma-4-31b-it", "org/local-32b"]}],
             },
         }
     }
     ch = build_free_fallback_chain(cfg)
     assert ch
-    flat = [m for t in ch[0]["hf_router_tiers"] for m in t["models"]]
+    flat = [m for t in ch[0]["gemini_tier_router_tiers"] for m in t["models"]]
     assert "gemma-4-31b-it" in flat
-    assert "Qwen/QwQ-32B" not in flat
+    assert "org/local-32b" not in flat
 
 
 def test_build_chain_router_provider_gemini():
@@ -124,7 +125,7 @@ def test_build_chain_router_provider_gemini():
     }
     ch = build_free_fallback_chain(cfg)
     assert len(ch) == 1
-    assert ch[0]["router_provider"] == "gemini"
+    assert ch[0]["provider"] == "gemini"
     assert ch[0]["model"] == "gemma-4-31b-it"
 
 
@@ -136,8 +137,8 @@ def test_resolve_explicit_fallback_providers_wins():
     assert resolve_fallback_providers(cfg) == [{"provider": "openai", "model": "gpt-4o"}]
 
 
-def test_resolve_explicit_plain_hf_dropped_for_kimi_synthesis():
-    """Plain huggingface hub rows (no hf_router) are dropped — use Kimi synthesis."""
+def test_resolve_explicit_plain_hf_dropped_for_gemini_synthesis():
+    """Plain huggingface hub rows (no gemini_tier_router) are dropped — use Gemini synthesis."""
     cfg = {
         "fallback_providers": [
             {"provider": "huggingface", "model": "MiniMaxAI/MiniMax-M2.5"},
@@ -145,18 +146,19 @@ def test_resolve_explicit_plain_hf_dropped_for_kimi_synthesis():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "moonshotai/Kimi-K2-Thinking",
+                "router_model": "gemma-4-31b-it",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
             },
         },
     }
     out = resolve_fallback_providers(cfg)
     assert len(out) == 1
-    assert out[0].get("hf_router") is True
-    assert out[0]["model"] == "moonshotai/Kimi-K2-Thinking"
+    assert out[0].get("gemini_tier_router") is True
+    assert out[0]["provider"] == "gemini"
+    assert out[0]["model"] == "gemma-4-31b-it"
 
 
-def test_resolve_legacy_fallback_model_plain_hf_yields_to_kimi():
+def test_resolve_legacy_fallback_model_plain_hf_yields_to_gemini():
     cfg = {
         "fallback_model": {
             "provider": "huggingface",
@@ -165,13 +167,13 @@ def test_resolve_legacy_fallback_model_plain_hf_yields_to_kimi():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "moonshotai/Kimi-K2-Thinking",
+                "router_model": "gemma-4-31b-it",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
             },
         },
     }
     out = resolve_fallback_providers(cfg)
-    assert out[0].get("hf_router") is True
+    assert out[0].get("gemini_tier_router") is True
 
 
 def test_resolve_explicit_empty_list():
@@ -179,20 +181,21 @@ def test_resolve_explicit_empty_list():
     assert resolve_fallback_providers(cfg) == []
 
 
-def test_build_chain_kimi_only():
+def test_build_chain_gemini_direct():
     cfg = {
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "org/router",
+                "router_model": "gemma-4-31b-it",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
             },
         },
     }
     ch = build_free_fallback_chain(cfg)
     assert len(ch) == 1
-    assert ch[0]["hf_router"] is True
-    assert ch[0]["model"] == "org/router"
+    assert ch[0]["gemini_tier_router"] is True
+    assert ch[0]["provider"] == "gemini"
+    assert ch[0]["model"] == "gemma-4-31b-it"
 
 
 def test_resolve_legacy_fallback_model_dict():

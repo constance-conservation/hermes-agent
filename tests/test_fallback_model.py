@@ -353,8 +353,8 @@ class TestFallbackInit:
     def test_fallback_defaults_when_not_configured(self, _mock_lc):
         agent = _make_agent(fallback_model=None)
         assert agent._fallback_model is not None
-        assert agent._fallback_model["provider"] == "huggingface"
-        assert agent._fallback_model.get("hf_router") is True
+        assert agent._fallback_model["provider"] == "gemini"
+        assert agent._fallback_model.get("gemini_tier_router") is True
         assert len(agent._fallback_chain) == 1
         assert agent._fallback_activated is False
 

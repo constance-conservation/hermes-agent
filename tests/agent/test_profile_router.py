@@ -178,30 +178,28 @@ def test_classify_keyword_security_skips_llm():
     assert "keyword" in reason.lower()
 
 
-def test_call_profile_router_llm_uses_hf_tier_pick(monkeypatch):
-    monkeypatch.setenv("HF_TOKEN", "fake-token-for-test")
+def test_call_profile_router_llm_uses_gemini_direct(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
     from agent import profile_router as pr
 
     fake_fmr = {
         "enabled": True,
         "kimi_router": {
-            "router_provider": "huggingface",
-            "router_model": "moonshotai/Kimi-K2-Thinking",
+            "router_provider": "gemini",
+            "router_model": "gemma-4-31b-it",
             "tiers": [
                 {"id": "general", "description": "g", "models": ["some/hub-id"]},
             ],
         },
     }
 
-    with patch("hermes_cli.config.load_config", return_value={"free_model_routing": fake_fmr}), patch(
-        "agent.hf_fallback_router.resolve_hf_routed_model",
-        return_value="kimi-picked-hub-model",
-    ) as mock_resolve, patch("agent.auxiliary_client.call_llm") as mock_llm:
+    with patch("hermes_cli.config.load_config", return_value={"free_model_routing": fake_fmr}), \
+         patch("agent.auxiliary_client.call_llm") as mock_llm:
         mock_llm.return_value = object()
         pr._call_profile_router_llm(
             [{"role": "user", "content": "route me"}],
             {"use_free_model_routing": True},
         )
-    mock_resolve.assert_called_once()
     mock_llm.assert_called_once()
-    assert mock_llm.call_args.kwargs.get("model") == "kimi-picked-hub-model"
+    assert mock_llm.call_args.kwargs.get("provider") == "gemini"
+    assert mock_llm.call_args.kwargs.get("model") == "gemma-4-31b-it"

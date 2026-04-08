@@ -35,8 +35,8 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
     """Return menu rows for ``/models``: ``model``, ``source``, ``provider_kind``.
 
     *provider_kind* is ``primary`` (current profile primary), ``local`` (downloaded hub model),
-    ``huggingface`` (HF inference), or ``gemini``.
-    Order: primary, then tier router → tier hub models (deduped), then optional Gemini.
+    or ``gemini``.
+    Order: primary, then tier router → tier models (deduped), then optional Gemini.
     """
     if not config or not isinstance(config, dict):
         return []
@@ -58,8 +58,7 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
         if not mid or mid in seen_hf or is_routing_blocklisted(mid):
             return
         seen_hf.add(mid)
-        # Show as 'local' when the model is present in local_models/hub/state.json.
-        pk = "local" if mid in _downloaded else "huggingface"
+        pk = "local" if mid in _downloaded else "gemini"
         out.append({"model": mid, "source": source, "provider_kind": pk})
 
     def _add_gemini(model_id: str, source: str) -> None:
@@ -74,7 +73,9 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
         primary = _strip(mc.get("default") or mc.get("model"))
     else:
         primary = _strip(mc)
-    if primary and not is_routing_blocklisted(primary):
+    # Always list the configured primary so custom endpoints keep a row even when
+    # the id matches tier/OpenRouter blocklist rules (e.g. legacy local IDs on Ollama).
+    if primary:
         out.append(
             {
                 "model": primary,

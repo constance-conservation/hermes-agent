@@ -528,7 +528,12 @@ class AIAgent:
         """
         _install_safe_stdio()
 
-        self.model = model
+        if model is None:
+            self.model = None
+        else:
+            from agent.tier_model_routing import canonical_gemma_model_id
+
+            self.model = canonical_gemma_model_id(model)
         # CLI /models → Choose-Router: force consultant router LLM stack for the session.
         self._router_session_override = (
             dict(router_session_override) if isinstance(router_session_override, dict) else None
@@ -1564,7 +1569,7 @@ class AIAgent:
         Extract reasoning/thinking content from an assistant message.
         
         OpenRouter and various providers can return reasoning in multiple formats:
-        1. message.reasoning - Direct reasoning field (DeepSeek, Qwen, etc.)
+        1. message.reasoning - Direct reasoning field (DeepSeek and similar models)
         2. message.reasoning_content - Alternative field (Moonshot AI, Novita, etc.)
         3. message.reasoning_details - Array of {type, summary, ...} objects (OpenRouter unified)
         
@@ -4914,32 +4919,20 @@ class AIAgent:
         fb_resolve = self._fallback_entry_for_resolve(fb)
         fb_provider = (fb_resolve.get("provider") or "").strip().lower()
         fb_model = (fb_resolve.get("model") or "").strip()
-        if fb.get("hf_router") and fb_provider == "huggingface":
+
+        # Gemini tier router: use Gemini API to pick a model from tiers
+        if fb.get("gemini_tier_router") and fb_provider == "gemini":
             import os as _os
 
             from agent.hf_fallback_router import (
-                env_flat_candidates,
                 first_tier_hub_fallback,
                 resolve_gemini_routed_model,
-                resolve_hf_routed_model,
-                resolve_hf_routed_model_flat_candidates,
             )
 
-            _hf_key = (
-                _os.environ.get("HF_TOKEN")
-                or _os.environ.get("HUGGING_FACE_HUB_TOKEN")
-                or _os.environ.get("HUGGINGFACE_API_KEY")
-                or ""
-            ).strip()
-            _hf_base = (
-                _os.environ.get("HF_BASE_URL", "").strip() or "https://router.huggingface.co/v1"
-            )
-            _router = fb_model
-            _tiers = fb.get("hf_router_tiers") or []
-            _router_prov = (fb.get("router_provider") or "gemini").strip().lower()
+            _tiers = fb.get("gemini_tier_router_tiers") or []
             _user_turn = getattr(self, "_last_user_turn_text", "") or ""
 
-            if _router_prov == "gemini" and _tiers:
+            if _tiers:
                 _gem = (
                     _os.environ.get("GEMINI_API_KEY")
                     or _os.environ.get("GOOGLE_API_KEY")
@@ -4949,36 +4942,51 @@ class AIAgent:
                     try:
                         fb_model = resolve_gemini_routed_model(
                             _user_turn,
-                            router_model=_router,
+                            router_model=fb_model,
                             tiers=_tiers,
                         )
                     except Exception as _exc:
                         logging.warning("Gemini tier router failed: %s", _exc)
-                        fb_model = first_tier_hub_fallback(_tiers, _router)
+                        fb_model = first_tier_hub_fallback(_tiers, fb_model)
                 else:
                     logging.warning(
-                        "free fallback: router_provider=gemini but no GEMINI_API_KEY/GOOGLE_API_KEY — "
+                        "free fallback: no GEMINI_API_KEY/GOOGLE_API_KEY — "
                         "using first tier hub id",
                     )
-                    fb_model = first_tier_hub_fallback(_tiers, _router)
-            elif _hf_key and _tiers:
-                fb_model = resolve_hf_routed_model(
-                    _user_turn,
-                    api_key=_hf_key,
-                    base_url=_hf_base,
-                    router_model=_router,
-                    tiers=_tiers,
-                )
-            elif _hf_key:
-                _flat = env_flat_candidates()
-                if _flat:
-                    fb_model = resolve_hf_routed_model_flat_candidates(
-                        _user_turn,
-                        api_key=_hf_key,
-                        base_url=_hf_base,
-                        router_model=_router,
-                        candidates=_flat,
-                    )
+                    fb_model = first_tier_hub_fallback(_tiers, fb_model)
+
+        # Legacy hf_router entries: remap to gemini provider
+        elif fb.get("hf_router"):
+            import os as _os
+
+            from agent.hf_fallback_router import (
+                first_tier_hub_fallback,
+                resolve_gemini_routed_model,
+            )
+
+            _tiers = fb.get("hf_router_tiers") or []
+            _user_turn = getattr(self, "_last_user_turn_text", "") or ""
+
+            if _tiers:
+                _gem = (
+                    _os.environ.get("GEMINI_API_KEY")
+                    or _os.environ.get("GOOGLE_API_KEY")
+                    or ""
+                ).strip()
+                if _gem:
+                    try:
+                        fb_model = resolve_gemini_routed_model(
+                            _user_turn,
+                            router_model=fb_model,
+                            tiers=_tiers,
+                        )
+                    except Exception as _exc:
+                        logging.warning("Gemini tier router failed: %s", _exc)
+                        fb_model = first_tier_hub_fallback(_tiers, fb_model)
+                else:
+                    fb_model = first_tier_hub_fallback(_tiers, fb_model)
+            fb_provider = "gemini"
+
         _gn = fb.get("gemini_native_tier_models")
         _gn_set = frozenset(_gn) if isinstance(_gn, list) else frozenset()
         if fb_model in _gn_set:
@@ -4994,76 +5002,6 @@ class AIAgent:
 
             explicit_key = None
             explicit_base = None
-            if fb_provider == "huggingface":
-                import os as _os
-
-                try:
-                    from agent.local_inference import local_inference_override_for_hub_model
-
-                    _loc = local_inference_override_for_hub_model(fb_model)
-                except Exception:
-                    _loc = None
-                    logger.debug("local_inference override failed", exc_info=True)
-                if _loc:
-                    # Before committing to local inference, check the server is
-                    # actually reachable. If not, auto-start on Mac or skip to
-                    # the next fallback — avoids 3×retry noise on a dead server.
-                    try:
-                        from agent.local_inference import (
-                            ensure_local_inference_server_running,
-                            is_local_inference_server_alive,
-                        )
-                        _orig_fb = fb_model  # keep hub id for hub_id lookup
-                        _alive = is_local_inference_server_alive()
-                        if not _alive:
-                            _alive = ensure_local_inference_server_running(_orig_fb)
-                    except Exception:
-                        _alive = False
-                    if not _alive:
-                        logging.info(
-                            "local_inference: server not reachable for %s — "
-                            "skipping to next fallback (gemma-4).",
-                            fb_model,
-                        )
-                        return self._try_activate_fallback(
-                            triggered_by_rate_limit=triggered_by_rate_limit
-                        )
-                    explicit_base, explicit_key = _loc[0], _loc[1]
-                    # Use the resolved local path as model name so the server
-                    # reuses the already-loaded model instead of re-fetching.
-                    if len(_loc) > 2 and _loc[2] and _loc[2] != fb_model:
-                        fb_model = _loc[2]
-                else:
-                    # If the model is locally downloaded but no server is configured,
-                    # skip HF inference entirely and fall through to next fallback
-                    # (e.g. gemma-4 via optional_gemini).
-                    try:
-                        from agent.local_inference import downloaded_hub_repo_ids as _dhri
-
-                        _dl_ids = _dhri()
-                    except Exception:
-                        _dl_ids = None
-                    if _dl_ids and fb_model in _dl_ids:
-                        logging.info(
-                            "local_inference: %s is locally downloaded but no server URL set — "
-                            "skipping to gemma-4 fallback.",
-                            fb_model,
-                        )
-                        return self._try_activate_fallback(
-                            triggered_by_rate_limit=triggered_by_rate_limit
-                        )
-                    _ek = (
-                        _os.environ.get("HF_TOKEN")
-                        or _os.environ.get("HUGGING_FACE_HUB_TOKEN")
-                        or _os.environ.get("HUGGINGFACE_API_KEY")
-                        or ""
-                    ).strip()
-                    if _ek:
-                        explicit_key = _ek
-                        explicit_base = (
-                            _os.environ.get("HF_BASE_URL", "").strip()
-                            or "https://router.huggingface.co/v1"
-                        )
             fb_client, _ = resolve_provider_client(
                 fb_provider,
                 model=fb_model,
@@ -5075,14 +5013,7 @@ class AIAgent:
                 logging.warning(
                     "Fallback to %s failed: provider not configured",
                     fb_provider)
-                if fb_provider == "huggingface":
-                    self._emit_status(
-                        "⚠️ Hugging Face fallback skipped — no API client "
-                        "(set HF_TOKEN, HUGGING_FACE_HUB_TOKEN, or HUGGINGFACE_API_KEY in ~/.hermes/.env; "
-                        "profiles load the parent file first). Trying next fallback…",
-                        "fallback",
-                    )
-                return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain
+                return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)
 
             # Determine api_mode from provider / base URL
             fb_api_mode = "chat_completions"
@@ -5474,7 +5405,7 @@ class AIAgent:
         return transformed
 
     def _anthropic_preserve_dots(self) -> bool:
-        """True when using Alibaba/DashScope anthropic-compatible endpoint (model names keep dots, e.g. qwen3.5-plus)."""
+        """True when using Alibaba/DashScope anthropic-compatible endpoint (model names may keep dots)."""
         if (getattr(self, "provider", "") or "").lower() == "alibaba":
             return True
         base = (getattr(self, "base_url", "") or "").lower()
@@ -5631,8 +5562,16 @@ class AIAgent:
         if self.provider_data_collection:
             provider_preferences["data_collection"] = self.provider_data_collection
 
+        _model_param = self._openai_compatible_model_param()
+        _model_param_l = str(_model_param or "").strip().lower()
+        # Cost guard for OpenRouter auto-routing: prefer cheaper providers by default
+        # and require explicit provider parameter support.
+        if _model_param_l == "openrouter/auto":
+            provider_preferences.setdefault("sort", "price")
+            provider_preferences.setdefault("require_parameters", True)
+
         api_kwargs = {
-            "model": self._openai_compatible_model_param(),
+            "model": _model_param,
             "messages": sanitized_messages,
             "timeout": float(os.getenv("HERMES_API_TIMEOUT", 1800.0)),
         }
@@ -5687,9 +5626,10 @@ class AIAgent:
                     else:
                         extra_body["reasoning"] = rc
                 else:
+                    _effort = "low" if (_is_openrouter and _model_param_l == "openrouter/auto") else "medium"
                     extra_body["reasoning"] = {
                         "enabled": True,
-                        "effort": "medium"
+                        "effort": _effort
                     }
 
         # Nous Portal product attribution
@@ -5731,7 +5671,6 @@ class AIAgent:
             "openai/",
             "x-ai/",
             "google/gemini-2",
-            "qwen/qwen3",
         )
         return any(model.startswith(prefix) for prefix in reasoning_model_prefixes)
 

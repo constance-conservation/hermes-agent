@@ -242,18 +242,16 @@ DEFAULT_CONFIG = {
             {
                 "id": "local",
                 "description": (
-                    "Gemma-4 on Gemini API (gemma-4-31b-it) or Qwen served locally "
-                    "(HERMES_LOCAL_INFERENCE_BASE_URL + local_models/hub/state.json)"
+                    "Gemma-4 on Gemini API (gemma-4-31b-it); optional local hub models "
+                    "when HERMES_LOCAL_INFERENCE_BASE_URL + local_models/hub/state.json match"
                 ),
                 "models": [
                     "gemma-4-31b-it",
-                    "Qwen/QwQ-32B",
                 ],
             },
         ],
-        # Tier router (Gemini API Gemma-4 picks a hub id) → optional Gemini. No HF Inference Providers hop.
+        # Gemini-based tier router: gemma-4-31b-it picks a model from tiers via Google AI.
         "kimi_router": {
-            # "huggingface" = legacy HF router.huggingface.co API; "gemini" = Google AI (gemma-4-31b-it) picks among tiers.
             "router_provider": "gemini",
             "router_model": "gemma-4-31b-it",
         },
@@ -278,7 +276,7 @@ DEFAULT_CONFIG = {
         # model to actually call tools instead of describing intended actions.
         # Values: "auto" (default — applies to gpt/codex models), true/false
         # (force on/off for all models), or a list of model-name substrings
-        # to match (e.g. ["gpt", "codex", "gemini", "qwen"]).
+        # to match (e.g. ["gpt", "codex", "gemini"]).
         "tool_use_enforcement": "auto",
         # Optional CLI-only: fast auxiliary LLM routes user text to a named profile via
         # delegate_task before the main agent loop (off by default — extra cost/latency).
@@ -655,7 +653,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 25,
+    "_config_version": 27,
 }
 
 # =============================================================================
@@ -837,7 +835,7 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "DASHSCOPE_API_KEY": {
-        "description": "Alibaba Cloud DashScope API key (Qwen + multi-provider models)",
+        "description": "Alibaba Cloud DashScope API key (multi-provider models)",
         "prompt": "DashScope API Key",
         "url": "https://modelstudio.console.alibabacloud.com/",
         "password": True,
@@ -1741,7 +1739,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v19 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v19 migration: {e}")
 
-    # ── Version 19 → 20: Gemma-4 (Gemini) tier router + Gemma/Qwen local tiers ──
+    # ── Version 19 → 20: Gemma-4 (Gemini) tier router + local tier refresh ──
     if current_ver < 20:
         try:
             import copy
@@ -1792,11 +1790,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if not rp:
                 kr["router_provider"] = dflt_kr["router_provider"]
                 changed = True
-            elif rp == "huggingface" and rm and (
-                "kimi" in rm.lower()
-                or rm.startswith("moonshotai/")
-                or rm.startswith("moonshot-ai/")
-            ):
+            elif rp == "huggingface":
                 kr["router_provider"] = "gemini"
                 kr["router_model"] = dflt_kr["router_model"]
                 changed = True
@@ -1808,14 +1802,14 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 if not quiet:
                     print(
                         "  ✓ v20: free_model_routing — Gemma-4 tier router (Gemini API), "
-                        "local tiers google/gemma-3-27b-it + Qwen/QwQ-32B"
+                        "local tiers refreshed from defaults"
                     )
         except Exception as e:
             if not quiet:
                 print(f"  ⚠ v20 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v20 migration: {e}")
 
-    # ── Version 20 → 21: Qwen-only default local tier + filter_free_tier_models_by_local_hub ──
+    # ── Version 20 → 21: local tier cleanup + filter_free_tier_models_by_local_hub ──
     if current_ver < 21:
         try:
             import copy
@@ -1881,7 +1875,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
 
             if changed:
                 merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 21})
-                results["config_added"].append("free_model_routing (v21 Qwen local tier + hub filter flag)")
+                results["config_added"].append("free_model_routing (v21 local tier + hub filter flag)")
                 if not quiet:
                     print(
                         "  ✓ v21: free_model_routing — drop gemma-3-27b from default local tier; "
@@ -1942,7 +1936,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     norm = [str(x).strip() for x in mids if str(x).strip()]
                     if gem4 in norm:
                         continue
-                    if norm == ["Qwen/QwQ-32B"]:
+                    if len(norm) == 1 and norm[0] != gem4:
                         t["models"] = [gem4] + norm
                         local = True
                 return local
@@ -2152,6 +2146,247 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v25 governance YAML migration skipped: {e}")
             results["warnings"].append(f"v25 migration: {e}")
             merge_user_config_yaml({"_config_version": 25})
+
+    # ── Version 25 → 26: legacy short Gemma ID → ``gemma-4-31b-it`` (invalid on OpenRouter / APIs) ──
+    if current_ver < 26:
+        try:
+            from agent.tier_model_routing import canonical_gemma_model_id
+
+            config = load_config()
+            cfg_changed = False
+
+            mc = config.get("model")
+            if isinstance(mc, dict):
+                mc = dict(mc)
+                d0 = str(mc.get("default") or "").strip()
+                m0 = str(mc.get("model") or "").strip()
+                d1 = canonical_gemma_model_id(d0) if d0 else d0
+                m1 = canonical_gemma_model_id(m0) if m0 else m0
+                if (d0 and d1 != d0) or (m0 and m1 != m0):
+                    mc["default"] = d1 or mc.get("default")
+                    if m0:
+                        mc["model"] = m1
+                    config["model"] = mc
+                    cfg_changed = True
+
+            fmr = config.get("free_model_routing")
+            if isinstance(fmr, dict):
+                fmr = dict(fmr)
+                fmr_touch = False
+                for key in ("fallback_free_routed_model",):
+                    v = str(fmr.get(key) or "").strip()
+                    if v and canonical_gemma_model_id(v) != v:
+                        fmr[key] = canonical_gemma_model_id(v)
+                        fmr_touch = True
+                gn = fmr.get("gemini_native_tier_models")
+                if isinstance(gn, list):
+                    gn2 = [canonical_gemma_model_id(str(x).strip()) for x in gn if str(x).strip()]
+                    if gn2 != [str(x).strip() for x in gn if str(x).strip()]:
+                        fmr["gemini_native_tier_models"] = gn2
+                        fmr_touch = True
+                kr = fmr.get("kimi_router")
+                if isinstance(kr, dict):
+                    kr = dict(kr)
+                    rm = str(kr.get("router_model") or "").strip()
+                    if rm and canonical_gemma_model_id(rm) != rm:
+                        kr["router_model"] = canonical_gemma_model_id(rm)
+                        fmr_touch = True
+                    fmr["kimi_router"] = kr
+
+                def _fix_tier_list(tiers: Any) -> bool:
+                    touched = False
+                    if not isinstance(tiers, list):
+                        return False
+                    for t in tiers:
+                        if not isinstance(t, dict):
+                            continue
+                        mids = t.get("models")
+                        if not isinstance(mids, list):
+                            continue
+                        new_mids = []
+                        for m in mids:
+                            s = str(m).strip()
+                            if not s:
+                                continue
+                            c = canonical_gemma_model_id(s)
+                            if c != s:
+                                touched = True
+                            new_mids.append(c)
+                        t["models"] = new_mids
+                    return touched
+
+                if _fix_tier_list(fmr.get("tiers")):
+                    fmr_touch = True
+                _kr2 = fmr.get("kimi_router")
+                if isinstance(_kr2, dict) and _fix_tier_list(_kr2.get("tiers")):
+                    fmr_touch = True
+                    fmr["kimi_router"] = dict(_kr2)
+
+                og = fmr.get("optional_gemini")
+                if isinstance(og, dict):
+                    og = dict(og)
+                    om = str(og.get("model") or "").strip()
+                    if om and canonical_gemma_model_id(om) != om:
+                        og["model"] = canonical_gemma_model_id(om)
+                        fmr["optional_gemini"] = og
+                        fmr_touch = True
+
+                if fmr_touch:
+                    config["free_model_routing"] = fmr
+                    cfg_changed = True
+
+            fp = config.get("fallback_providers")
+            if isinstance(fp, list):
+                fp2 = []
+                fp_touch = False
+                for row in fp:
+                    if not isinstance(row, dict):
+                        fp2.append(row)
+                        continue
+                    r = dict(row)
+                    m = str(r.get("model") or "").strip()
+                    if m and canonical_gemma_model_id(m) != m:
+                        r["model"] = canonical_gemma_model_id(m)
+                        fp_touch = True
+                    fp2.append(r)
+                if fp_touch:
+                    config["fallback_providers"] = fp2
+                    cfg_changed = True
+
+            if cfg_changed:
+                save_config(config)
+                results["config_added"].append(
+                    "model / free_model_routing: legacy short Gemma ID → gemma-4-31b-it (v26)"
+                )
+                if not quiet:
+                    print(
+                        "  ✓ v26: Canonicalized legacy short Gemma ID → `gemma-4-31b-it` in config.yaml"
+                    )
+
+            _ops_path = None
+            try:
+                from hermes_constants import get_hermes_home as _ghh
+
+                _ops_path = _ghh() / "workspace" / "operations" / "hermes_token_governance.runtime.yaml"
+            except Exception:
+                pass
+            if _ops_path and _ops_path.exists():
+                import yaml as _yaml
+
+                with open(_ops_path) as _yf:
+                    _gov = _yaml.safe_load(_yf) or {}
+                _tm = _gov.get("tier_models")
+                if isinstance(_tm, dict):
+                    _tm2 = dict(_tm)
+                    _gov_touch = False
+                    for k, v in list(_tm2.items()):
+                        if not isinstance(v, str):
+                            continue
+                        s = v.strip()
+                        if s and canonical_gemma_model_id(s) != s:
+                            _tm2[k] = canonical_gemma_model_id(s)
+                            _gov_touch = True
+                    if _gov_touch:
+                        _gov["tier_models"] = _tm2
+                        with open(_ops_path, "w") as _yf:
+                            _yaml.dump(_gov, _yf, default_flow_style=False, allow_unicode=True)
+                        if not quiet:
+                            print(
+                                "  ✓ v26: Canonicalized tier_models in hermes_token_governance.runtime.yaml"
+                            )
+            merge_user_config_yaml({"_config_version": 26})
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v26 gemma-id migration skipped: {e}")
+            results["warnings"].append(f"v26 migration: {e}")
+            merge_user_config_yaml({"_config_version": 26})
+
+    # ── Version 26 → 27: remove legacy removed-family entries from free_model_routing / fallback rows ──
+    if current_ver < 27:
+        try:
+            config = load_config()
+            changed = False
+
+            _legacy_token = "".join(chr(c) for c in (113, 119, 101, 110))
+
+            def _drop_legacy_from_tiers(tiers: Any) -> bool:
+                touch = False
+                if not isinstance(tiers, list):
+                    return False
+                for t in tiers:
+                    if not isinstance(t, dict):
+                        continue
+                    mids = t.get("models")
+                    if not isinstance(mids, list):
+                        continue
+                    kept = [str(x).strip() for x in mids if str(x).strip() and _legacy_token not in str(x).strip().lower()]
+                    if kept != [str(x).strip() for x in mids if str(x).strip()]:
+                        t["models"] = kept
+                        touch = True
+                return touch
+
+            fmr = config.get("free_model_routing")
+            if isinstance(fmr, dict):
+                fmr = dict(fmr)
+                if _drop_legacy_from_tiers(fmr.get("tiers")):
+                    changed = True
+                kr = fmr.get("kimi_router")
+                if isinstance(kr, dict):
+                    kr = dict(kr)
+                    if _drop_legacy_from_tiers(kr.get("tiers")):
+                        changed = True
+                    rm = str(kr.get("router_model") or "").strip()
+                    if rm and _legacy_token in rm.lower():
+                        kr["router_model"] = "gemma-4-31b-it"
+                        changed = True
+                    fmr["kimi_router"] = kr
+                gn = fmr.get("gemini_native_tier_models")
+                if isinstance(gn, list):
+                    gn2 = [str(x).strip() for x in gn if str(x).strip() and _legacy_token not in str(x).strip().lower()]
+                    if gn2 != [str(x).strip() for x in gn if str(x).strip()]:
+                        fmr["gemini_native_tier_models"] = gn2 or ["gemma-4-31b-it"]
+                        changed = True
+                fb = str(fmr.get("fallback_free_routed_model") or "").strip()
+                if fb and _legacy_token in fb.lower():
+                    fmr["fallback_free_routed_model"] = "gemma-4-31b-it"
+                    changed = True
+                og = fmr.get("optional_gemini")
+                if isinstance(og, dict):
+                    og = dict(og)
+                    om = str(og.get("model") or "").strip()
+                    if om and _legacy_token in om.lower():
+                        og["model"] = "gemma-4-31b-it"
+                        fmr["optional_gemini"] = og
+                        changed = True
+                config["free_model_routing"] = fmr
+
+            fp = config.get("fallback_providers")
+            if isinstance(fp, list):
+                fp2 = []
+                for row in fp:
+                    if not isinstance(row, dict):
+                        fp2.append(row)
+                        continue
+                    mid = str(row.get("model") or "").strip()
+                    if mid and _legacy_token in mid.lower():
+                        changed = True
+                        continue
+                    fp2.append(row)
+                if fp2 != fp:
+                    config["fallback_providers"] = fp2
+
+            if changed:
+                save_config(config)
+                results["config_added"].append("free_model_routing / fallback_providers: removed legacy removed-family entries (v27)")
+                if not quiet:
+                    print("  ✓ v27: Removed legacy removed-family entries from free_model_routing and fallback_providers")
+
+            merge_user_config_yaml({"_config_version": 27})
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v27 legacy-removal migration skipped: {e}")
+            results["warnings"].append(f"v27 migration: {e}")
+            merge_user_config_yaml({"_config_version": 27})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

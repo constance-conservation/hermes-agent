@@ -57,8 +57,8 @@ class TestFallbackChainInit:
         agent = _make_agent(fallback_model=None)
         # Omitted fallback_model: synthesized from free_model_routing (Kimi tier router only).
         assert len(agent._fallback_chain) == 1
-        assert agent._fallback_chain[0]["provider"] == "huggingface"
-        assert agent._fallback_chain[0].get("hf_router") is True
+        assert agent._fallback_chain[0]["provider"] == "gemini"
+        assert agent._fallback_chain[0].get("gemini_tier_router") is True
         assert agent._fallback_index == 0
         assert agent._fallback_model == agent._fallback_chain[0]
 
