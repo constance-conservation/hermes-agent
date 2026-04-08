@@ -2,7 +2,15 @@ version: 2
 enabled: true
 max_agent_turns: 50
 dynamic_tier_routing: true
-default_routing_tier: D
+default_routing_tier: E
+
+tier_models:
+  A: gpt-5.4
+  B: gpt-5.4
+  C: gpt-5.4
+  D: gpt-5.4
+  E: gpt-5.4
+  F: gpt-5.3-codex
 
 cost_governance:
   daily_budget_usd: 10.0
