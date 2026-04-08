@@ -1458,13 +1458,20 @@ class AIAgent:
         ``token_governance`` / ``consultant`` for tier routing lines so adapters
         can format Telegram/Slack/WhatsApp notifications.
 
+        ``token_governance`` and ``routing_trace`` are not printed on the CLI
+        (too noisy); they still reach ``status_callback`` for optional gateway
+        delivery when configured.
+
         This helper never raises — exceptions are swallowed so it cannot
         interrupt the retry/fallback logic.
         """
-        try:
-            self._vprint(f"{self.log_prefix}{message}", force=True)
-        except Exception:
-            pass
+        _et = (event_type or "lifecycle").lower()
+        _skip_cli = _et in ("token_governance", "routing_trace")
+        if not _skip_cli:
+            try:
+                self._vprint(f"{self.log_prefix}{message}", force=True)
+            except Exception:
+                pass
         if self.status_callback:
             try:
                 self.status_callback(event_type or "lifecycle", message)
