@@ -8899,7 +8899,11 @@ def main(
     
     # Handle single query mode
     if query:
-        if quiet:
+        # Piped / captured stdout (cron, scripts posting to Slack) should not
+        # emit the interactive banner, Rich "Query:" line, or exit summary —
+        # same output as -Q/--quiet unless the user explicitly asked for quiet=False on a TTY.
+        use_quiet = quiet or not sys.stdout.isatty()
+        if use_quiet:
             # Quiet mode: suppress banner, spinner, tool previews.
             # Only print the final response and parseable session info.
             cli.tool_progress_mode = "off"
@@ -8932,11 +8936,11 @@ def main(
             
             # Exit with error code if credentials or agent init fails
             sys.exit(1)
-        else:
-            cli.show_banner()
-            cli.console.print(f"[bold blue]Query:[/] {query}")
-            cli.chat(query)
-            cli._print_exit_summary()
+
+        cli.show_banner()
+        cli.console.print(f"[bold blue]Query:[/] {query}")
+        cli.chat(query)
+        cli._print_exit_summary()
         return
     
     # Run interactive mode

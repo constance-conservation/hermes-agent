@@ -4,17 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from typing import Any, Callable, Dict, Optional
-
-from utils import is_truthy_value
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-
-def _routing_trace_verbose() -> bool:
-    """Opt-in: ``HERMES_ROUTING_TRACE=1`` restores INFO logs + status_callback."""
-    return is_truthy_value(os.getenv("HERMES_ROUTING_TRACE", ""), default=False)
 
 
 def emit_routing_decision_trace(
@@ -31,7 +23,6 @@ def emit_routing_decision_trace(
     explicit_user_model: Optional[bool] = None,
     profile: str = "",
     session_id: str = "",
-    emit_status: Optional[Callable[[str, str], None]] = None,
 ) -> None:
     payload = {
         "stage": stage,
@@ -52,13 +43,6 @@ def emit_routing_decision_trace(
         "session_id": session_id or "",
     }
     line = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
-    if _routing_trace_verbose():
-        logger.info("[RouteTrace] %s", line)
-        if callable(emit_status):
-            try:
-                emit_status(f"[RouteTrace] {line}", "routing_trace")
-            except Exception:
-                logger.debug("routing_trace emit_status failed", exc_info=True)
-    else:
-        logger.debug("[RouteTrace] %s", line)
+    # DEBUG only — avoids noisy CLI/gateway logs unless log level is turned up.
+    logger.debug("[RouteTrace] %s", line)
 

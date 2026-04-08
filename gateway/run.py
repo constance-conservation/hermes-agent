@@ -5757,6 +5757,32 @@ class GatewayRunner:
                 return
             if _display_cfg.get("gateway_status_messages") is False:
                 return
+            _msg = message or ""
+            # Never forward routing JSON to chat (defense in depth if event_type drifts).
+            if _msg.lstrip().startswith("[RouteTrace]"):
+                return
+            _et_lc = (event_type or "lifecycle").lower()
+            # Routing JSON and similar instrumentation never belong in chat.
+            if _et_lc == "routing_trace":
+                return
+            # Per-turn tier / baseline token governance lines (verbose for Slack).
+            if _et_lc == "token_governance":
+                _tg = _display_cfg.get("gateway_status_token_governance")
+                if _tg is True:
+                    pass
+                elif _tg is False:
+                    return
+                elif _display_cfg.get("gateway_status_governance_only"):
+                    pass
+                else:
+                    return
+            if _display_cfg.get("gateway_status_router_messages", True) is False:
+                if _et_lc in (
+                    "router_progress",
+                    "summary_review",
+                    "delegation_heartbeat",
+                ):
+                    return
             if _display_cfg.get("gateway_status_governance_only") and (
                 event_type or "lifecycle"
             ).lower() not in ("token_governance", "consultant"):
@@ -6159,6 +6185,9 @@ class GatewayRunner:
 
             _approval_session_key = session_key or ""
             register_gateway_notify(_approval_session_key, _approval_notify_sync)
+            # Prevent any Rich/spinner leakage to stdout from this thread; messaging
+            # surfaces only the returned final_response (and explicit status_callback sends).
+            agent._print_fn = lambda *a, **kw: None
             try:
                 result = agent.run_conversation(message, conversation_history=agent_history, task_id=session_id)
             finally:

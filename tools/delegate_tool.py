@@ -347,6 +347,7 @@ def _build_child_agent(
         provider_sort=parent_agent.provider_sort,
         tool_progress_callback=child_progress_cb,
         iteration_budget=None,  # fresh budget per subagent
+        opm_merge_parent=parent_agent,
     )
     # Set delegation depth so children can't spawn grandchildren
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
@@ -484,7 +485,6 @@ def _run_single_child(
                 explicit_user_model=False,
                 profile=str(getattr(parent_agent, "profile", "") or ""),
                 session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                emit_status=getattr(parent_agent, "_emit_status", None),
             )
 
             # Auto-fallback: rerun with configured free model (gemma-4-31b-it on Gemini API)
@@ -525,7 +525,6 @@ def _run_single_child(
                                 explicit_user_model=False,
                                 profile=str(getattr(parent_agent, "profile", "") or ""),
                                 session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                                emit_status=getattr(parent_agent, "_emit_status", None),
                             )
                             # Drop blocked child from interrupt list; replacement re-registers
                             if hasattr(parent_agent, "_active_children") and child in getattr(
@@ -956,7 +955,6 @@ def delegate_task(
                 explicit_user_model=False,
                 profile=str(getattr(parent_agent, "profile", "") or ""),
                 session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                emit_status=getattr(parent_agent, "_emit_status", None),
             )
             return _next
         except Exception:
@@ -1371,7 +1369,6 @@ def _resolve_delegation_credentials(
                         explicit_user_model=False,
                         profile=str(getattr(parent_agent, "profile", "") or ""),
                         session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                        emit_status=getattr(parent_agent, "_emit_status", None),
                     )
                     # region agent log
                     _dbg98(
@@ -1416,7 +1413,6 @@ def _resolve_delegation_credentials(
                     opm_enabled=False,
                     opm_source="",
                     tier_source="delegation_gemma_path",
-                    emit_status=getattr(parent_agent, "_emit_status", None),
                     session_id=str(getattr(parent_agent, "session_id", "") or ""),
                 )
                 # region agent log
@@ -1455,7 +1451,6 @@ def _resolve_delegation_credentials(
                     opm_source="",
                     tier_source="delegation_gemma_path",
                     fallback_activated=True,
-                    emit_status=getattr(parent_agent, "_emit_status", None),
                     session_id=str(getattr(parent_agent, "session_id", "") or ""),
                 )
                 # region agent log
@@ -1553,7 +1548,6 @@ def _resolve_delegation_credentials(
         opm_enabled=False,
         opm_source="",
         tier_source="delegation_provider_cfg",
-        emit_status=getattr(parent_agent, "_emit_status", None),
         session_id=str(getattr(parent_agent, "session_id", "") or ""),
     )
     # region agent log

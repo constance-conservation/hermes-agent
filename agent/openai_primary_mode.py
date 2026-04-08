@@ -55,8 +55,20 @@ def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any
     merged = _merge_dicts(cfg_opm, rt_opm)
     merged = _merge_dicts(merged, parent_opm)
 
+    # Delegated subagent under hermes_profile: child's config/YAML may omit OPM while
+    # the chief has it enabled. Overlay the parent's merged OPM when the anchor is on.
+    _anchor = getattr(parent_agent, "_opm_merge_parent", None) if parent_agent is not None else None
+    _delegation_opm_overlay = False
+    if _anchor is not None:
+        anchor_merged, _ = resolve_openai_primary_mode(_anchor)
+        if anchor_merged.get("enabled"):
+            merged = _merge_dicts(merged, anchor_merged)
+            _delegation_opm_overlay = True
+
     source = "none"
-    if parent_opm:
+    if _delegation_opm_overlay:
+        source = "delegation_parent"
+    elif parent_opm:
         source = "parent_cached"
     elif rt_opm:
         source = "runtime_yaml"

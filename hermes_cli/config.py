@@ -518,6 +518,14 @@ DEFAULT_CONFIG = {
         "gateway_status_messages": True,
         # When True, only token_governance / consultant events are sent (not rate-limit retries etc.).
         "gateway_status_governance_only": False,
+        # Forward [Router] heartbeats, stall nudges, summary-review lines, and
+        # delegation watchdog messages to messaging platforms. Set False for Slack/Telegram
+        # when you only want the final assistant reply (plus governance/consultant if enabled).
+        "gateway_status_router_messages": True,
+        # Tier routing lines ("Token governance: this turn Tier …"). Omitted by default in
+        # chat; set true to forward. When gateway_status_governance_only is true, tier lines
+        # are forwarded unless this key is explicitly false.
+        "gateway_status_token_governance": None,
     },
 
     # Privacy settings

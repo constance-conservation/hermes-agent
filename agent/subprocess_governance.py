@@ -357,7 +357,6 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
                     explicit_user_model=False,
                     profile=str(getattr(parent_agent, "profile", "") or ""),
                     session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                    emit_status=getattr(parent_agent, "_emit_status", None),
                 )
                 return False
         return True
@@ -398,7 +397,6 @@ def enforce_subprocess_model_policy(
             opm_enabled=False,
             opm_source="",
             tier_source="subprocess_policy",
-            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
             session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
         )
         return True, "free_model"
@@ -418,7 +416,6 @@ def enforce_subprocess_model_policy(
             opm_enabled=True,
             opm_source="policy_helper",
             tier_source="subprocess_policy",
-            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
             session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
         )
         return True, "openai_primary_mode"
@@ -436,7 +433,6 @@ def enforce_subprocess_model_policy(
             opm_enabled=False,
             opm_source="",
             tier_source="subprocess_policy",
-            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
             session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
         )
         return True, "low_cost_allowed"
@@ -466,7 +462,6 @@ def enforce_subprocess_model_policy(
             opm_enabled=False,
             opm_source="",
             tier_source="subprocess_policy",
-            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
             session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
         )
         return True, "operator_approved"
@@ -483,7 +478,6 @@ def enforce_subprocess_model_policy(
         opm_enabled=False,
         opm_source="",
         tier_source="subprocess_policy",
-        emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
         session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
     )
     return False, f"denied_paid_model:{model_id}"

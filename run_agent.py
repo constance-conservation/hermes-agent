@@ -490,6 +490,7 @@ class AIAgent:
         checkpoint_max_snapshots: int = 50,
         pass_session_id: bool = False,
         persist_session: bool = True,
+        opm_merge_parent: Any = None,
     ):
         """
         Initialize the AI Agent.
@@ -571,6 +572,9 @@ class AIAgent:
         self._credential_pool = credential_pool
         self.log_prefix_chars = log_prefix_chars
         self.log_prefix = f"{log_prefix} " if log_prefix else ""
+        # Chief/parent agent for OPM resolution when this instance is a delegated subagent
+        # (hermes_profile / delegate_task child with a different HERMES_HOME).
+        self._opm_merge_parent = opm_merge_parent
         # Store effective base URL for feature detection (prompt caching, reasoning, etc.)
         self.base_url = base_url or ""
         provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
@@ -1459,15 +1463,26 @@ class AIAgent:
         can format Telegram/Slack/WhatsApp notifications.
 
         ``token_governance`` and ``routing_trace`` are not printed on the CLI
-        (too noisy); they still reach ``status_callback`` for optional gateway
-        delivery when configured.
+        (too noisy). Structured routing traces are log-only (see
+        ``agent.routing_trace.emit_routing_decision_trace``). The gateway status
+        bridge drops ``[RouteTrace]`` lines and, by default, per-turn token-governance
+        tier pings unless ``display.gateway_status_token_governance`` / governance-only
+        mode says otherwise.         ``router_progress`` / ``summary_review`` are controlled
+        by ``display.gateway_status_router_messages``. When ``quiet_mode`` is true,
+        ``router_progress``, ``summary_review``, and ``delegation_heartbeat`` are
+        not printed on the CLI (``status_callback`` still runs).
 
         This helper never raises — exceptions are swallowed so it cannot
         interrupt the retry/fallback logic.
         """
         _et = (event_type or "lifecycle").lower()
         _skip_cli = _et in ("token_governance", "routing_trace")
-        if not _skip_cli:
+        _quiet_cli_noise = getattr(self, "quiet_mode", False) and _et in (
+            "router_progress",
+            "summary_review",
+            "delegation_heartbeat",
+        )
+        if not _skip_cli and not _quiet_cli_noise:
             try:
                 self._vprint(f"{self.log_prefix}{message}", force=True)
             except Exception:
@@ -5184,7 +5199,6 @@ class AIAgent:
                 explicit_user_model=False,
                 profile=str(getattr(self, "profile", "") or ""),
                 session_id=str(getattr(self, "session_id", "") or ""),
-                emit_status=getattr(self, "_emit_status", None),
             )
             return True
         except Exception as e:
@@ -6443,8 +6457,8 @@ class AIAgent:
                     logging.debug(f"Tool {function_name} completed in {tool_duration:.2f}s")
                     logging.debug(f"Tool result ({len(function_result)} chars): {function_result}")
 
-            # Print cute message per tool
-            if self.quiet_mode:
+            # Print cute message per tool (skip when UI uses tool_progress_callback)
+            if self.quiet_mode and not self.tool_progress_callback:
                 cute_msg = _get_cute_tool_message_impl(name, args, tool_duration, result=function_result)
                 self._safe_print(f"  {cute_msg}")
             elif not self.quiet_mode:
@@ -6589,7 +6603,7 @@ class AIAgent:
                     store=self._todo_store,
                 )
                 tool_duration = time.time() - tool_start_time
-                if self.quiet_mode:
+                if self.quiet_mode and not self.tool_progress_callback:
                     self._vprint(f"  {_get_cute_tool_message_impl('todo', function_args, tool_duration, result=function_result)}")
             elif function_name == "session_search":
                 if not self._session_db:
@@ -6604,7 +6618,7 @@ class AIAgent:
                         current_session_id=self.session_id,
                     )
                 tool_duration = time.time() - tool_start_time
-                if self.quiet_mode:
+                if self.quiet_mode and not self.tool_progress_callback:
                     self._vprint(f"  {_get_cute_tool_message_impl('session_search', function_args, tool_duration, result=function_result)}")
             elif function_name == "memory":
                 target = function_args.get("target", "memory")
@@ -6617,7 +6631,7 @@ class AIAgent:
                     store=self._memory_store,
                 )
                 tool_duration = time.time() - tool_start_time
-                if self.quiet_mode:
+                if self.quiet_mode and not self.tool_progress_callback:
                     self._vprint(f"  {_get_cute_tool_message_impl('memory', function_args, tool_duration, result=function_result)}")
             elif self._memory_manager and self._memory_manager.has_tool(function_name):
                 # Mem0 / Honcho / etc. — same routing as _invoke_tool (not in tools/registry).
@@ -6625,7 +6639,7 @@ class AIAgent:
                     function_name, function_args
                 )
                 tool_duration = time.time() - tool_start_time
-                if self.quiet_mode:
+                if self.quiet_mode and not self.tool_progress_callback:
                     self._vprint(
                         f"  {_get_cute_tool_message_impl(function_name, function_args, tool_duration, result=function_result)}"
                     )
@@ -6637,7 +6651,7 @@ class AIAgent:
                     callback=self.clarify_callback,
                 )
                 tool_duration = time.time() - tool_start_time
-                if self.quiet_mode:
+                if self.quiet_mode and not self.tool_progress_callback:
                     self._vprint(f"  {_get_cute_tool_message_impl('clarify', function_args, tool_duration, result=function_result)}")
             elif function_name == "delegate_task":
                 from tools.delegate_tool import delegate_task as _delegate_task
@@ -6670,7 +6684,7 @@ class AIAgent:
                     cute_msg = _get_cute_tool_message_impl('delegate_task', function_args, tool_duration, result=_delegate_result)
                     if spinner:
                         spinner.stop(cute_msg)
-                    elif self.quiet_mode:
+                    elif self.quiet_mode and not self.tool_progress_callback:
                         self._vprint(f"  {cute_msg}")
             elif self.quiet_mode:
                 spinner = None
@@ -6695,7 +6709,7 @@ class AIAgent:
                     cute_msg = _get_cute_tool_message_impl(function_name, function_args, tool_duration, result=_spinner_result)
                     if spinner:
                         spinner.stop(cute_msg)
-                    else:
+                    elif not self.tool_progress_callback:
                         self._vprint(f"  {cute_msg}")
             else:
                 try:
@@ -7121,7 +7135,6 @@ class AIAgent:
                 explicit_user_model=not bool(getattr(self, "_model_is_tier_routed", True)),
                 profile=str(getattr(self, "profile", "") or ""),
                 session_id=str(getattr(self, "session_id", "") or ""),
-                emit_status=getattr(self, "_emit_status", None),
             )
         except Exception:
             logger.debug("apply_per_turn_tier_model failed", exc_info=True)
@@ -7388,6 +7401,7 @@ class AIAgent:
                         f"[Router] Agent idle for {int(_idle_seconds)}s "
                         f"(total {int(_total_elapsed)}s) "
                         f"— nudging ({_stall_nudge_count}/{_MAX_STALL_NUDGES})",
+                        "router_progress",
                     )
                     messages.append({
                         "role": "user",
@@ -7402,6 +7416,7 @@ class AIAgent:
                     self._emit_status(
                         f"[Router] Agent still idle after {_MAX_STALL_NUDGES} nudges "
                         f"({int(_total_elapsed)}s total) — forcing wrap-up",
+                        "router_progress",
                     )
                     messages.append({
                         "role": "user",
@@ -7426,6 +7441,7 @@ class AIAgent:
                 self._emit_status(
                     f"[Router] Still processing — iteration {api_call_count}, "
                     f"{int(_total_elapsed)}s elapsed ({_model_short})",
+                    "router_progress",
                 )
 
             # Check for interrupt request (e.g., user sent new message)
@@ -9284,10 +9300,14 @@ class AIAgent:
                     _reason = _review.get("reason", "misaligned")
                     self._emit_status(
                         f"[Router] Summary review: misaligned — {_reason}",
+                        "summary_review",
                     )
                     logger.info("summary review: misaligned — %s", _reason)
                 else:
-                    self._emit_status("[Router] Summary review: aligned")
+                    self._emit_status(
+                        "[Router] Summary review: aligned",
+                        "summary_review",
+                    )
             except Exception as _sr_exc:
                 logger.debug("summary review skipped: %s", _sr_exc)
 

@@ -449,7 +449,7 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
     agent = object()
     with (
         patch(
-            "agent.token_governance_runtime.opm_suppresses_free_model_fallback",
+            "agent.token_governance_runtime.opm_blocks_gemma",
             return_value=True,
         ),
         patch(
@@ -482,7 +482,7 @@ def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
     agent = _StubAgent()
     with (
         patch(
-            "agent.token_governance_runtime.opm_suppresses_free_model_fallback",
+            "agent.token_governance_runtime.opm_blocks_gemma",
             return_value=True,
         ),
         patch(
