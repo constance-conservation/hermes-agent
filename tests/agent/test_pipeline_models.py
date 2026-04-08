@@ -18,7 +18,7 @@ def test_collect_pipeline_models_order_and_dedupe():
             "enabled": True,
             "filter_free_tier_models_by_local_hub": False,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "router_provider": "gemini",
                 "tiers": [
                     {
@@ -30,18 +30,18 @@ def test_collect_pipeline_models_order_and_dedupe():
             },
             "optional_gemini": {
                 "enabled": True,
-                "model": "gemma-4-31b-it",
+                "model": "gemini-2.5-flash",
             },
         },
     }
     rows = collect_pipeline_models(cfg)
     models = [r["model"] for r in rows]
-    # Primary first; router (gemma-4-31b-it = gemini); local tier + other; optional_gemini dedupes
+    # Primary first; router (Gemini Flash); local tier + other; optional_gemini dedupes
     assert models[0] == "anthropic/claude-sonnet-4"
     assert models.count("org/local-32b") == 1
-    assert "gemma-4-31b-it" in models
+    assert "gemini-2.5-flash" in models
     assert "org/other" in models
-    g4 = [r for r in rows if r["model"] == "gemma-4-31b-it"]
+    g4 = [r for r in rows if r["model"] == "gemini-2.5-flash"]
     assert g4 and all(r["provider_kind"] == "gemini" for r in g4)
 
 
@@ -62,7 +62,7 @@ def test_collect_pipeline_models_routing_tiers():
             "enabled": True,
             "filter_free_tier_models_by_local_hub": False,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "router_provider": "gemini",
                 "tiers": [{"id": "g", "models": ["only-tier-model"]}],
             },

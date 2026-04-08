@@ -1,7 +1,7 @@
 """Tier routing: pick one HF hub model id from configured tiers.
 
 - ``resolve_hf_routed_model`` — Hugging Face ``router.huggingface.co`` OpenAI-compatible API.
-- ``resolve_gemini_routed_model`` — same JSON contract via Google AI (e.g. ``gemma-4-31b-it``).
+- ``resolve_gemini_routed_model`` — same JSON contract via Google AI (configured router model).
 
 Model IDs come from configuration (``free_model_routing`` / ``fallback_providers``).
 
@@ -16,25 +16,22 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from agent.tier_model_routing import canonical_gemma_model_id
+from agent.tier_model_routing import canonical_native_tier_model_id
 
 logger = logging.getLogger(__name__)
 
 
 def _opm_clamp_routed_model(selected: str, routing_agent: Any) -> str:
-    """Never return a Gemma id when openai_primary_mode is enabled."""
+    """Never return a disallowed-family id when openai_primary_mode is enabled."""
     try:
-        from agent.openai_primary_mode import (
-            is_gemma_model_id,
-            opm_blocks_gemma,
-            opm_non_gemma_replacement_model,
-        )
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
 
-        if not opm_blocks_gemma(routing_agent):
+        if not opm_enabled(routing_agent):
             return selected
-        if not is_gemma_model_id(selected):
+        if not model_id_contains_disallowed_family(selected):
             return selected
-        return opm_non_gemma_replacement_model(routing_agent)
+        return opm_auxiliary_model(routing_agent)
     except Exception:
         return selected
 
@@ -56,20 +53,17 @@ def first_tier_hub_fallback(
     router_model: str,
     routing_agent: Any = None,
 ) -> str:
-    """First hub id in tier order; else *router_model*. Under OPM, skip Gemma tier targets."""
+    """First hub id in tier order; else *router_model*. Under OPM, skip disallowed-family tier targets."""
     flat = _flatten_tier_models(tiers)
     try:
-        from agent.openai_primary_mode import (
-            is_gemma_model_id,
-            opm_blocks_gemma,
-            opm_non_gemma_replacement_model,
-        )
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
 
-        if opm_blocks_gemma(routing_agent):
+        if opm_enabled(routing_agent):
             for m in flat:
-                if m and not is_gemma_model_id(m):
+                if m and not model_id_contains_disallowed_family(m):
                     return m
-            return opm_non_gemma_replacement_model(routing_agent)
+            return opm_auxiliary_model(routing_agent)
     except Exception:
         pass
     return flat[0] if flat else router_model
@@ -82,20 +76,17 @@ def resolve_gemini_routed_model(
     tiers: List[Dict[str, Any]],
     routing_agent: Any = None,
 ) -> str:
-    """Pick one hub id from *tiers* using Google AI (Gemini / Gemma API) *router_model*.
+    """Pick one hub id from *tiers* using Google AI (*router_model*).
 
     Uses ``GEMINI_API_KEY`` or ``GOOGLE_API_KEY``. Same JSON shape as the HF router path.
     """
-    router_model = canonical_gemma_model_id((router_model or "").strip())
+    router_model = canonical_native_tier_model_id((router_model or "").strip())
     try:
-        from agent.openai_primary_mode import (
-            is_gemma_model_id,
-            opm_blocks_gemma,
-            opm_non_gemma_replacement_model,
-        )
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
 
-        if opm_blocks_gemma(routing_agent) and is_gemma_model_id(router_model):
-            router_model = opm_non_gemma_replacement_model(routing_agent)
+        if opm_enabled(routing_agent) and model_id_contains_disallowed_family(router_model):
+            router_model = opm_auxiliary_model(routing_agent)
     except Exception:
         pass
     if os.environ.get("HERMES_HF_ROUTER_DISABLE", "").strip().lower() in ("1", "true", "yes"):
@@ -179,7 +170,7 @@ def resolve_hf_routed_model(
     *tiers* is the normalized list from ``free_model_routing.normalize_kimi_tiers``.
     On failure, returns the first model of the first tier (if any), else *router_model*.
     """
-    router_model = canonical_gemma_model_id((router_model or "").strip())
+    router_model = canonical_native_tier_model_id((router_model or "").strip())
     if os.environ.get("HERMES_HF_ROUTER_DISABLE", "").strip().lower() in ("1", "true", "yes"):
         flat = _flatten_tier_models(tiers)
         return flat[0] if flat else router_model
@@ -271,7 +262,7 @@ def _parse_tier_model_json(
     mid = data.get("model")
     if not isinstance(mid, str) or not mid.strip():
         return None
-    mid = canonical_gemma_model_id(mid.strip())
+    mid = canonical_native_tier_model_id(mid.strip())
     if mid not in flat:
         return None
     tier_i = data.get("tier")

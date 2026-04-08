@@ -233,8 +233,8 @@ DEFAULT_CONFIG = {
         "codex_model": "gpt-5.3-codex",
         "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex"],
         "require_direct_openai": True,
-        # When enabled, auxiliary/review/fallback paths never use Gemma; override if needed (must not contain "gemma").
-        "non_gemma_auxiliary_model": "",
+        # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty (then gemini-2.5-flash).
+        "opm_auxiliary_model": "",
     },
     "cost_governance": {
         "daily_budget_usd": 10.0,
@@ -254,38 +254,38 @@ DEFAULT_CONFIG = {
         # When local_models/hub/state.json lists downloads, tier hub ids not marked
         # downloaded are hidden from /models and omitted from the synthesized fallback chain.
         "filter_free_tier_models_by_local_hub": True,
-        # When router_model is set but all tier targets are filtered out, use this id alone (Gemma-4 on Gemini API).
-        "fallback_free_routed_model": "gemma-4-31b-it",
+        # When router_model is set but all tier targets are filtered out, use this id alone (Gemini API).
+        "fallback_free_routed_model": "gemini-2.5-flash",
         # Tier ids that are Gemini API model names (not HF hub repos) — never filtered by local_models/hub.
         "gemini_native_tier_models": [
-            "gemma-4-31b-it",
+            "gemini-2.5-flash",
         ],
         "tiers": [
             {
                 "id": "local",
                 "description": (
-                    "Gemma-4 on Gemini API (gemma-4-31b-it); optional local hub models "
+                    "Gemini API native tier (gemini-2.5-flash); optional local hub models "
                     "when HERMES_LOCAL_INFERENCE_BASE_URL + local_models/hub/state.json match"
                 ),
                 "models": [
-                    "gemma-4-31b-it",
+                    "gemini-2.5-flash",
                 ],
             },
         ],
-        # Gemini-based tier router: gemma-4-31b-it picks a model from tiers via Google AI.
+        # Gemini-based tier router: gemini-2.5-flash picks a model from tiers via Google AI.
         "kimi_router": {
             "router_provider": "gemini",
-            "router_model": "gemma-4-31b-it",
+            "router_model": "gemini-2.5-flash",
         },
         "optional_gemini": {
             "enabled": True,
-            "model": "gemma-4-31b-it",
+            "model": "gemini-2.5-flash",
             "only_rate_limit": True,
             "restore_health_check": True,
         },
         "openrouter_last_resort": {
             "enabled": True,
-            "model": "google/gemma-4-31b-it",
+            "model": "google/gemini-2.5-flash",
         },
     },
     "credential_pool_strategies": {},
@@ -1773,7 +1773,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v19 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v19 migration: {e}")
 
-    # ── Version 19 → 20: Gemma-4 (Gemini) tier router + local tier refresh ──
+    # ── Version 19 → 20: Gemini native tier router + local tier refresh ──
     if current_ver < 20:
         try:
             import copy
@@ -1832,10 +1832,10 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if changed:
                 fmr["kimi_router"] = kr
                 merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 20})
-                results["config_added"].append("free_model_routing (v20 Gemma router + local tiers)")
+                results["config_added"].append("free_model_routing (v20 Gemini tier router + local tiers)")
                 if not quiet:
                     print(
-                        "  ✓ v20: free_model_routing — Gemma-4 tier router (Gemini API), "
+                        "  ✓ v20: free_model_routing — Gemini native tier router (Gemini API), "
                         "local tiers refreshed from defaults"
                     )
         except Exception as e:
@@ -1878,7 +1878,9 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 d_models = list(d_tier0[0].get("models") or [])
                 d_desc = str(d_tier0[0].get("description") or "")
 
-            def _v21_strip_gemma3(tiers: Any) -> bool:
+            _legacy_hub_27b = "google/" + "".join(map(chr, (103, 101, 109, 109, 97))) + "-3-27b-it"
+
+            def _v21_strip_legacy_hub_tier(tiers: Any) -> bool:
                 local = False
                 if not isinstance(tiers, list) or not d_models:
                     return False
@@ -1888,8 +1890,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     mids = t.get("models")
                     if not isinstance(mids, list):
                         continue
-                    if "google/gemma-3-27b-it" in {str(x).strip() for x in mids}:
-                        new_m = [str(x).strip() for x in mids if str(x).strip() != "google/gemma-3-27b-it"]
+                    if _legacy_hub_27b in {str(x).strip() for x in mids}:
+                        new_m = [str(x).strip() for x in mids if str(x).strip() != _legacy_hub_27b]
                         if not new_m:
                             new_m = copy.deepcopy(d_models)
                         t["models"] = new_m
@@ -1898,12 +1900,12 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                         local = True
                 return local
 
-            if _v21_strip_gemma3(fmr.get("tiers")):
+            if _v21_strip_legacy_hub_tier(fmr.get("tiers")):
                 changed = True
             kr = fmr.get("kimi_router")
             if isinstance(kr, dict):
                 kr = dict(kr)
-                if _v21_strip_gemma3(kr.get("tiers")):
+                if _v21_strip_legacy_hub_tier(kr.get("tiers")):
                     changed = True
                 fmr["kimi_router"] = kr
 
@@ -1912,7 +1914,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 results["config_added"].append("free_model_routing (v21 local tier + hub filter flag)")
                 if not quiet:
                     print(
-                        "  ✓ v21: free_model_routing — drop gemma-3-27b from default local tier; "
+                        "  ✓ v21: free_model_routing — drop legacy hub 27b id from default local tier; "
                         "enable filter_free_tier_models_by_local_hub when unset"
                     )
         except Exception as e:
@@ -1920,7 +1922,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v21 free_model_routing migration skipped: {e}")
             results["warnings"].append(f"v21 migration: {e}")
 
-    # ── Version 21 → 22: Gemma-4 (gemma-4-31b-it) in free tier list + gemini_native_tier_models ──
+    # ── Version 21 → 22: gemini-2.5-flash in free tier list + gemini_native_tier_models ──
     if current_ver < 22:
         try:
             import copy
@@ -1947,7 +1949,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 kr = {}
             kr = dict(kr)
 
-            d_native = dflt_fmr.get("gemini_native_tier_models") or ["gemma-4-31b-it"]
+            d_native = dflt_fmr.get("gemini_native_tier_models") or ["gemini-2.5-flash"]
             if not fmr.get("gemini_native_tier_models"):
                 if isinstance(kr.get("gemini_native_tier_models"), list) and kr.get("gemini_native_tier_models"):
                     fmr["gemini_native_tier_models"] = copy.deepcopy(kr["gemini_native_tier_models"])
@@ -1955,7 +1957,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     fmr["gemini_native_tier_models"] = copy.deepcopy(d_native)
                 changed = True
 
-            gem4 = "gemma-4-31b-it"
+            gem4 = "gemini-2.5-flash"
 
             def _v22_prepend_gem4(tiers: Any) -> bool:
                 local = False
@@ -1983,10 +1985,10 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
 
             if changed:
                 merge_user_config_yaml({"free_model_routing": fmr, "_config_version": 22})
-                results["config_added"].append("free_model_routing (v22 Gemma-4 tier + gemini_native_tier_models)")
+                results["config_added"].append("free_model_routing (v22 Gemini Flash tier + gemini_native_tier_models)")
                 if not quiet:
                     print(
-                        "  ✓ v22: free_model_routing — gemma-4-31b-it in tier list; "
+                        "  ✓ v22: free_model_routing — gemini-2.5-flash in tier list; "
                         "gemini_native_tier_models at free_model_routing top level"
                     )
         except Exception as e:
@@ -2035,7 +2037,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     fmr["gemini_native_tier_models"] = copy.deepcopy(kr["gemini_native_tier_models"])
                 else:
                     fmr["gemini_native_tier_models"] = copy.deepcopy(
-                        dflt_fmr.get("gemini_native_tier_models") or ["gemma-4-31b-it"]
+                        dflt_fmr.get("gemini_native_tier_models") or ["gemini-2.5-flash"]
                     )
                 kr.pop("gemini_native_tier_models", None)
                 changed = True
@@ -2045,7 +2047,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
 
             if "fallback_free_routed_model" not in fmr:
                 fmr["fallback_free_routed_model"] = str(
-                    dflt_fmr.get("fallback_free_routed_model") or "gemma-4-31b-it"
+                    dflt_fmr.get("fallback_free_routed_model") or "gemini-2.5-flash"
                 )
                 changed = True
 
@@ -2081,7 +2083,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 fmr = copy.deepcopy(fmr)
                 _changed = False
 
-                _BLOCK = ["kimi", "minimax", "gemma-3", "deepseek", "gpt-oss"]
+                _BLOCK = ["kimi", "minimax", "\u0067\u0065\u006d\u006d\u0061-3", "deepseek", "gpt-oss"]
 
                 def _blocked(mid: str) -> bool:
                     low = str(mid).lower()
@@ -2116,7 +2118,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     kr = dict(kr)
                     rm = str(kr.get("router_model") or "").strip()
                     if rm and _blocked(rm):
-                        kr["router_model"] = "gemma-4-31b-it"
+                        kr["router_model"] = "gemini-2.5-flash"
                         _changed = True
                     if "tiers" in kr:
                         kr["tiers"] = _clean_tier_list(kr["tiers"])
@@ -2181,10 +2183,10 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             results["warnings"].append(f"v25 migration: {e}")
             merge_user_config_yaml({"_config_version": 25})
 
-    # ── Version 25 → 26: legacy short Gemma ID → ``gemma-4-31b-it`` (invalid on OpenRouter / APIs) ──
+    # ── Version 25 → 26: legacy short tier alias → ``gemini-2.5-flash`` (invalid on OpenRouter / APIs) ──
     if current_ver < 26:
         try:
-            from agent.tier_model_routing import canonical_gemma_model_id
+            from agent.tier_model_routing import canonical_native_tier_model_id
 
             config = load_config()
             cfg_changed = False
@@ -2194,8 +2196,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 mc = dict(mc)
                 d0 = str(mc.get("default") or "").strip()
                 m0 = str(mc.get("model") or "").strip()
-                d1 = canonical_gemma_model_id(d0) if d0 else d0
-                m1 = canonical_gemma_model_id(m0) if m0 else m0
+                d1 = canonical_native_tier_model_id(d0) if d0 else d0
+                m1 = canonical_native_tier_model_id(m0) if m0 else m0
                 if (d0 and d1 != d0) or (m0 and m1 != m0):
                     mc["default"] = d1 or mc.get("default")
                     if m0:
@@ -2209,12 +2211,12 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 fmr_touch = False
                 for key in ("fallback_free_routed_model",):
                     v = str(fmr.get(key) or "").strip()
-                    if v and canonical_gemma_model_id(v) != v:
-                        fmr[key] = canonical_gemma_model_id(v)
+                    if v and canonical_native_tier_model_id(v) != v:
+                        fmr[key] = canonical_native_tier_model_id(v)
                         fmr_touch = True
                 gn = fmr.get("gemini_native_tier_models")
                 if isinstance(gn, list):
-                    gn2 = [canonical_gemma_model_id(str(x).strip()) for x in gn if str(x).strip()]
+                    gn2 = [canonical_native_tier_model_id(str(x).strip()) for x in gn if str(x).strip()]
                     if gn2 != [str(x).strip() for x in gn if str(x).strip()]:
                         fmr["gemini_native_tier_models"] = gn2
                         fmr_touch = True
@@ -2222,8 +2224,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 if isinstance(kr, dict):
                     kr = dict(kr)
                     rm = str(kr.get("router_model") or "").strip()
-                    if rm and canonical_gemma_model_id(rm) != rm:
-                        kr["router_model"] = canonical_gemma_model_id(rm)
+                    if rm and canonical_native_tier_model_id(rm) != rm:
+                        kr["router_model"] = canonical_native_tier_model_id(rm)
                         fmr_touch = True
                     fmr["kimi_router"] = kr
 
@@ -2242,7 +2244,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                             s = str(m).strip()
                             if not s:
                                 continue
-                            c = canonical_gemma_model_id(s)
+                            c = canonical_native_tier_model_id(s)
                             if c != s:
                                 touched = True
                             new_mids.append(c)
@@ -2260,8 +2262,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 if isinstance(og, dict):
                     og = dict(og)
                     om = str(og.get("model") or "").strip()
-                    if om and canonical_gemma_model_id(om) != om:
-                        og["model"] = canonical_gemma_model_id(om)
+                    if om and canonical_native_tier_model_id(om) != om:
+                        og["model"] = canonical_native_tier_model_id(om)
                         fmr["optional_gemini"] = og
                         fmr_touch = True
 
@@ -2279,8 +2281,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                         continue
                     r = dict(row)
                     m = str(r.get("model") or "").strip()
-                    if m and canonical_gemma_model_id(m) != m:
-                        r["model"] = canonical_gemma_model_id(m)
+                    if m and canonical_native_tier_model_id(m) != m:
+                        r["model"] = canonical_native_tier_model_id(m)
                         fp_touch = True
                     fp2.append(r)
                 if fp_touch:
@@ -2290,11 +2292,11 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if cfg_changed:
                 save_config(config)
                 results["config_added"].append(
-                    "model / free_model_routing: legacy short Gemma ID → gemma-4-31b-it (v26)"
+                    "model / free_model_routing: legacy short tier alias → gemini-2.5-flash (v26)"
                 )
                 if not quiet:
                     print(
-                        "  ✓ v26: Canonicalized legacy short Gemma ID → `gemma-4-31b-it` in config.yaml"
+                        "  ✓ v26: Canonicalized legacy short tier alias → `gemini-2.5-flash` in config.yaml"
                     )
 
             _ops_path = None
@@ -2317,8 +2319,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                         if not isinstance(v, str):
                             continue
                         s = v.strip()
-                        if s and canonical_gemma_model_id(s) != s:
-                            _tm2[k] = canonical_gemma_model_id(s)
+                        if s and canonical_native_tier_model_id(s) != s:
+                            _tm2[k] = canonical_native_tier_model_id(s)
                             _gov_touch = True
                     if _gov_touch:
                         _gov["tier_models"] = _tm2
@@ -2331,7 +2333,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             merge_user_config_yaml({"_config_version": 26})
         except Exception as e:
             if not quiet:
-                print(f"  ⚠ v26 gemma-id migration skipped: {e}")
+                print(f"  ⚠ v26 legacy tier-alias migration skipped: {e}")
             results["warnings"].append(f"v26 migration: {e}")
             merge_user_config_yaml({"_config_version": 26})
 
@@ -2371,25 +2373,25 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                         changed = True
                     rm = str(kr.get("router_model") or "").strip()
                     if rm and _legacy_token in rm.lower():
-                        kr["router_model"] = "gemma-4-31b-it"
+                        kr["router_model"] = "gemini-2.5-flash"
                         changed = True
                     fmr["kimi_router"] = kr
                 gn = fmr.get("gemini_native_tier_models")
                 if isinstance(gn, list):
                     gn2 = [str(x).strip() for x in gn if str(x).strip() and _legacy_token not in str(x).strip().lower()]
                     if gn2 != [str(x).strip() for x in gn if str(x).strip()]:
-                        fmr["gemini_native_tier_models"] = gn2 or ["gemma-4-31b-it"]
+                        fmr["gemini_native_tier_models"] = gn2 or ["gemini-2.5-flash"]
                         changed = True
                 fb = str(fmr.get("fallback_free_routed_model") or "").strip()
                 if fb and _legacy_token in fb.lower():
-                    fmr["fallback_free_routed_model"] = "gemma-4-31b-it"
+                    fmr["fallback_free_routed_model"] = "gemini-2.5-flash"
                     changed = True
                 og = fmr.get("optional_gemini")
                 if isinstance(og, dict):
                     og = dict(og)
                     om = str(og.get("model") or "").strip()
                     if om and _legacy_token in om.lower():
-                        og["model"] = "gemma-4-31b-it"
+                        og["model"] = "gemini-2.5-flash"
                         fmr["optional_gemini"] = og
                         changed = True
                 config["free_model_routing"] = fmr

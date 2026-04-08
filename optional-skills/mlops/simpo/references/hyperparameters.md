@@ -65,7 +65,7 @@ warmup_ratio: 0.1
 lr_scheduler_type: cosine
 ```
 
-**Gemma 2 9B (creative)**:
+**Small ~9B instruct (creative)**:
 ```yaml
 learning_rate: 1e-6
 num_train_epochs: 1

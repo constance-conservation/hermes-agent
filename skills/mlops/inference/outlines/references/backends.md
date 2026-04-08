@@ -118,10 +118,6 @@ model = outlines.models.transformers("Qwen/Qwen2.5-7B-Instruct")
 model = outlines.models.transformers("Qwen/Qwen2.5-14B-Instruct")
 model = outlines.models.transformers("Qwen/Qwen2.5-72B-Instruct")
 
-# Gemma (Google)
-model = outlines.models.transformers("google/gemma-2-9b-it")
-model = outlines.models.transformers("google/gemma-2-27b-it")
-
 # Llava (Vision)
 model = outlines.models.transformers("llava-hf/llava-v1.6-mistral-7b-hf")
 ```

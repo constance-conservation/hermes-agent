@@ -312,7 +312,7 @@ class TestStripProviderPrefix:
         """Ollama model:tag format must NOT be stripped."""
         assert _strip_provider_prefix("qwen3.5:27b") == "qwen3.5:27b"
         assert _strip_provider_prefix("llama3.3:70b") == "llama3.3:70b"
-        assert _strip_provider_prefix("gemma2:9b") == "gemma2:9b"
+        assert _strip_provider_prefix("phi3:14b") == "phi3:14b"
         assert _strip_provider_prefix("codellama:13b-instruct-q4_0") == "codellama:13b-instruct-q4_0"
 
     def test_http_urls_preserved(self):

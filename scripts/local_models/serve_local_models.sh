@@ -9,9 +9,9 @@
 # Usage:
 #   ./scripts/local_models/serve_local_models.sh [--model <hub_id>] [--port <N>]
 #
-# Default model: google/gemma-2-9b-it
-#   - Prefers quantized 4-bit version: local_models/hub/google__gemma-2-9b-it-mlx-4bit
-#   - Falls back to BF16:              local_models/hub/google__gemma-2-9b-it
+# Default model: Qwen/Qwen2.5-1.5B-Instruct (see local_models/manifest.yaml)
+#   - Prefers quantized 4-bit tree under local_models/hub/ when present
+#   - Falls back to BF16 checkpoint path when present
 # Default port: 8000
 #
 # Hermes config (profile .env):
@@ -20,8 +20,8 @@
 #
 # To quantize the model first (recommended, ~18GB vs 64GB):
 #   ./venv/bin/python -m mlx_lm convert \
-#     --hf-path local_models/hub/google__gemma-2-9b-it \
-#     --mlx-path local_models/hub/google__gemma-2-9b-it-mlx-4bit \
+#     --hf-path local_models/hub/<your_hub_dir> \
+#     --mlx-path local_models/hub/<your_mlx_dir> \
 #     --quantize --q-bits 4
 set -euo pipefail
 
@@ -30,7 +30,7 @@ HUB_DIR="$REPO_ROOT/local_models/hub"
 STATE_JSON="$HUB_DIR/state.json"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-MODEL_HUB_ID="${HERMES_SERVE_MODEL:-google/gemma-2-9b-it}"
+MODEL_HUB_ID="${HERMES_SERVE_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}"
 PORT="${HERMES_SERVE_PORT:-8000}"
 GPU_UTIL="${HERMES_SERVE_GPU_UTIL:-0.90}"        # vLLM only
 MAX_MODEL_LEN="${HERMES_SERVE_MAX_MODEL_LEN:-}"  # vLLM only, empty = default

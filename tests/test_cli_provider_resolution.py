@@ -253,7 +253,7 @@ def test_cli_turn_routing_uses_cheap_model_when_simple(monkeypatch):
 
 def test_models_primary_gpt_forces_native_openai_runtime(monkeypatch):
     cli = _import_cli()
-    shell = cli.HermesCLI(model="gemma-4-31b-it", compact=True, max_turns=1)
+    shell = cli.HermesCLI(model="gemini-2.5-flash", compact=True, max_turns=1)
     shell.provider = "gemini"
     shell.api_mode = "chat_completions"
     shell.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"

@@ -2,12 +2,11 @@
 
 Synthesized order:
 
-1. **Gemini direct** — ``gemma-4-31b-it`` via Google AI (Gemini API).  The chain
-   entry uses ``"provider": "gemini"`` directly — no HuggingFace inference hop.
+1. **Gemini direct** — default ``gemini-2.5-flash`` via Google AI (Gemini API).
    Tier ids that are blocklisted are excluded from routing and ``/models``.
-   When every tier target is filtered out, ``fallback_free_routed_model``
-   (default ``gemma-4-31b-it``) is used as the sole tier target.
-2. **Optional Gemini** — last-resort hosted Gemma if ``optional_gemini`` is enabled.
+   When every tier target is filtered out, ``fallback_free_routed_model`` supplies
+   the sole tier target.
+2. **Optional Gemini** — last-resort if ``optional_gemini`` is enabled.
 """
 
 from __future__ import annotations
@@ -17,12 +16,12 @@ from typing import Any, Dict, List, Optional
 
 from agent.local_inference import filter_hub_model_ids_by_local_state
 from agent.routing_model_blocklist import is_routing_blocklisted
-from agent.tier_model_routing import canonical_gemma_model_id
+from agent.tier_model_routing import canonical_native_tier_model_id
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GEMINI_NATIVE = frozenset({"gemma-4-31b-it"})
-_DEFAULT_FALLBACK_FREE_ROUTED = "gemma-4-31b-it"
+_DEFAULT_GEMINI_NATIVE = frozenset({"gemini-2.5-flash"})
+_DEFAULT_FALLBACK_FREE_ROUTED = "gemini-2.5-flash"
 
 
 def raw_free_model_routing_tiers(fmr: Optional[Dict[str, Any]]) -> Any:
@@ -41,7 +40,7 @@ def fallback_free_routed_model_id(fmr: Optional[Dict[str, Any]] = None) -> str:
     """Model id used alone when ``router_model`` is set but no tier targets remain after filtering."""
     if not isinstance(fmr, dict):
         return _DEFAULT_FALLBACK_FREE_ROUTED
-    v = canonical_gemma_model_id(_strip(fmr.get("fallback_free_routed_model")))
+    v = canonical_native_tier_model_id(_strip(fmr.get("fallback_free_routed_model")))
     return v or _DEFAULT_FALLBACK_FREE_ROUTED
 
 
@@ -56,7 +55,7 @@ def gemini_native_tier_model_set(fmr: Optional[Dict[str, Any]] = None) -> frozen
             raw = kr.get("gemini_native_tier_models")
     if isinstance(raw, list) and raw:
         return frozenset(
-            canonical_gemma_model_id(str(x).strip()) for x in raw if str(x).strip()
+            canonical_native_tier_model_id(str(x).strip()) for x in raw if str(x).strip()
         )
     return _DEFAULT_GEMINI_NATIVE
 
@@ -78,7 +77,7 @@ def normalize_kimi_tiers(raw: Any) -> List[Dict[str, Any]]:
                     "id": _strip(raw.get("id")) or "tier-0",
                     "description": _strip(raw.get("description")) or "",
                     "models": [
-                        canonical_gemma_model_id(str(x).strip())
+                        canonical_native_tier_model_id(str(x).strip())
                         for x in mids
                         if str(x).strip()
                     ],
@@ -93,7 +92,7 @@ def normalize_kimi_tiers(raw: Any) -> List[Dict[str, Any]]:
             if not isinstance(mids, list):
                 continue
             models = [
-                canonical_gemma_model_id(str(x).strip()) for x in mids if str(x).strip()
+                canonical_native_tier_model_id(str(x).strip()) for x in mids if str(x).strip()
             ]
             if not models:
                 continue
@@ -106,7 +105,7 @@ def normalize_kimi_tiers(raw: Any) -> List[Dict[str, Any]]:
             )
         elif isinstance(tier, list):
             models = [
-                canonical_gemma_model_id(str(x).strip()) for x in tier if str(x).strip()
+                canonical_native_tier_model_id(str(x).strip()) for x in tier if str(x).strip()
             ]
             if models:
                 out.append(
@@ -122,7 +121,7 @@ def normalize_kimi_tiers(raw: Any) -> List[Dict[str, Any]]:
 def _filtered_kimi_tiers(fmr: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Apply optional local-hub download filter to tier hub ids.
 
-    ``gemini_native_tier_models`` (default ``gemma-4-31b-it``) are never stripped — they are
+    ``gemini_native_tier_models`` (default ``gemini-2.5-flash``) are never stripped — they are
     served via Gemini API, not ``local_models/hub``.
     """
     tiers = normalize_kimi_tiers(raw_free_model_routing_tiers(fmr))
@@ -171,7 +170,7 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
 
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):
-        router_model = canonical_gemma_model_id(_strip(kr.get("router_model")))
+        router_model = canonical_native_tier_model_id(_strip(kr.get("router_model")))
         tiers = _filtered_kimi_tiers(fmr)
         if router_model and not tiers:
             fb = fallback_free_routed_model_id(fmr)
@@ -204,20 +203,17 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
         chain.append(
             {
                 "provider": "gemini",
-                "model": canonical_gemma_model_id(_strip(og.get("model"))),
+                "model": canonical_native_tier_model_id(_strip(og.get("model"))),
                 "only_rate_limit": bool(og.get("only_rate_limit", True)),
                 "restore_health_check": bool(og.get("restore_health_check", True)),
             }
         )
 
-    # Last resort: OpenRouter with gemma-4-31b-it, then any low-cost
-    # alternative.  Only reached when ALL direct Gemini API entries above
-    # have failed (errors, quota, unavailable).  OpenRouter is always paid
-    # but is cheaper than most alternatives when using gemma.
+    # Last resort: OpenRouter with a small Gemini hub id when direct API failed.
     or_fallback = fmr.get("openrouter_last_resort", {})
     if isinstance(or_fallback, dict) and or_fallback.get("enabled", True):
-        _or_model = canonical_gemma_model_id(
-            _strip(or_fallback.get("model")) or "google/gemma-4-31b-it"
+        _or_model = canonical_native_tier_model_id(
+            _strip(or_fallback.get("model")) or "google/gemini-2.5-flash"
         )
         chain.append(
             {
@@ -229,9 +225,9 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
         )
 
     try:
-        from agent.openai_primary_mode import opm_blocks_gemma
+        from agent.openai_primary_mode import opm_enabled
 
-        if opm_blocks_gemma():
+        if opm_enabled():
             return _opm_finalize_fallback_chain(chain)
     except Exception:
         pass
@@ -254,20 +250,20 @@ def _drop_plain_hf_without_router(entries: List[Dict[str, Any]]) -> List[Dict[st
 
 
 def _opm_finalize_fallback_chain(chain: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Under ``openai_primary_mode.enabled``, drop Gemma entries; inject one non-Gemma hop if empty."""
+    """Under OPM, drop disallowed-family entries; inject one auxiliary hop if empty."""
     try:
         from agent.openai_primary_mode import (
-            filter_fallback_chain_strip_gemma,
-            opm_blocks_gemma,
-            opm_non_gemma_replacement_model,
+            filter_fallback_chain_disallowed,
+            opm_auxiliary_model,
+            opm_enabled,
         )
 
-        if not opm_blocks_gemma():
+        if not opm_enabled():
             return chain
-        filtered = filter_fallback_chain_strip_gemma(chain)
+        filtered = filter_fallback_chain_disallowed(chain)
         if filtered:
             return filtered
-        aux = opm_non_gemma_replacement_model()
+        aux = opm_auxiliary_model()
         return [{"provider": "gemini", "model": aux, "only_rate_limit": False}]
     except Exception:
         return chain

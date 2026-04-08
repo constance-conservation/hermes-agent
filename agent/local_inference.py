@@ -175,7 +175,7 @@ def _find_mlx_lm_executable() -> Optional[str]:
 
 
 def ensure_local_inference_server_running(
-    hub_id: str = "google/gemma-2-9b-it",
+    hub_id: str = "Qwen/Qwen2.5-1.5B-Instruct",
     *,
     port: Optional[int] = None,
     start_timeout: int = 90,

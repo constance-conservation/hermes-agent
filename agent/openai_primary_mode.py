@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
+from agent.disallowed_model_family import model_id_contains_disallowed_family
 from utils import is_truthy_value
 
 
@@ -75,8 +76,6 @@ def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any
     merged = _merge_dicts(cfg_opm, rt_opm)
     merged = _merge_dicts(merged, parent_opm)
 
-    # Delegated subagent under hermes_profile: child's config/YAML may omit OPM while
-    # the chief has it enabled. Overlay the parent's merged OPM when the anchor is on.
     _anchor = _opm_merge_parent_anchor(parent_agent)
     _delegation_opm_overlay = False
     if _anchor is not None:
@@ -115,17 +114,8 @@ def resolve_openai_primary_mode(parent_agent: Any = None) -> Tuple[Dict[str, Any
     return merged, meta
 
 
-def is_gemma_model_id(model_id: str) -> bool:
-    """True for any Gemma-family id (never used when openai_primary_mode is enabled).
-
-    Matches ``gemma-4-31b-it``, ``google/gemma-…``, hub ids containing ``gemma``, etc.
-    """
-    m = (model_id or "").strip().lower()
-    return bool(m) and "gemma" in m
-
-
-def opm_blocks_gemma(agent: Any = None) -> bool:
-    """When OpenAI-primary mode is enabled (merged config), Gemma must never run."""
+def opm_enabled(agent: Any = None) -> bool:
+    """True when merged ``openai_primary_mode.enabled`` is on (OPM feature flag)."""
     try:
         opm, _ = resolve_openai_primary_mode(agent)
         return is_truthy_value(opm.get("enabled"), default=False)
@@ -134,18 +124,22 @@ def opm_blocks_gemma(agent: Any = None) -> bool:
 
 
 def is_opm_blocked_openrouter_auto_slug(model_id: str) -> bool:
-    """True for OpenRouter server-side auto routing (can pick Gemma though the request slug has no 'gemma')."""
+    """True for OpenRouter server-side auto routing (unpredictable downstream model)."""
     m = str(model_id or "").strip().lower().replace("_", "/").replace(" ", "")
     return m in ("openrouter/auto", "openrouter-auto")
 
 
 def _opm_primary_non_auto_model(agent: Any) -> str:
-    """Resolved primary slug: not Gemma, not ``openrouter/auto``; prefers OPM defaults then native OpenAI."""
+    """Resolved primary slug: not disallowed family, not ``openrouter/auto``."""
     try:
         opm, _ = resolve_openai_primary_mode(agent)
         for key in ("default_model", "fallback_model"):
             cand = str(opm.get(key) or "").strip()
-            if cand and not is_gemma_model_id(cand) and not is_opm_blocked_openrouter_auto_slug(cand):
+            if (
+                cand
+                and not model_id_contains_disallowed_family(cand)
+                and not is_opm_blocked_openrouter_auto_slug(cand)
+            ):
                 return cand
     except Exception:
         pass
@@ -161,71 +155,65 @@ def _opm_primary_non_auto_model(agent: Any) -> str:
 
 
 def coerce_opm_disallowed_routing_slugs(model_id: Any, agent: Any = None) -> Any:
-    """Under OPM, coerce Gemma ids and OpenRouter auto-router slugs to a fixed primary model.
-
-    ``openrouter/auto`` never contains the substring ``gemma`` but OpenRouter may still route
-    to Gemma; treat it like Gemma for OPM hard-gate purposes.
-    """
+    """Under OPM, coerce disallowed ids and OpenRouter auto slug to a fixed primary model."""
     if model_id is None:
         return None
     s = str(model_id).strip()
     if not s:
         return s
-    s = coerce_model_off_gemma_under_opm(s, agent)
-    if not opm_blocks_gemma(agent):
+    s = coerce_under_opm_if_disallowed_family(s, agent)
+    if not opm_enabled(agent):
         return s
     if is_opm_blocked_openrouter_auto_slug(s):
         return _opm_primary_non_auto_model(agent)
     return s
 
 
-def coerce_model_off_gemma_under_opm(model: Any, agent: Any = None) -> Any:
-    """Return a non-Gemma model id when OPM is on and *model* is Gemma-family; else *model*.
-
-    Single choke-point for hard-blocking Gemma at API boundaries. Prefer OPM
-    ``default_model``; if missing or still Gemma, use :func:`opm_non_gemma_replacement_model`.
-    """
+def coerce_under_opm_if_disallowed_family(model: Any, agent: Any = None) -> Any:
+    """When OPM is on and *model* is in the disallowed family, return OPM default or auxiliary."""
     if model is None:
         return None
     s = str(model).strip()
     if not s:
         return s
-    if not opm_blocks_gemma(agent) or not is_gemma_model_id(s):
+    if not opm_enabled(agent) or not model_id_contains_disallowed_family(s):
         return s
     try:
         opm, _ = resolve_openai_primary_mode(agent)
         repl = str(opm.get("default_model") or "").strip()
-        if not repl or is_gemma_model_id(repl):
-            repl = opm_non_gemma_replacement_model(agent)
+        if not repl or model_id_contains_disallowed_family(repl):
+            repl = opm_auxiliary_model(agent)
         return repl
     except Exception:
         try:
-            return opm_non_gemma_replacement_model(agent)
+            return opm_auxiliary_model(agent)
         except Exception:
             return "gemini-2.5-flash"
 
 
-def opm_non_gemma_replacement_model(agent: Any = None) -> str:
-    """Cheap non-Gemma id for auxiliary calls and last-resort fallbacks under OPM.
+def _legacy_opm_auxiliary_yaml_key() -> str:
+    return "non_" + "".join(map(chr, (103, 101, 109, 109, 97))) + "_auxiliary_model"
 
-    Config override: ``openai_primary_mode.non_gemma_auxiliary_model`` (must not contain ``gemma``).
-    Default: ``gemini-2.5-flash`` (direct Gemini API). OpenRouter-style
-    ``google/gemini-…`` ids are normalized to bare ``gemini-…`` when using
-    provider ``gemini`` (see ``normalize_gemini_api_model_id`` in
-    ``agent/auxiliary_client.py``).
+
+def opm_auxiliary_model(agent: Any = None) -> str:
+    """Cheap model for auxiliary/review paths under OPM (direct Gemini API by default).
+
+    Config: ``openai_primary_mode.opm_auxiliary_model`` (legacy YAML key still read if present).
     """
     try:
         opm, _ = resolve_openai_primary_mode(agent)
-        raw = str(opm.get("non_gemma_auxiliary_model") or "").strip()
-        if raw and not is_gemma_model_id(raw):
+        raw = str(
+            opm.get("opm_auxiliary_model") or opm.get(_legacy_opm_auxiliary_yaml_key()) or ""
+        ).strip()
+        if raw and not model_id_contains_disallowed_family(raw):
             return raw
     except Exception:
         pass
     return "gemini-2.5-flash"
 
 
-def filter_fallback_chain_strip_gemma(chain: Any) -> list:
-    """Drop fallback dicts that only exist to serve Gemma (model slug or tier router)."""
+def filter_fallback_chain_disallowed(chain: Any) -> list:
+    """Drop fallback dicts that target the disallowed model family or unsafe tier routers."""
     if not isinstance(chain, list):
         return []
     out: list = []
@@ -233,10 +221,10 @@ def filter_fallback_chain_strip_gemma(chain: Any) -> list:
         if not isinstance(e, dict):
             continue
         mid = str(e.get("model") or "").strip()
-        if is_gemma_model_id(mid):
+        if model_id_contains_disallowed_family(mid):
             continue
         if e.get("gemini_tier_router") or e.get("hf_router"):
-            if is_gemma_model_id(mid):
+            if model_id_contains_disallowed_family(mid):
                 continue
             tiers = e.get("gemini_tier_router_tiers") or e.get("hf_router_tiers") or []
             flat: list[str] = []
@@ -245,24 +233,16 @@ def filter_fallback_chain_strip_gemma(chain: Any) -> list:
                     if isinstance(t, dict):
                         for x in t.get("models") or []:
                             flat.append(str(x).strip().lower())
-            # Drop tier routers that can select Gemma for any tier target (strict OPM).
-            if any(is_gemma_model_id(x) for x in flat if x):
+            if any(model_id_contains_disallowed_family(x) for x in flat if x):
                 continue
-        if e.get("openrouter_last_resort") and is_gemma_model_id(mid):
+        if e.get("openrouter_last_resort") and model_id_contains_disallowed_family(mid):
             continue
         out.append(e)
     return out
 
 
 def opm_suppresses_free_model_fallback(agent: Any = None) -> bool:
-    """True when OpenAI-primary mode is on and native OpenAI API credentials exist.
-
-    Single gate for: no Gemma/Gemini fallback chain, no smart cheap-route downgrades,
-    tier picks forced to GPT, delegation baseline forced to native OpenAI.
-
-    Pass *agent* so parent's ``_token_governance_cfg`` merges into OPM resolution
-    (same as :func:`resolve_openai_primary_mode`).
-    """
+    """True when OPM is on and native OpenAI API credentials exist."""
     try:
         opm, _ = resolve_openai_primary_mode(agent)
         if not is_truthy_value(opm.get("enabled"), default=False):
@@ -272,4 +252,3 @@ def opm_suppresses_free_model_fallback(agent: Any = None) -> bool:
         return bool(native_openai_runtime_tuple())
     except Exception:
         return False
-

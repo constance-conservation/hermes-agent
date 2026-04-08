@@ -68,9 +68,9 @@ This note is for **operators and engineers** who need to **reproduce or extend**
 
 ---
 
-## Provider fallback chain (OpenRouter limits → direct Gemini / Gemma)
+## Provider fallback chain (OpenRouter limits → direct Gemini)
 
-**Goal:** When OpenRouter returns **rate limits**, **402-style billing**, or **403 “key limit / credits”** style errors, optionally switch the running agent to a **direct** provider (e.g. **Google Gemini API** with **Gemma**) without requiring a manual model change, then **probe the primary** when configured.
+**Goal:** When OpenRouter returns **rate limits**, **402-style billing**, or **403 “key limit / credits”** style errors, optionally switch the running agent to a **direct** provider (e.g. **Google Gemini API** with **Gemini Flash**) without requiring a manual model change, then **probe the primary** when configured.
 
 ### Policy alignment
 
@@ -83,7 +83,7 @@ This note is for **operators and engineers** who need to **reproduce or extend**
 - Hermes-only keys on each entry (stripped before router resolution):
   - **`only_rate_limit: true`** — activate this entry only for **quota-style** failures (rate limit, 402, OpenRouter key/credit limit messages, specific 403 bodies). Do **not** rely on generic non-retryable 403 without the quota classifier.
   - **`restore_health_check: true`** — after fallback, periodically **ping** the primary before restoring (optional **`health_check_message`**).
-- **`provider` + `model`** on each entry — must resolve via `agent/auxiliary_client.resolve_provider_client` (e.g. `provider: gemini`, `model: gemma-4-31b-it`, **`GEMINI_API_KEY`** in profile `.env`).
+- **`provider` + `model`** on each entry — must resolve via `agent/auxiliary_client.resolve_provider_client` (e.g. `provider: gemini`, `model: gemini-2.5-flash`, **`GEMINI_API_KEY`** in profile `.env`).
 
 See **`scripts/templates/chief-orchestrator-profile.example.yaml`** and inline comments on **`fallback_model`**.
 
@@ -106,9 +106,9 @@ See **`scripts/templates/chief-orchestrator-profile.example.yaml`** and inline c
 
 ---
 
-## Gemma / Gemini `<thought>` tags in assistant text
+## Gemini `<thought>` tags in assistant text
 
-Some models (notably **Gemma** via the **Google API**) emit **`<thought>…</thought>`** (or similar) **inside** `message.content` instead of separate reasoning fields.
+Some models served via the **Google API** emit **`<thought>…</thought>`** (or similar) **inside** `message.content` instead of separate reasoning fields.
 
 ### Expected Hermes behavior
 

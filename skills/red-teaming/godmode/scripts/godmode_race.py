@@ -61,7 +61,7 @@ ULTRAPLINIAN_MODELS = [
     'z-ai/glm-5-turbo',
     'mistralai/mistral-medium-3.1',
     # SMART TIER (25-38)
-    'google/gemma-3-27b-it',
+    'google/gemini-2.5-flash',
     'openai/gpt-5',
     'openai/gpt-5.4-chat',
     'qwen/qwen3.5-plus-02-15',

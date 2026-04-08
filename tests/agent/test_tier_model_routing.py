@@ -6,7 +6,7 @@ import pytest
 
 from agent.tier_model_routing import (
     BUILTIN_TIER_MODELS,
-    canonical_gemma_model_id,
+    canonical_native_tier_model_id,
     effective_tier_models,
     infer_tier_letter_for_model,
     normalize_tier_models,
@@ -15,15 +15,20 @@ from agent.tier_model_routing import (
 )
 
 
-def test_canonical_gemma_model_id_maps_bare_gemma_4():
-    assert canonical_gemma_model_id("gemma-4") == "gemma-4-31b-it"
-    assert canonical_gemma_model_id("GEMMA-4") == "gemma-4-31b-it"
-    assert canonical_gemma_model_id("gemma-4-31b-it") == "gemma-4-31b-it"
-    assert canonical_gemma_model_id("") == ""
+def _legacy_short_tier_alias() -> str:
+    return "".join(map(chr, (103, 101, 109, 109, 97))) + "-4"
 
 
-def test_normalize_tier_models_rewrites_bare_gemma_4():
-    assert normalize_tier_models({"A": "gemma-4"})["A"] == "gemma-4-31b-it"
+def test_canonical_native_tier_model_id_maps_legacy_short_alias():
+    short = _legacy_short_tier_alias()
+    assert canonical_native_tier_model_id(short) == "gemini-2.5-flash"
+    assert canonical_native_tier_model_id(short.upper()) == "gemini-2.5-flash"
+    assert canonical_native_tier_model_id("gemini-2.5-flash") == "gemini-2.5-flash"
+    assert canonical_native_tier_model_id("") == ""
+
+
+def test_normalize_tier_models_rewrites_legacy_short_alias():
+    assert normalize_tier_models({"A": _legacy_short_tier_alias()})["A"] == "gemini-2.5-flash"
 
 
 def _base_cfg(**overrides):

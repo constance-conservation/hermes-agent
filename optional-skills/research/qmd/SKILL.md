@@ -67,7 +67,7 @@ First run auto-downloads 3 local GGUF models (~2GB total):
 
 | Model | Purpose | Size |
 |-------|---------|------|
-| embeddinggemma-300M-Q8_0 | Vector embeddings | ~300MB |
+| nomic-embed-text-v1.5-Q8_0 | Vector embeddings | ~300MB |
 | qwen3-reranker-0.6b-q8_0 | Result reranking | ~640MB |
 | qmd-query-expansion-1.7B | Query expansion | ~1.1GB |
 

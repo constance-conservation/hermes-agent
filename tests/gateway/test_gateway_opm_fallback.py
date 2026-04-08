@@ -25,7 +25,7 @@ def test_resolve_fallback_providers_empty_under_opm():
     cfg = {
         "free_model_routing": {
             "enabled": True,
-            "kimi_router": {"router_model": "gemma-4-31b-it", "tiers": []},
+            "kimi_router": {"router_model": "gemini-2.5-flash", "tiers": []},
         }
     }
     with patch(

@@ -178,7 +178,7 @@ def test_classify_keyword_security_skips_llm():
     assert "keyword" in reason.lower()
 
 
-def test_call_profile_router_llm_uses_gemini_direct(monkeypatch):
+def test_call_profile_router_llm_uses_configured_router_on_gemini(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
     from agent import profile_router as pr
 
@@ -186,7 +186,7 @@ def test_call_profile_router_llm_uses_gemini_direct(monkeypatch):
         "enabled": True,
         "kimi_router": {
             "router_provider": "gemini",
-            "router_model": "gemma-4-31b-it",
+            "router_model": "gemini-2.5-flash",
             "tiers": [
                 {"id": "general", "description": "g", "models": ["some/hub-id"]},
             ],
@@ -202,4 +202,4 @@ def test_call_profile_router_llm_uses_gemini_direct(monkeypatch):
         )
     mock_llm.assert_called_once()
     assert mock_llm.call_args.kwargs.get("provider") == "gemini"
-    assert mock_llm.call_args.kwargs.get("model") == "gemma-4-31b-it"
+    assert mock_llm.call_args.kwargs.get("model") == "gemini-2.5-flash"

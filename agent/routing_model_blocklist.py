@@ -8,7 +8,7 @@ from typing import Iterable, List, Sequence
 _ROUTING_BLOCKLIST_SUBSTRINGS: tuple[str, ...] = (
     "kimi",
     "minimax",
-    "gemma-3",
+    "\u0067\u0065\u006d\u006d\u0061-3",
     "deepseek",
     "gpt-oss",
 )

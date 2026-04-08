@@ -323,7 +323,7 @@ trainer.save_model("final_model")
 from unsloth import FastLanguageModel
 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="google/gemma-3-1b-it",
+    model_name="meta-llama/Llama-3.2-1B-Instruct",
     max_seq_length=1024,
     load_in_4bit=True,
     fast_inference=True,

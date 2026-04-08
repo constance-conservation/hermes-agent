@@ -1758,17 +1758,14 @@ def call_llm(
         task, provider, model, base_url, api_key)
     resolved_model = _resolve_tier_dynamic_for_auxiliary(resolved_model, messages)
     try:
-        from agent.openai_primary_mode import (
-            coerce_opm_disallowed_routing_slugs,
-            is_gemma_model_id,
-            is_opm_blocked_openrouter_auto_slug,
-        )
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_primary_mode import coerce_opm_disallowed_routing_slugs, is_opm_blocked_openrouter_auto_slug
 
         _prev = resolved_model
         resolved_model = coerce_opm_disallowed_routing_slugs(resolved_model, None)
         if resolved_model != _prev:
             _rp = (resolved_provider or "").strip().lower()
-            if is_gemma_model_id(_prev) and _rp in ("", "auto", "huggingface", "openrouter"):
+            if model_id_contains_disallowed_family(_prev) and _rp in ("", "auto", "huggingface", "openrouter"):
                 resolved_provider = "gemini"
                 resolved_base_url = None
                 resolved_api_key = None
@@ -1944,17 +1941,14 @@ async def async_call_llm(
         task, provider, model, base_url, api_key)
     resolved_model = _resolve_tier_dynamic_for_auxiliary(resolved_model, messages)
     try:
-        from agent.openai_primary_mode import (
-            coerce_opm_disallowed_routing_slugs,
-            is_gemma_model_id,
-            is_opm_blocked_openrouter_auto_slug,
-        )
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_primary_mode import coerce_opm_disallowed_routing_slugs, is_opm_blocked_openrouter_auto_slug
 
         _prev = resolved_model
         resolved_model = coerce_opm_disallowed_routing_slugs(resolved_model, None)
         if resolved_model != _prev:
             _rp = (resolved_provider or "").strip().lower()
-            if is_gemma_model_id(_prev) and _rp in ("", "auto", "huggingface", "openrouter"):
+            if model_id_contains_disallowed_family(_prev) and _rp in ("", "auto", "huggingface", "openrouter"):
                 resolved_provider = "gemini"
                 resolved_base_url = None
                 resolved_api_key = None

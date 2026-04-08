@@ -338,7 +338,7 @@ def _call_profile_router_llm(
 ) -> Any:
     """Run the profile-router JSON classifier via Gemini API.
 
-    Uses ``gemma-4-31b-it`` (or configured ``router_model``) on the Gemini API
+    Uses the configured ``router_model`` (default ``gemini-2.5-flash``) on the Gemini API
     for lightweight JSON classification.  HuggingFace Inference Providers are
     not used — credits deplete and the call is too simple to need them.
 
@@ -372,18 +372,15 @@ def _call_profile_router_llm(
         fmr = {}
 
     kr = fmr.get("kimi_router") if isinstance(fmr.get("kimi_router"), dict) else {}
-    router_model = str(kr.get("router_model") or "gemma-4-31b-it").strip()
+    router_model = str(kr.get("router_model") or "gemini-2.5-flash").strip()
 
-    from agent.tier_model_routing import canonical_gemma_model_id
-    from agent.openai_primary_mode import (
-        is_gemma_model_id,
-        opm_blocks_gemma,
-        opm_non_gemma_replacement_model,
-    )
+    from agent.disallowed_model_family import model_id_contains_disallowed_family
+    from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
+    from agent.tier_model_routing import canonical_native_tier_model_id
 
-    router_model = canonical_gemma_model_id(router_model)
-    if opm_blocks_gemma(None) and is_gemma_model_id(router_model):
-        router_model = opm_non_gemma_replacement_model(None)
+    router_model = canonical_native_tier_model_id(router_model)
+    if opm_enabled(None) and model_id_contains_disallowed_family(router_model):
+        router_model = opm_auxiliary_model(None)
 
     gem = (
         os.environ.get("GEMINI_API_KEY")
@@ -403,7 +400,7 @@ def _call_profile_router_llm(
 
     raise RuntimeError(
         "profile_router: set GEMINI_API_KEY (or GOOGLE_API_KEY) and "
-        "free_model_routing.kimi_router.router_model=gemma-4-31b-it in config.yaml.",
+        "free_model_routing.kimi_router.router_model=gemini-2.5-flash in config.yaml.",
     )
 
 

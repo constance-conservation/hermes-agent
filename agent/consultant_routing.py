@@ -375,7 +375,7 @@ def resolve_consultant_tier(
             "multi-domain problems. Single-turn only. Always requires deliberation+approval.\n\n"
             "COST PRIORITY: Always prefer direct API sources (Google Gemini API, OpenAI API, Anthropic API) "
             "over OpenRouter. OpenRouter is ALWAYS paid even for models that are free via their native API. "
-            "gemma-4-31b-it via direct Gemini API = free; via OpenRouter = paid.\n"
+            "Native Gemini Flash via direct Google API is low-cost; the same model id on OpenRouter is paid.\n"
             "ROUTING BIAS: Use A/B/C for the bulk of routine/menial work (lowest API cost). "
             "Optimize for the lowest cost that delivers the performance the task requires. "
             "Only escalate to D for genuinely complex tasks. Only escalate to E/F for the hardest tasks "

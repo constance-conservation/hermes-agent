@@ -94,19 +94,21 @@ class TestFallbackChainInit:
         assert agent._fallback_chain == []
         assert agent._fallback_model is None
 
-    def test_explicit_gemma_fallback_replaced_when_opm_blocks(self):
-        """Gateway passes config fallback_providers verbatim; OPM must still strip Gemma."""
+    def test_explicit_disallowed_fallback_replaced_when_opm_blocks(self):
+        """Gateway passes config fallback_providers verbatim; OPM must still strip disallowed ids."""
+        from agent.disallowed_model_family import disallowed_family_fixture_slug
+
         with (
             patch("agent.token_governance_runtime.apply_token_governance_runtime", lambda a: None),
-            patch("agent.openai_primary_mode.opm_blocks_gemma", return_value=True),
+            patch("agent.openai_primary_mode.opm_enabled", return_value=True),
             patch("agent.openai_primary_mode.opm_suppresses_free_model_fallback", return_value=False),
             patch(
-                "agent.openai_primary_mode.opm_non_gemma_replacement_model",
+                "agent.openai_primary_mode.opm_auxiliary_model",
                 return_value="gemini-2.5-flash",
             ),
         ):
             agent = _make_agent(
-                fallback_model=[{"provider": "gemini", "model": "gemma-4-31b-it"}],
+                fallback_model=[{"provider": "gemini", "model": disallowed_family_fixture_slug()}],
             )
             agent.client = MagicMock()
         assert len(agent._fallback_chain) == 1

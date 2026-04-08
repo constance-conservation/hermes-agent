@@ -21,10 +21,10 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
-    is_gemma_model_id,
-    opm_blocks_gemma,
-    opm_non_gemma_replacement_model,
+    opm_auxiliary_model,
+    opm_enabled,
     resolve_openai_primary_mode,
 )
 from agent.routing_trace import emit_routing_decision_trace
@@ -41,7 +41,7 @@ def _dbg98(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]
     try:
         payload = {
             "sessionId": "98bb66",
-            "runId": "gemma-debug-1",
+            "runId": "tgov-debug-1",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -170,7 +170,7 @@ def apply_token_governance_runtime(agent: Any) -> None:
     # With OpenAI-primary mode + native OpenAI, keep per-turn routing active even if
     # model.default is currently a concrete slug (legacy/stale profile config).
     _, _opm_meta = resolve_openai_primary_mode(agent)
-    if opm_blocks_gemma(agent):
+    if opm_enabled(agent):
         _is_tier_placeholder = True
     agent._model_is_tier_routed = _is_tier_placeholder
     # region agent log
@@ -344,7 +344,7 @@ def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
     _raw = (getattr(child, "model", None) or "").strip()
     _is_tier_placeholder = is_tier_dynamic(_raw) or bool(TIER_SENTINEL_RE.match(_raw))
     _, _opm_meta = resolve_openai_primary_mode(child)
-    if opm_blocks_gemma(child):
+    if opm_enabled(child):
         _is_tier_placeholder = True
     child._model_is_tier_routed = _is_tier_placeholder
     child._last_opm_meta = _opm_meta
@@ -356,14 +356,14 @@ def _opm_clamp_tier_resolved_model(
     user_message: str,
     opm_meta: Dict[str, Any],
 ) -> str:
-    """Under OPM, never keep a per-turn pick on Gemma, Gemini API slugs, or other free stacks.
+    """Under OPM, never keep a per-turn pick on disallowed-family ids, Gemini API slugs, or other free stacks.
 
     Misconfigured ``tier_models``, blocklist replacements, or missed tier upgrades can
-    still yield ``gemma-4-31b-it`` / ``google/gemini-*``. Without this clamp,
+    still yield wrong Google-stack slugs. Without this clamp,
     ``_reconcile_runtime_after_tier_model_change`` may leave the Gemini snapshot
     while the model id is wrong, or keep the subagent on a free tier despite OPM.
     """
-    if not mid or not opm_blocks_gemma(agent):
+    if not mid or not opm_enabled(agent):
         return mid
     mlow = str(mid).lower()
     try:
@@ -372,7 +372,7 @@ def _opm_clamp_tier_resolved_model(
         cost = classify_model_cost(mid)
     except Exception:
         cost = "paid"
-    google_stack = "gemma" in mlow or "gemini" in mlow
+    google_stack = model_id_contains_disallowed_family(mid) or "gemini" in mlow
     if cost != "free" and not google_stack:
         return mid
     try:
@@ -399,9 +399,9 @@ def _opm_clamp_tier_resolved_model(
         repl = str(
             (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
         ).strip()
-        if not repl or is_gemma_model_id(repl):
-            repl = opm_non_gemma_replacement_model(agent)
-        if repl and not is_gemma_model_id(repl):
+        if not repl or model_id_contains_disallowed_family(repl):
+            repl = opm_auxiliary_model(agent)
+        if repl and not model_id_contains_disallowed_family(repl):
             logger.info("openai_primary_mode: clamping tier-mapped model %r → %r", mid, repl)
             return repl
     except Exception:
@@ -415,7 +415,7 @@ def _opm_turn_needs_native_openai_fix(agent: Any, mid: str) -> bool:
     if not m:
         return True
     low = m.lower()
-    if "gemma" in low or "gemini" in low:
+    if model_id_contains_disallowed_family(m) or "gemini" in low:
         return True
     try:
         from agent.subprocess_governance import classify_model_cost
@@ -443,14 +443,14 @@ def enforce_opm_runtime_after_per_turn_routing(agent: Any, user_message: str) ->
 
     Catches early returns inside per-turn routing (``_model_is_tier_routed`` off,
     no runtime cfg on first init path, etc.), wrong HTTP stack for a GPT slug, or
-    any remaining Gemma / Gemini / free model id before the first LLM call.
+    any remaining disallowed-family / Gemini / free model id before the first LLM call.
     """
     try:
-        if not opm_blocks_gemma(agent):
+        if not opm_enabled(agent):
             return
         cur = (getattr(agent, "model", None) or "").strip()
-        gemma_only = is_gemma_model_id(cur)
-        if not gemma_only and not _opm_turn_needs_native_openai_fix(agent, cur):
+        disallowed_only = model_id_contains_disallowed_family(cur)
+        if not disallowed_only and not _opm_turn_needs_native_openai_fix(agent, cur):
             return
         opm_cfg, _ = resolve_openai_primary_mode(agent)
         coding = any(
@@ -475,11 +475,11 @@ def enforce_opm_runtime_after_per_turn_routing(agent: Any, user_message: str) ->
         new_mid = str(
             (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
         ).strip()
-        if (not new_mid or is_gemma_model_id(new_mid)) and gemma_only:
-            new_mid = opm_non_gemma_replacement_model(agent)
+        if (not new_mid or model_id_contains_disallowed_family(new_mid)) and disallowed_only:
+            new_mid = opm_auxiliary_model(agent)
         elif not new_mid:
             return
-        if is_gemma_model_id(new_mid):
+        if model_id_contains_disallowed_family(new_mid):
             return
         logger.info("openai_primary_mode: turn enforcement %r → %r", cur or "(empty)", new_mid)
         agent.model = new_mid
@@ -585,7 +585,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
     _opm_meta = getattr(agent, "_last_opm_meta", None) or {}
-    if opm_blocks_gemma(agent) and tier in ("A", "B", "C"):
+    if opm_enabled(agent) and tier in ("A", "B", "C"):
         _is_coding = any(
             kw in (user_message or "").lower()
             for kw in ("code", "implement", "debug", "refactor", "function",
@@ -625,8 +625,8 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
             audit = {}
 
     # Enforce OpenAI-primary mode after consultant routing too, so no later
-    # router step can drop back to low-cost Gemma tiers when the flag is on.
-    if opm_blocks_gemma(agent) and tier in ("A", "B", "C", "D"):
+    # router step can drop back to low-cost tiers when the flag is on.
+    if opm_enabled(agent) and tier in ("A", "B", "C", "D"):
         _router_rec2 = audit.get("router") if isinstance(audit, dict) else {}
         _coding_hint = bool(
             isinstance(_router_rec2, dict) and _router_rec2.get("coding_task", False)
@@ -668,7 +668,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
         setattr(agent, "_routing_detected_background_task", True)
         logger.info(
             "routing_engine: background task detected — chief orchestrator should be consulted "
-            "before launching subprocess; only free local models (gemma-4-31b-it or local inference) permitted "
+            "before launching subprocess; only free local models (local inference or local/ slugs) permitted "
             "without explicit operator approval"
         )
         emit = getattr(agent, "_emit_status", None)

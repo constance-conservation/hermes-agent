@@ -20,7 +20,10 @@ def test_normalize_kimi_tiers_list_of_dicts():
     assert t[1]["models"] == ["m3"]
 
 
-def test_resolve_fallback_providers_strips_gemma_when_opm_enabled(monkeypatch):
+def test_resolve_fallback_providers_strips_disallowed_when_opm_enabled(monkeypatch):
+    from agent.disallowed_model_family import disallowed_family_fixture_slug
+
+    bad = disallowed_family_fixture_slug()
     monkeypatch.setattr(
         "hermes_cli.config.load_config",
         lambda: {
@@ -29,8 +32,8 @@ def test_resolve_fallback_providers_strips_gemma_when_opm_enabled(monkeypatch):
                 "enabled": True,
                 "filter_free_tier_models_by_local_hub": False,
                 "kimi_router": {
-                    "router_model": "gemma-4-31b-it",
-                    "tiers": [{"id": "t", "models": ["gemma-4-31b-it"]}],
+                    "router_model": bad,
+                    "tiers": [{"id": "t", "models": [bad]}],
                 },
                 "openrouter_last_resort": {"enabled": False},
             },
@@ -45,7 +48,9 @@ def test_resolve_fallback_providers_strips_gemma_when_opm_enabled(monkeypatch):
 
     out = resolve_fallback_providers(load_config())
     assert out
-    assert all("gemma" not in str(e.get("model") or "").lower() for e in out)
+    from agent.disallowed_model_family import model_id_contains_disallowed_family
+
+    assert all(not model_id_contains_disallowed_family(str(e.get("model") or "")) for e in out)
 
 
 def test_resolve_fallback_providers_empty_when_opm_suppresses_native(monkeypatch):
@@ -73,7 +78,7 @@ def test_top_level_tiers_preferred_over_legacy_kimi_router():
             "filter_free_tier_models_by_local_hub": False,
             "tiers": [{"id": "top", "models": ["org/top"]}],
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "legacy", "models": ["org/legacy"]}],
             },
         }
@@ -94,11 +99,11 @@ def test_fallback_tier_when_all_hub_models_filtered(monkeypatch):
         "free_model_routing": {
             "enabled": True,
             "filter_free_tier_models_by_local_hub": True,
-            "fallback_free_routed_model": "gemma-4-31b-it",
-            "gemini_native_tier_models": ["gemma-4-31b-it"],
+            "fallback_free_routed_model": "gemini-2.5-flash",
+            "gemini_native_tier_models": ["gemini-2.5-flash"],
             "kimi_router": {
                 "router_provider": "gemini",
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "local", "models": ["org/local-32b"]}],
             },
         }
@@ -107,7 +112,7 @@ def test_fallback_tier_when_all_hub_models_filtered(monkeypatch):
     assert ch
     assert ch[0].get("gemini_tier_router") is True
     flat = [m for t in ch[0]["gemini_tier_router_tiers"] for m in t["models"]]
-    assert "gemma-4-31b-it" in flat
+    assert "gemini-2.5-flash" in flat
 
 
 def test_build_chain_kimi_then_optional_gemini():
@@ -115,12 +120,12 @@ def test_build_chain_kimi_then_optional_gemini():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
             },
             "optional_gemini": {
                 "enabled": True,
-                "model": "gemma-test",
+                "model": "gemini-test",
                 "only_rate_limit": True,
                 "restore_health_check": True,
             },
@@ -131,9 +136,9 @@ def test_build_chain_kimi_then_optional_gemini():
     assert len(ch) == 2
     assert ch[0]["gemini_tier_router"] is True
     assert ch[0]["provider"] == "gemini"
-    assert ch[0]["model"] == "gemma-4-31b-it"
+    assert ch[0]["model"] == "gemini-2.5-flash"
     assert len(ch[0]["gemini_tier_router_tiers"]) == 1
-    assert "gemma-4-31b-it" in (ch[0].get("gemini_native_tier_models") or [])
+    assert "gemini-2.5-flash" in (ch[0].get("gemini_native_tier_models") or [])
     assert ch[1]["provider"] == "gemini"
 
 
@@ -147,15 +152,15 @@ def test_filtered_tiers_preserve_gemini_native_models(monkeypatch):
             "enabled": True,
             "filter_free_tier_models_by_local_hub": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
-                "tiers": [{"id": "local", "models": ["gemma-4-31b-it", "org/local-32b"]}],
+                "router_model": "gemini-2.5-flash",
+                "tiers": [{"id": "local", "models": ["gemini-2.5-flash", "org/local-32b"]}],
             },
         }
     }
     ch = build_free_fallback_chain(cfg)
     assert ch
     flat = [m for t in ch[0]["gemini_tier_router_tiers"] for m in t["models"]]
-    assert "gemma-4-31b-it" in flat
+    assert "gemini-2.5-flash" in flat
     assert "org/local-32b" not in flat
 
 
@@ -165,7 +170,7 @@ def test_build_chain_router_provider_gemini():
             "enabled": True,
             "kimi_router": {
                 "router_provider": "gemini",
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
             },
             "openrouter_last_resort": {"enabled": False},
@@ -174,7 +179,7 @@ def test_build_chain_router_provider_gemini():
     ch = build_free_fallback_chain(cfg)
     assert len(ch) == 1
     assert ch[0]["provider"] == "gemini"
-    assert ch[0]["model"] == "gemma-4-31b-it"
+    assert ch[0]["model"] == "gemini-2.5-flash"
 
 
 def test_resolve_explicit_fallback_providers_wins():
@@ -194,7 +199,7 @@ def test_resolve_explicit_plain_hf_dropped_for_gemini_synthesis():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
             },
             "openrouter_last_resort": {"enabled": False},
@@ -204,7 +209,7 @@ def test_resolve_explicit_plain_hf_dropped_for_gemini_synthesis():
     assert len(out) == 1
     assert out[0].get("gemini_tier_router") is True
     assert out[0]["provider"] == "gemini"
-    assert out[0]["model"] == "gemma-4-31b-it"
+    assert out[0]["model"] == "gemini-2.5-flash"
 
 
 def test_resolve_legacy_fallback_model_plain_hf_yields_to_gemini():
@@ -216,7 +221,7 @@ def test_resolve_legacy_fallback_model_plain_hf_yields_to_gemini():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
             },
         },
@@ -235,7 +240,7 @@ def test_build_chain_gemini_direct():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
             },
             "openrouter_last_resort": {"enabled": False},
@@ -245,7 +250,7 @@ def test_build_chain_gemini_direct():
     assert len(ch) == 1
     assert ch[0]["gemini_tier_router"] is True
     assert ch[0]["provider"] == "gemini"
-    assert ch[0]["model"] == "gemma-4-31b-it"
+    assert ch[0]["model"] == "gemini-2.5-flash"
 
 
 def test_openrouter_last_resort_appended_by_default():
@@ -253,7 +258,7 @@ def test_openrouter_last_resort_appended_by_default():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a"]}],
             },
         },
@@ -264,7 +269,7 @@ def test_openrouter_last_resort_appended_by_default():
     assert ch[1]["provider"] == "openrouter"
     assert ch[1]["openrouter_last_resort"] is True
     assert ch[1]["only_rate_limit"] is True
-    assert "gemma" in ch[1]["model"]
+    assert "gemini" in ch[1]["model"].lower()
 
 
 def test_openrouter_last_resort_disabled():
@@ -272,7 +277,7 @@ def test_openrouter_last_resort_disabled():
         "free_model_routing": {
             "enabled": True,
             "kimi_router": {
-                "router_model": "gemma-4-31b-it",
+                "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a"]}],
             },
             "openrouter_last_resort": {"enabled": False},
@@ -293,22 +298,27 @@ def test_resolve_legacy_fallback_model_dict():
 # ── classify_model_cost provider-awareness ────────────────────────────
 
 
-def test_classify_gemma_direct_gemini_is_free():
+def test_classify_local_slug_is_free():
     from agent.subprocess_governance import classify_model_cost
 
-    assert classify_model_cost("gemma-4-31b-it") == "free"
-    assert classify_model_cost("gemma-4-31b-it", provider="gemini") == "free"
+    assert classify_model_cost("local/my-model") == "free"
 
 
-def test_classify_gemma_openrouter_is_low_cost():
+def test_classify_gemini_direct_is_low_cost():
+    from agent.subprocess_governance import classify_model_cost
+
+    assert classify_model_cost("gemini-2.5-flash", provider="gemini") == "low_cost"
+
+
+def test_classify_openrouter_gemini_is_paid():
     from agent.subprocess_governance import classify_model_cost
 
     assert classify_model_cost(
-        "google/gemma-4-31b-it", provider="openrouter"
-    ) == "low_cost"
+        "google/gemini-2.5-flash", provider="openrouter"
+    ) == "paid"
     assert classify_model_cost(
-        "gemma-4-31b-it", base_url="https://openrouter.ai/api/v1"
-    ) == "low_cost"
+        "gemini-2.5-flash", base_url="https://openrouter.ai/api/v1"
+    ) == "paid"
 
 
 def test_classify_openrouter_paid_model():

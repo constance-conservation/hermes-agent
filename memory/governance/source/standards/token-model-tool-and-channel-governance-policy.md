@@ -340,7 +340,7 @@ One question should produce one primary model attempt unless policy explicitly a
 
 ## 6.5 Direct-provider fallback when the aggregator is exhausted
 
-When **OpenRouter** (or another **aggregator**) returns **account-level** limits (**402**, **429**, or **403** bodies such as **key limit / credits**, as classified by Hermes), the operator **may** configure a **single ordered fallback chain** to a **direct** provider (e.g. **Google Gemini / Gemma** with a separate API key) so production agents remain available without violating §6.4’s “no spray across providers for the same question” rule.
+When **OpenRouter** (or another **aggregator**) returns **account-level** limits (**402**, **429**, or **403** bodies such as **key limit / credits**, as classified by Hermes), the operator **may** configure a **single ordered fallback chain** to a **direct** provider (e.g. **Google Gemini** with a separate API key) so production agents remain available without violating §6.4’s “no spray across providers for the same question” rule.
 
 - **Implementation and config keys** — read **`policies/core/hermes-model-delegation-and-tier-runtime.md`** § *Provider fallback chain* (code map, `only_rate_limit`, tests).
 - **Do not** use fallback configuration to run **parallel** competing requests solely to bypass limits; one primary plus one **declared** fallback path is the intended pattern.

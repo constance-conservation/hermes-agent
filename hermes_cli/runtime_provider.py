@@ -61,7 +61,7 @@ def _auto_detect_local_model(base_url: str) -> str:
 
 
 def _get_model_config() -> Dict[str, Any]:
-    from agent.tier_model_routing import canonical_gemma_model_id
+    from agent.tier_model_routing import canonical_native_tier_model_id
 
     config = load_config()
     model_cfg = config.get("model")
@@ -70,7 +70,7 @@ def _get_model_config() -> Dict[str, Any]:
         # Accept "model" as alias for "default" (users intuitively write model.model)
         if not cfg.get("default") and cfg.get("model"):
             cfg["default"] = cfg["model"]
-        default = canonical_gemma_model_id((cfg.get("default") or "").strip())
+        default = canonical_native_tier_model_id((cfg.get("default") or "").strip())
         base_url = (cfg.get("base_url") or "").strip()
         is_local = "localhost" in base_url or "127.0.0.1" in base_url
         is_fallback = not default
@@ -82,7 +82,7 @@ def _get_model_config() -> Dict[str, Any]:
             cfg["default"] = default
         return cfg
     if isinstance(model_cfg, str) and model_cfg.strip():
-        return {"default": canonical_gemma_model_id(model_cfg.strip())}
+        return {"default": canonical_native_tier_model_id(model_cfg.strip())}
     return {}
 
 

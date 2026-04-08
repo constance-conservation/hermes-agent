@@ -66,9 +66,9 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
     long-form work, keep the primary model.
     """
     try:
-        from agent.openai_primary_mode import opm_blocks_gemma
+        from agent.openai_primary_mode import opm_enabled
 
-        if opm_blocks_gemma():
+        if opm_enabled():
             return None
     except Exception:
         pass
@@ -86,9 +86,9 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
         return None
 
     try:
-        from agent.openai_primary_mode import is_gemma_model_id
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
 
-        if is_gemma_model_id(model):
+        if model_id_contains_disallowed_family(model):
             return None
     except Exception:
         pass
@@ -124,7 +124,7 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
 
 
 def _apply_opm_model_coercion(out: Dict[str, Any], agent: Any = None) -> Dict[str, Any]:
-    """Under OPM, replace Gemma and ``openrouter/auto`` primary slugs (no agent → config-only OPM)."""
+    """Under OPM, replace disallowed-family ids and ``openrouter/auto`` primary slugs."""
     try:
         from agent.openai_primary_mode import coerce_opm_disallowed_routing_slugs
 

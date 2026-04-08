@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+from agent.disallowed_model_family import model_id_contains_disallowed_family
 
-def test_default_free_subprocess_model_never_gemma_when_opm_enabled(monkeypatch):
+
+def test_default_free_subprocess_model_never_disallowed_family_when_opm_enabled(monkeypatch):
     from agent import subprocess_governance as sg
 
     monkeypatch.setattr(
@@ -12,12 +14,12 @@ def test_default_free_subprocess_model_never_gemma_when_opm_enabled(monkeypatch)
                 "allowed_subprocess_models": ["gpt-5.4"],
                 "default_model": "gpt-5.4",
             },
-            "free_model_routing": {"gemini_native_tier_models": ["gemma-4-31b-it"]},
+            "free_model_routing": {"gemini_native_tier_models": ["gemini-2.5-flash"]},
         },
     )
     monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
     mid = sg.default_free_subprocess_model_id(None)
-    assert "gemma" not in mid.lower()
+    assert not model_id_contains_disallowed_family(mid)
     assert mid == "gpt-5.4"
 
 

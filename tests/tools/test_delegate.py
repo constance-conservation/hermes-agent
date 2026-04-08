@@ -16,6 +16,7 @@ import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
+from agent.disallowed_model_family import disallowed_family_fixture_slug
 from tools.delegate_tool import (
     DELEGATE_BLOCKED_TOOLS,
     DELEGATE_TASK_SCHEMA,
@@ -53,10 +54,15 @@ def _make_mock_parent(depth=0):
 
 
 class TestDelegationCredsOpmUplift(unittest.TestCase):
-    def test_detects_gemini_gemma_stack(self):
+    def test_detects_disallowed_family_on_gemini_stack(self):
+        bad = disallowed_family_fixture_slug()
         self.assertTrue(
             _delegation_creds_need_opm_uplift(
-                {"model": "gemma-4-31b-it", "provider": "gemini", "base_url": "https://generativelanguage.googleapis.com"}
+                {
+                    "model": bad,
+                    "provider": "gemini",
+                    "base_url": "https://generativelanguage.googleapis.com",
+                }
             )
         )
 
@@ -375,7 +381,7 @@ class TestToolNamePreservation(unittest.TestCase):
                 )
 
     def test_delegate_child_omits_fallback_model_kwarg(self):
-        """Gemma fallback is cleared inside AIAgent.__init__ when OPM applies; delegate stays simple."""
+        """Disallowed-family fallback is cleared inside AIAgent.__init__ when OPM applies; delegate stays simple."""
         parent = _make_mock_parent(depth=0)
         with patch("run_agent.AIAgent") as MockAgent:
             MockAgent.return_value = MagicMock()
@@ -634,44 +640,28 @@ class TestDelegationCredentialResolution(unittest.TestCase):
         self.assertIsNone(creds["base_url"])
         self.assertIsNone(creds["api_key"])
 
-    @patch("hermes_cli.runtime_provider.resolve_runtime_provider")
-    def test_gemma_prefers_direct_gemini_before_openrouter(self, mock_resolve):
-        """Gemma delegation must use direct Gemini first when provider is unspecified."""
-        mock_resolve.side_effect = [
-            {
-                "provider": "gemini",
-                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-                "api_key": "gemini-key",
-                "api_mode": "chat_completions",
-            }
-        ]
+    def test_disallowed_delegation_model_rewritten_to_gemini_flash_when_opm_off(self):
         parent = _make_mock_parent(depth=0)
-        cfg = {"model": "gemma-4-31b-it", "provider": ""}
+        cfg = {"model": disallowed_family_fixture_slug(), "provider": ""}
         creds = _resolve_delegation_credentials(cfg, parent)
-        self.assertEqual(creds["provider"], "gemini")
-        self.assertEqual(creds["model"], "gemma-4-31b-it")
-        self.assertIn("generativelanguage.googleapis.com", creds["base_url"])
-        self.assertEqual(mock_resolve.call_args_list[0].kwargs, {"requested": "gemini"})
+        self.assertEqual(creds["model"], "gemini-2.5-flash")
+        self.assertIsNone(creds["provider"])
 
     @patch("hermes_cli.runtime_provider.resolve_runtime_provider")
-    def test_gemma_falls_back_to_openrouter_only_when_gemini_unavailable(self, mock_resolve):
-        """If Gemini cannot be resolved, Gemma delegation can use OpenRouter last."""
-        mock_resolve.side_effect = [
-            RuntimeError("gemini unavailable"),
-            {
-                "provider": "openrouter",
-                "base_url": "https://openrouter.ai/api/v1",
-                "api_key": "or-key",
-                "api_mode": "chat_completions",
-            },
-        ]
+    def test_gemini_provider_resolves_full_creds(self, mock_resolve):
+        mock_resolve.return_value = {
+            "provider": "gemini",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "api_key": "gemini-key",
+            "api_mode": "chat_completions",
+        }
         parent = _make_mock_parent(depth=0)
-        cfg = {"model": "gemma-4-31b-it", "provider": ""}
+        cfg = {"model": "gemini-2.5-flash", "provider": "gemini"}
         creds = _resolve_delegation_credentials(cfg, parent)
-        self.assertEqual(creds["provider"], "openrouter")
-        self.assertEqual(creds["model"], "google/gemma-4-31b-it")
-        self.assertEqual(mock_resolve.call_args_list[0].kwargs, {"requested": "gemini"})
-        self.assertEqual(mock_resolve.call_args_list[1].kwargs, {"requested": "openrouter"})
+        self.assertEqual(creds["provider"], "gemini")
+        self.assertEqual(creds["model"], "gemini-2.5-flash")
+        self.assertIn("generativelanguage.googleapis.com", creds["base_url"] or "")
+        mock_resolve.assert_called_once_with(requested="gemini")
 
     @patch("hermes_cli.runtime_provider.resolve_runtime_provider")
     def test_provider_resolves_full_credentials(self, mock_resolve):
@@ -828,11 +818,11 @@ class TestDelegationCredentialResolution(unittest.TestCase):
     @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
     @patch("hermes_cli.config.load_config")
     @patch("agent.token_governance_runtime.load_runtime_config")
-    def test_openai_primary_mode_overrides_stale_gemma_delegation_default(
+    def test_openai_primary_mode_overrides_stale_disallowed_delegation_default(
         self, mock_load_rt, mock_load_cfg, mock_native
     ):
         parent = _make_mock_parent(depth=0)
-        cfg = {"model": "gemma-4-31b-it", "provider": "", "base_url": ""}
+        cfg = {"model": disallowed_family_fixture_slug(), "provider": "", "base_url": ""}
         mock_load_rt.return_value = {}
         mock_load_cfg.return_value = {
             "openai_primary_mode": {
@@ -873,10 +863,10 @@ class TestDelegationCredentialResolution(unittest.TestCase):
 
     @patch("agent.openai_native_runtime.native_openai_runtime_tuple")
     @patch("agent.token_governance_runtime.load_runtime_config")
-    def test_openai_primary_mode_rewrites_tier_dynamic_gemma_to_gpt(
+    def test_openai_primary_mode_rewrites_tier_dynamic_disallowed_to_gpt(
         self, mock_load_rt, mock_native
     ):
-        """tier:dynamic resolving to Gemma must become native GPT delegation under OPM."""
+        """tier:dynamic resolving to a disallowed id must become native GPT delegation under OPM."""
         parent = _make_mock_parent(depth=0)
         parent._token_governance_cfg = {
             "enabled": True,
@@ -885,7 +875,7 @@ class TestDelegationCredentialResolution(unittest.TestCase):
                 "default_model": "gpt-5.4",
                 "codex_model": "gpt-5.3-codex",
             },
-            "tier_models": {"B": "gemma-4-31b-it"},
+            "tier_models": {"B": disallowed_family_fixture_slug()},
         }
         mock_load_rt.return_value = {}
         mock_native.return_value = ("https://api.openai.com/v1", "openai-key")
@@ -941,12 +931,12 @@ class TestDelegationProviderIntegration(unittest.TestCase):
     @patch("hermes_cli.config.load_config")
     @patch("tools.delegate_tool._load_config")
     @patch("tools.delegate_tool._resolve_delegation_credentials")
-    def test_delegate_task_final_opm_guard_overrides_gemma_result(
+    def test_delegate_task_final_opm_guard_overrides_disallowed_stack_result(
         self, mock_creds, mock_cfg, mock_load_cfg, mock_native
     ):
         mock_cfg.return_value = {"max_iterations": 45, "model": "", "provider": ""}
         mock_creds.return_value = {
-            "model": "gemma-4-31b-it",
+            "model": disallowed_family_fixture_slug(),
             "provider": "gemini",
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
             "api_key": "gkey",
@@ -1141,12 +1131,15 @@ class TestDelegationProviderIntegration(unittest.TestCase):
 
     @patch("tools.delegate_tool._build_child_agent")
     @patch("agent.subprocess_governance.is_free_subprocess_model", return_value=True)
-    @patch("agent.subprocess_governance.default_free_subprocess_model_id", return_value="gemma-4-31b-it")
+    @patch(
+        "agent.subprocess_governance.default_free_subprocess_model_id",
+        return_value="gemini-2.5-flash",
+    )
     @patch(
         "agent.subprocess_governance.enforce_subprocess_model_policy",
         return_value=(False, "denied_paid_model:gpt-5.4"),
     )
-    def test_opm_denied_paid_model_does_not_autofallback_to_gemma(
+    def test_opm_denied_paid_model_does_not_autofallback_to_free_tier_model(
         self,
         _mock_policy,
         _mock_default_free,

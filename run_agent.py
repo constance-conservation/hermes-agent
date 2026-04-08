@@ -536,15 +536,15 @@ class AIAgent:
         if model is None:
             self.model = None
         else:
-            from agent.openai_primary_mode import opm_blocks_gemma
-            from agent.tier_model_routing import canonical_gemma_model_id
+            from agent.openai_primary_mode import opm_enabled
+            from agent.tier_model_routing import canonical_native_tier_model_id
 
-            # Do not canonicalize to Gemma-4-31b when OPM forbids Gemma. Use *opm_merge_parent*
+            # Do not expand legacy short aliases to a concrete id when OPM is on. Use *opm_merge_parent*
             # (chief) when set so delegated children see OPM before self._opm_merge_parent is stored.
-            if opm_blocks_gemma(opm_merge_parent):
+            if opm_enabled(opm_merge_parent):
                 self.model = str(model).strip()
             else:
-                self.model = canonical_gemma_model_id(model)
+                self.model = canonical_native_tier_model_id(model)
         # CLI /models → Choose-Router: force consultant router LLM stack for the session.
         self._router_session_override = (
             dict(router_session_override) if isinstance(router_session_override, dict) else None
@@ -616,11 +616,11 @@ class AIAgent:
         except Exception:
             logger.debug("token_governance_runtime apply failed", exc_info=True)
 
-        # OpenAI-primary mode: never Gemma; also block OpenRouter auto-router (can pick Gemma).
+        # OpenAI-primary mode: coerce disallowed ids; block OpenRouter auto-router.
         try:
-            from agent.openai_primary_mode import coerce_opm_disallowed_routing_slugs, opm_blocks_gemma
+            from agent.openai_primary_mode import coerce_opm_disallowed_routing_slugs, opm_enabled
 
-            if self.model and opm_blocks_gemma(self):
+            if self.model and opm_enabled(self):
                 prev = str(self.model).strip()
                 new_m = str(coerce_opm_disallowed_routing_slugs(prev, self) or "").strip()
                 if new_m and new_m != prev:
@@ -970,24 +970,24 @@ class AIAgent:
         except Exception:
             pass
         # Explicit fallback_providers from config (e.g. gateway) bypass resolve_fallback_providers;
-        # strip Gemma whenever OPM is enabled — same as _opm_finalize_fallback_chain.
+        # strip disallowed-family rows whenever OPM is enabled — same as _opm_finalize_fallback_chain.
         try:
             from agent.openai_primary_mode import (
-                filter_fallback_chain_strip_gemma,
-                opm_blocks_gemma,
-                opm_non_gemma_replacement_model,
+                filter_fallback_chain_disallowed,
+                opm_enabled,
+                opm_auxiliary_model,
                 opm_suppresses_free_model_fallback,
             )
 
-            if opm_blocks_gemma(self) and self._fallback_chain:
-                self._fallback_chain = filter_fallback_chain_strip_gemma(self._fallback_chain)
+            if opm_enabled(self) and self._fallback_chain:
+                self._fallback_chain = filter_fallback_chain_disallowed(self._fallback_chain)
                 if not self._fallback_chain and not opm_suppresses_free_model_fallback(self):
-                    _aux = opm_non_gemma_replacement_model(self)
+                    _aux = opm_auxiliary_model(self)
                     self._fallback_chain = [
                         {"provider": "gemini", "model": _aux, "only_rate_limit": False}
                     ]
         except Exception:
-            logger.debug("opm fallback chain gemma strip failed", exc_info=True)
+            logger.debug("opm fallback chain disallowed strip failed", exc_info=True)
         self._fallback_index = 0
         self._fallback_activated = False
         # Legacy attribute kept for backward compat (tests, external callers)
@@ -2658,6 +2658,8 @@ class AIAgent:
         nous_subscription_prompt = build_nous_subscription_prompt(self.valid_tool_names)
         if nous_subscription_prompt:
             prompt_parts.append(nous_subscription_prompt)
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+
         # Tool-use enforcement: tells the model to actually call tools instead
         # of describing intended actions.  Controlled by config.yaml
         # agent.tool_use_enforcement:
@@ -2684,7 +2686,7 @@ class AIAgent:
                 # Google model operational guidance (conciseness, absolute
                 # paths, parallel tool calls, verify-before-edit, etc.)
                 _model_lower = (self.model or "").lower()
-                if "gemini" in _model_lower or "gemma" in _model_lower:
+                if "gemini" in _model_lower or model_id_contains_disallowed_family(self.model or ""):
                     prompt_parts.append(GOOGLE_MODEL_OPERATIONAL_GUIDANCE)
 
         # so it can refer the user to them rather than reinventing answers.
@@ -2768,7 +2770,7 @@ class AIAgent:
 
         _prov_l = (self.provider or "").strip().lower()
         _model_l = (self.model or "").strip().lower()
-        if _prov_l == "gemini" or "gemini" in _model_l or "gemma" in _model_l:
+        if _prov_l == "gemini" or "gemini" in _model_l or model_id_contains_disallowed_family(self.model or ""):
             prompt_parts.append(
                 "You run on Google's Gemini (Google AI) family. "
                 f"The configured inference provider is `{self.provider or 'gemini'}` "
@@ -4798,7 +4800,7 @@ class AIAgent:
         Used for eager fallback, retry backoff, and primary health probes.  OpenRouter
         and similar aggregators often return 402 or credit-related messages when the
         account has no balance — treat like quota so ``only_rate_limit`` fallback can
-        switch to a direct provider (e.g. Gemini/Gemma).
+        switch to a direct provider (e.g. Gemini).
 
         HTTP 403 is usually auth — except aggregators that return 403 for **key/credit
         limits** (e.g. OpenRouter ``Key limit exceeded (total limit)``).  Those are
@@ -4955,7 +4957,7 @@ class AIAgent:
         """True when fallback should run even if ``only_rate_limit: true`` (first chain entry).
 
         Invalid model IDs and similar request/config errors won't recover by retrying the
-        same primary — Gemma/HF fallback must be allowed (same class of fix as quota-style).
+        same primary — direct-Gemini fallback must be allowed (same class of fix as quota-style).
         """
         low = (error_msg or "").lower()
         if any(
@@ -4974,18 +4976,18 @@ class AIAgent:
             return True
         return False
 
-    def _opm_reconcile_primary_if_gemma(self) -> None:
-        """Hard block: with OPM enabled, primary ``self.model`` must never stay on Gemma.
+    def _opm_reconcile_primary_if_disallowed(self) -> None:
+        """Hard block: with OPM enabled, primary ``self.model`` must not stay on a disallowed family id.
 
-        Also coerces ``openrouter/auto`` (server-side router can select Gemma without ``gemma`` in the slug).
+        Also coerces ``openrouter/auto`` (unpredictable downstream routing).
 
         Called every main-loop iteration and at API chokepoints (:meth:`_build_api_kwargs`,
         :meth:`_openai_compatible_model_param`, memory flush, iteration-limit summary).
         """
         try:
+            from agent.disallowed_model_family import model_id_contains_disallowed_family
             from agent.openai_primary_mode import (
                 coerce_opm_disallowed_routing_slugs,
-                is_gemma_model_id,
                 is_opm_blocked_openrouter_auto_slug,
             )
 
@@ -5004,7 +5006,7 @@ class AIAgent:
                 reason = (
                     "coerce_openrouter_auto_primary"
                     if is_opm_blocked_openrouter_auto_slug(prev)
-                    else "coerce_gemma_off_primary"
+                    else "coerce_disallowed_family_primary"
                 )
                 emit_routing_decision_trace(
                     stage="opm_hard_gate",
@@ -5021,18 +5023,18 @@ class AIAgent:
                 )
             except Exception:
                 pass
-            if is_gemma_model_id(str(self.model or "")):
+            if model_id_contains_disallowed_family(str(self.model or "")):
                 logger.warning(
-                    "openai_primary_mode: coerce left Gemma on model=%r — forcing replacement slug",
+                    "openai_primary_mode: coerce left disallowed family on model=%r — forcing replacement slug",
                     self.model,
                 )
-                from agent.openai_primary_mode import opm_non_gemma_replacement_model
+                from agent.openai_primary_mode import opm_auxiliary_model
 
-                self.model = opm_non_gemma_replacement_model(self)
+                self.model = opm_auxiliary_model(self)
                 if hasattr(self, "_reconcile_runtime_after_tier_model_change"):
                     self._reconcile_runtime_after_tier_model_change()
         except Exception:
-            logger.debug("_opm_reconcile_primary_if_gemma failed", exc_info=True)
+            logger.debug("_opm_reconcile_primary_if_disallowed failed", exc_info=True)
 
     def _try_activate_fallback(self, *, triggered_by_rate_limit: bool = False) -> bool:
         """Switch to the next fallback model/provider in the chain.
@@ -5163,18 +5165,19 @@ class AIAgent:
             return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # skip invalid, try next
 
         try:
-            from agent.openai_primary_mode import opm_blocks_gemma, is_gemma_model_id
+            from agent.disallowed_model_family import model_id_contains_disallowed_family
+            from agent.openai_primary_mode import opm_enabled
 
-            if opm_blocks_gemma(self) and is_gemma_model_id(fb_model):
+            if opm_enabled(self) and model_id_contains_disallowed_family(fb_model):
                 logging.warning(
-                    "openai_primary_mode: skipping Gemma fallback %r — trying next chain entry",
+                    "openai_primary_mode: skipping disallowed-family fallback %r — trying next chain entry",
                     fb_model,
                 )
                 return self._try_activate_fallback(
                     triggered_by_rate_limit=triggered_by_rate_limit
                 )
         except Exception:
-            logger.debug("opm Gemma fallback gate failed", exc_info=True)
+            logger.debug("opm disallowed-family fallback gate failed", exc_info=True)
 
         # Use centralized router for client construction.
         # raw_codex=True because the main agent needs direct responses.stream()
@@ -5260,7 +5263,7 @@ class AIAgent:
                     fb_context_length * self.context_compressor.threshold_percent
                 )
 
-            self._opm_reconcile_primary_if_gemma()
+            self._opm_reconcile_primary_if_disallowed()
 
             _or_last = fb.get("openrouter_last_resort", False)
             if _or_last:
@@ -5619,7 +5622,7 @@ class AIAgent:
 
     def _openai_compatible_model_param(self) -> str:
         """Model id for OpenAI-compatible ``chat.completions`` (native Gemini API rejects ``google/…`` slugs)."""
-        self._opm_reconcile_primary_if_gemma()
+        self._opm_reconcile_primary_if_disallowed()
         m = self.model
         if not m:
             return m
@@ -5633,7 +5636,7 @@ class AIAgent:
 
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Build the keyword arguments dict for the active API mode."""
-        self._opm_reconcile_primary_if_gemma()
+        self._opm_reconcile_primary_if_disallowed()
         if self.api_mode == "anthropic_messages":
             from agent.anthropic_adapter import build_anthropic_kwargs
             anthropic_messages = self._prepare_anthropic_messages_for_api(api_messages)
@@ -6105,7 +6108,7 @@ class AIAgent:
         messages.append(flush_msg)
 
         try:
-            self._opm_reconcile_primary_if_gemma()
+            self._opm_reconcile_primary_if_disallowed()
             # Build API messages for the flush call
             _is_strict_api = "api.mistral.ai" in self._base_url_lower
             api_messages = []
@@ -6977,7 +6980,7 @@ class AIAgent:
         messages.append({"role": "user", "content": summary_request})
 
         try:
-            self._opm_reconcile_primary_if_gemma()
+            self._opm_reconcile_primary_if_disallowed()
             # Build API messages, stripping internal-only fields
             # (finish_reason, reasoning) that strict APIs like Mistral reject with 422
             _is_strict_api = "api.mistral.ai" in self._base_url_lower
@@ -7587,7 +7590,7 @@ class AIAgent:
                     and "skill_manage" in self.valid_tool_names):
                 self._iters_since_skill += 1
 
-            self._opm_reconcile_primary_if_gemma()
+            self._opm_reconcile_primary_if_disallowed()
 
             # Prepare messages for API call
             # If we have an ephemeral system prompt, prepend it to the messages
@@ -8323,7 +8326,7 @@ class AIAgent:
                         # Only defer for **429** rate limits; 402/403 billing or key
                         # caps (e.g. OpenRouter "Key limit exceeded") are account-wide
                         # — another pooled key will not help, but ``only_rate_limit``
-                        # fallback (e.g. direct Gemini/Gemma) must run.
+                        # fallback (e.g. direct Gemini) must run.
                         pool = self._credential_pool
                         pool_may_recover = (
                             pool is not None

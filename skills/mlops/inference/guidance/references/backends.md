@@ -224,8 +224,8 @@ lm = Transformers("mistralai/Mixtral-8x7B-Instruct-v0.1")
 # Qwen (Alibaba)
 lm = Transformers("Qwen/Qwen2.5-7B-Instruct")
 
-# Gemma (Google)
-lm = Transformers("google/gemma-2-9b-it")
+# Smaller instruct checkpoints (example)
+lm = Transformers("meta-llama/Llama-3.2-3B-Instruct")
 ```
 
 #### Generation Configuration

@@ -155,7 +155,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
         "gemini-1.5-flash",
-        "gemma-4-31b-it",
     ],
     "opencode-zen": [
         "gpt-5.4-pro",

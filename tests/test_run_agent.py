@@ -232,7 +232,7 @@ class TestStripThinkBlocks:
         assert "answer" in result
 
     def test_thought_block_removed(self, agent):
-        """Gemma / some Gemini outputs use <thought>...</thought> before the answer."""
+        """Some Gemini outputs use <thought>...</thought> before the answer."""
         raw = "<thought>The user said ping; respond briefly.</thought>pong"
         result = agent._strip_think_blocks(raw)
         assert "user said ping" not in result

@@ -165,7 +165,7 @@ We currently default to OpenAI format for dataset keys, so if that’s your curr
 
 If your dataset format is different, here are the keys you should check (with their defaults):
 
-In some chat_templates (e.g. Gemma), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
+In some chat_templates (e.g. fixed-role templates), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
 
 In the example above, all gpt and model values are converted to assistant. All human values are converted to user.
 
@@ -270,7 +270,7 @@ We recommend checking the below examples for other usecases.
 
 If you receive an error like “chat_template choice is tokenizer_default but tokenizer’s chat_template is null.”, it means the tokenizer does not have a default chat_template. Follow the examples below instead to set a custom chat_template.
 
-Using the gemma chat template to override the tokenizer_config.json’s chat template on OpenAI messages format, training on all assistant messages.
+Using the llama3 chat template to override the tokenizer_config.json’s chat template on OpenAI messages format, training on all assistant messages.
 
 If you want to use built-in chat_template, use chat_template: tokenizer_default (this is set by default).
 
@@ -340,7 +340,7 @@ datasets:
       role: from
       content: value
 
-# new (if setting a new chat_template like chatml, gemma, etc)
+# new (if setting a new chat_template like chatml, llama3, etc)
 chat_template: chatml
 datasets:
   - path: ...
@@ -363,7 +363,7 @@ datasets:
 
 Example 4 (yaml):
 ```yaml
-chat_template: gemma # this overwrites the tokenizer's chat_template
+chat_template: llama3 # this overwrites the tokenizer's chat_template
 datasets:
   - path: ...
     type: chat_template
@@ -633,7 +633,7 @@ We currently default to OpenAI format for dataset keys, so if that’s your curr
 
 If your dataset format is different, here are the keys you should check (with their defaults):
 
-In some chat_templates (e.g. Gemma), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
+In some chat_templates (e.g. fixed-role templates), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
 
 In the example above, all gpt and model values are converted to assistant. All human values are converted to user.
 
@@ -846,7 +846,7 @@ We currently default to OpenAI format for dataset keys, so if that’s your curr
 
 If your dataset format is different, here are the keys you should check (with their defaults):
 
-In some chat_templates (e.g. Gemma), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
+In some chat_templates (e.g. fixed-role templates), the roles are hardcoded to user and assistant. Consequently, you may find it necessary to map the roles in your dataset to these above. We currently have some defaults that should work for common datasets, but if you get a KeyError, it would be necessary to add mapping for your roles. Here is an example of how it would look like:
 
 In the example above, all gpt and model values are converted to assistant. All human values are converted to user.
 

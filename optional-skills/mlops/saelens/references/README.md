@@ -66,5 +66,5 @@ SAEs decompose dense neural activations into sparse, interpretable features:
 | Release | Model | Description |
 |---------|-------|-------------|
 | `gpt2-small-res-jb` | GPT-2 Small | Residual stream SAEs |
-| `gemma-2b-res` | Gemma 2B | Residual stream SAEs |
+| `example-tiny-lm-res` | Tiny LM (example) | Residual stream SAEs |
 | Various | Search HuggingFace | Community-trained SAEs |

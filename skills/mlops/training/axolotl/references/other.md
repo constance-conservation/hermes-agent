@@ -448,7 +448,7 @@ Please make sure to install vision lib via pip install 'mistral-common[opencv]==
 
 Please make sure to install audio lib via pip3 install librosa==0.11.0 'mistral_common[audio]==1.8.3'
 
-The Gemma3-1B model is a text-only model, so please train as regular text model.
+Small text-only base models should be trained as regular text models (no vision head).
 
 For multi-modal 4B/12B/27B models, use the following config:
 
@@ -556,13 +556,13 @@ Please see stepwise_supervised for more details on the dataset format.
 
 Example 1 (yaml):
 ```yaml
-base_model: google/gemma-2-2b
+base_model: Qwen/Qwen2.5-1.5B-Instruct
 model_type: AutoModelForSequenceClassification
 num_labels: 1
 tokenizer_type: AutoTokenizer
 
 reward_model: true
-chat_template: gemma
+chat_template: llama3
 datasets:
   - path: argilla/distilabel-intel-orca-dpo-pairs
     type: bradley_terry.chat_template
@@ -1842,7 +1842,7 @@ datasets: Annotated[list[SFTDataset | DPODataset | KTODataset | StepwiseSupervis
   # tokenizer_default: Uses the chat template that is available in the
   # tokenizer_config.json. If the chat template is not available in the tokenizer, it
   # will raise an error. This is the default.
-  # alpaca/inst/chatml/gemma/cohere/llama3/phi_3/deepseek_v2/jamba: These chat templates
+  # alpaca/inst/chatml/llama3/cohere/phi_3/deepseek_v2/jamba: These chat templates
   # are available in the axolotl codebase at src/axolotl/utils/chat_templates.py.
   # tokenizer_default_fallback_*: where * is the name of the chat template to fallback
   # to if the tokenizer does not have a chat template else default to tokenizer. E.g.
@@ -1999,7 +1999,7 @@ test_datasets: Annotated[list[SFTDataset | DPODataset | KTODataset | StepwiseSup
   # tokenizer_default: Uses the chat template that is available in the
   # tokenizer_config.json. If the chat template is not available in the tokenizer, it
   # will raise an error. This is the default.
-  # alpaca/inst/chatml/gemma/cohere/llama3/phi_3/deepseek_v2/jamba: These chat templates
+  # alpaca/inst/chatml/llama3/cohere/phi_3/deepseek_v2/jamba: These chat templates
   # are available in the axolotl codebase at src/axolotl/utils/chat_templates.py.
   # tokenizer_default_fallback_*: where * is the name of the chat template to fallback
   # to if the tokenizer does not have a chat template else default to tokenizer. E.g.
@@ -2183,7 +2183,7 @@ pretraining_dataset: Annotated[list[PretrainingDataset | SFTDataset], MinLen(1)]
   # tokenizer_default: Uses the chat template that is available in the
   # tokenizer_config.json. If the chat template is not available in the tokenizer, it
   # will raise an error. This is the default.
-  # alpaca/inst/chatml/gemma/cohere/llama3/phi_3/deepseek_v2/jamba: These chat templates
+  # alpaca/inst/chatml/llama3/cohere/phi_3/deepseek_v2/jamba: These chat templates
   # are available in the axolotl codebase at src/axolotl/utils/chat_templates.py.
   # tokenizer_default_fallback_*: where * is the name of the chat template to fallback
   # to if the tokenizer does not have a chat template else default to tokenizer. E.g.
@@ -2664,7 +2664,7 @@ low_cpu_mem_usage: bool | None
 # tokenizer_default: Uses the chat template that is available in the
 # tokenizer_config.json. If the chat template is not available in the tokenizer, it will
 # raise an error. This is the default value.
-# alpaca/inst/chatml/gemma/cohere/llama3/phi_3/deepseek_v2/jamba: These chat templates
+# alpaca/inst/chatml/llama3/cohere/phi_3/deepseek_v2/jamba: These chat templates
 # are available in the axolotl codebase at src/axolotl/utils/chat_templates.py.
 # tokenizer_default_fallback_*: where * is the name of the chat template to fallback to.
 # E.g. tokenizer_default_fallback_chatml. This is useful when the chat template is not

@@ -5,8 +5,8 @@ Enforces that all background tasks and delegated subagents use only truly free
 before a subprocess or background task can run.
 
 TRULY FREE models (zero API cost — local inference only):
-  - Gemma-4 on Gemini API (``gemma-4-31b-it``) and matching local slugs; alternate ``gemma4`` spellings
   - Any model served via HERMES_LOCAL_INFERENCE_BASE_URL (self-hosted)
+  - Slugs under ``local/`` (self-hosted naming convention)
 
 LOW-COST models (Gemini API — small but non-zero cost per call):
   - google/gemini-2.5-flash, google/gemini-2.5-flash-lite, google/gemini-2.5-pro
@@ -39,10 +39,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
-    is_gemma_model_id,
-    opm_blocks_gemma,
-    opm_non_gemma_replacement_model,
+    opm_auxiliary_model,
+    opm_enabled,
     resolve_openai_primary_mode,
 )
 from agent.routing_trace import emit_routing_decision_trace
@@ -57,8 +57,6 @@ SUBPROCESS_MAX_SECONDS: int = 300  # 5 minutes hard limit
 
 # Substrings that identify models treated as free for subprocess policy (see classify_model_cost).
 _FREE_LOCAL_MODEL_SUBSTRINGS: tuple[str, ...] = (
-    "gemma-4-31b-it",
-    "gemma4",
     "local/",       # catch-all for self-hosted slugs prefixed with "local/"
 )
 
@@ -87,18 +85,17 @@ def _has_local_inference_url() -> bool:
 def classify_model_cost(model_id: str, *, provider: str = "", base_url: str = "") -> str:
     """Return 'free', 'low_cost', or 'paid' for a given model ID.
 
-    'free'     = zero API cost (direct Gemini API for gemma-4-31b-it, or local inference).
+    'free'     = zero API cost (local inference only, or local/ slugs when policy matches).
     'low_cost' = Gemini API calls (gemini-* models) — small cost, NOT free.
     'paid'     = mid/high-cost API model, or ANY model routed through OpenRouter.
 
     The *provider* and *base_url* parameters allow distinguishing the same model
-    name served via different backends.  ``gemma-4-31b-it`` via direct Gemini API
-    is free; the same model via OpenRouter is paid (OpenRouter charges for every
-    model it proxies).
+    name served via different backends. Any model via OpenRouter is at least
+    low_cost (OpenRouter charges for every proxied model).
     """
-    from agent.tier_model_routing import canonical_gemma_model_id
+    from agent.tier_model_routing import canonical_native_tier_model_id
 
-    mid = canonical_gemma_model_id((model_id or "").strip()).lower()
+    mid = canonical_native_tier_model_id((model_id or "").strip()).lower()
     prov = (provider or "").strip().lower()
     burl = (base_url or "").strip().lower()
 
@@ -108,16 +105,14 @@ def classify_model_cost(model_id: str, *, provider: str = "", base_url: str = ""
         or "openrouter.ai" in burl
     )
 
-    # OpenRouter charges for every model — never free, always at least low_cost
+    # OpenRouter charges for every model — never free
     if _is_openrouter:
-        if any(s in mid for s in _FREE_LOCAL_MODEL_SUBSTRINGS):
-            return "low_cost"
         return "paid"
 
     # Local inference base URL makes any model effectively free
     if _has_local_inference_url():
         return "free"
-    # Free models by slug (direct Gemini API or local)
+    # Free models by slug (local naming only)
     if any(s in mid for s in _FREE_LOCAL_MODEL_SUBSTRINGS):
         return "free"
     # Gemini API: low-cost but not free
@@ -139,25 +134,24 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     """Model id used when auto-falling back from a blocked paid subprocess model.
 
     Reads ``free_model_routing.gemini_native_tier_models[0]`` from config when present,
-    else ``gemma-4-31b-it`` (Gemma-4 on Gemini API — classified as *free* for subprocess policy).
+    else first ``gemini_native_tier_models`` entry from config.
 
-    When ``openai_primary_mode.enabled``, never returns a Gemma id (allowed subprocess /
-    default_model / non-Gemma auxiliary).
+    When ``openai_primary_mode.enabled``, never returns a disallowed-family id (uses OPM defaults / auxiliary).
     """
     try:
-        if opm_blocks_gemma(parent_agent):
+        if opm_enabled(parent_agent):
             opm_cfg, _ = resolve_openai_primary_mode(parent_agent)
             allowed = opm_cfg.get("allowed_subprocess_models") or []
             if isinstance(allowed, list):
                 for a in allowed:
                     s = str(a).strip()
-                    if s and not is_gemma_model_id(s):
+                    if s and not model_id_contains_disallowed_family(s):
                         return s
             for key in ("default_model", "codex_model"):
                 s = str(opm_cfg.get(key) or "").strip()
-                if s and not is_gemma_model_id(s):
+                if s and not model_id_contains_disallowed_family(s):
                     return s
-            return opm_non_gemma_replacement_model(parent_agent)
+            return opm_auxiliary_model(parent_agent)
     except Exception:
         pass
     try:
@@ -169,16 +163,16 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
         if isinstance(gn, list) and gn:
             for entry in gn:
                 mid = str(entry).strip()
-                if mid and (not opm_blocks_gemma(parent_agent) or not is_gemma_model_id(mid)):
+                if mid and (not opm_enabled(parent_agent) or not model_id_contains_disallowed_family(mid)):
                     return mid
     except Exception:
         pass
-    if opm_blocks_gemma(parent_agent):
+    if opm_enabled(parent_agent):
         try:
-            return opm_non_gemma_replacement_model(parent_agent)
+            return opm_auxiliary_model(parent_agent)
         except Exception:
             return "gemini-2.5-flash"
-    return "gemma-4-31b-it"
+    return "gemini-2.5-flash"
 
 
 def requires_operator_approval(model_id: str) -> bool:
@@ -281,7 +275,7 @@ def request_operator_approval(
         f"A background task wants to use a {cost_label} model:\n"
         f"  Model:  {model_id}\n"
         f"  Goal:   {goal[:120]}\n"
-        f"\nBackground tasks should only use free local models (gemma-4-31b-it or local inference).\n"
+        f"\nBackground tasks should only use free local models (local inference or local/ slugs).\n"
         f"Approve this subprocess to proceed with the paid model? [y/N]: "
     )
 

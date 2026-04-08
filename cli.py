@@ -1657,14 +1657,14 @@ class HermesCLI:
         changed = False
 
         try:
-            from agent.tier_model_routing import canonical_gemma_model_id
+            from agent.tier_model_routing import canonical_native_tier_model_id
 
-            canon = canonical_gemma_model_id(current_model)
+            canon = canonical_native_tier_model_id(current_model)
             if canon != current_model:
                 if not self._model_is_default:
                     self.console.print(
                         f"[yellow]⚠️  Normalized model id '{current_model}' → '{canon}' "
-                        f"(legacy short Gemma ID is invalid; using gemma-4-31b-it on Gemini API).[/]"
+                        f"(legacy short tier alias is invalid; using native Gemini Flash id).[/]"
                     )
                 self.model = canon
                 current_model = canon

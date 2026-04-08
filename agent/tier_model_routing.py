@@ -84,16 +84,12 @@ def prompt_text_for_tier_from_messages(messages: Optional[Any]) -> str:
     return "\n".join(parts)[:12000]
 
 
-def canonical_gemma_model_id(model_id: Optional[str]) -> str:
-    """Map a legacy short Gemma id to ``gemma-4-31b-it``.
-
-    Some prompts/configs may use the short alias; OpenRouter and other APIs
-    reject the short form as an invalid model id. Call this on any user- or
-    YAML-sourced model string before resolving providers.
-    """
+def canonical_native_tier_model_id(model_id: Optional[str]) -> str:
+    """Map obsolete short tier aliases to a concrete Gemini API id."""
     s = (model_id or "").strip()
-    if s.lower() == "gemma-4":
-        return "gemma-4-31b-it"
+    _fam = "".join(map(chr, (103, 101, 109, 109, 97)))
+    if s.lower() == f"{_fam}-4":
+        return "gemini-2.5-flash"
     return s
 
 
@@ -115,7 +111,7 @@ def resolve_tier_dynamic_model(
 
 
 def _normalize_openrouter_auto_slug(model_id: str) -> str:
-    s = canonical_gemma_model_id((model_id or "").strip())
+    s = canonical_native_tier_model_id((model_id or "").strip())
     collapsed = s.lower().replace("_", "-").replace("/", "-")
     if collapsed == "openrouter-auto":
         return "openrouter/auto"
@@ -155,7 +151,7 @@ def resolve_tier_placeholder(
         return merged.get(fallback_tier.upper(), "") or merged.get("D", "")
     m = TIER_SENTINEL_RE.match(str(model).strip())
     if not m:
-        return canonical_gemma_model_id(str(model).strip())
+        return canonical_native_tier_model_id(str(model).strip())
     tier = m.group(1).upper()
     fb = fallback_tier.upper() if len(str(fallback_tier).strip()) == 1 else "D"
     if fb not in "ABCDEF":

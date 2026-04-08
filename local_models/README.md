@@ -4,7 +4,7 @@ Downloaded checkpoints live under `hub/` (gitignored). Tracked files: `manifest.
 
 ## Current manifest
 
-**`google/gemma-2-9b-it`** (fits the default **90 GiB** budget in `manifest.yaml`). Raise `budget_gb` if you add more repos.
+Default entry: **`Qwen/Qwen2.5-1.5B-Instruct`** (fits the default **90 GiB** budget in `manifest.yaml`). Raise `budget_gb` if you add more repos.
 
 ## Download (resume + max parallelism)
 
@@ -24,7 +24,7 @@ Logs: `logs/download.log`, `logs/failures.jsonl`, `hub/state.json`.
 
 Multi‑100 GiB weights are **too large** for Hugging Face’s free serverless GPU slots and for most “free API” tiers. Practical options:
 
-1. **Google AI (Gemma-4 router)** — Hermes defaults to **`router_provider: gemini`** + **`gemma-4-31b-it`** under **`free_model_routing.kimi_router`**, with tier targets in **`free_model_routing.tiers`**, using **`GEMINI_API_KEY`** / **`GOOGLE_API_KEY`** (default: **`gemma-4-31b-it`** on Gemini API; local tiers use downloaded hub ids from `state.json` when **`HERMES_LOCAL_INFERENCE_BASE_URL`** is set). Top-level **`gemini_native_tier_models`** marks API ids that are not HF hub repos.
+1. **Google AI (Gemini)** — Hermes can use **`router_provider: gemini`** with **`gemini-2.5-flash`** (or similar) under **`free_model_routing.kimi_router`**, with tier targets in **`free_model_routing.tiers`**, using **`GEMINI_API_KEY`** / **`GOOGLE_API_KEY`**. Local tiers use downloaded hub ids from `state.json` when **`HERMES_LOCAL_INFERENCE_BASE_URL`** is set. Top-level **`gemini_native_tier_models`** marks API ids that are not HF hub repos.
 2. **Legacy HF router API** — set **`router_provider: huggingface`** and a **`router_model`** served at `router.huggingface.co` if you still use that path; **`HF_TOKEN`** is required for that hop.
 3. **Hugging Face Inference Providers** — optional paid/credit hosted models (see [Inference Providers pricing](https://huggingface.co/docs/inference-providers/pricing)); not part of Hermes default `free_model_routing` anymore.
 
@@ -32,7 +32,7 @@ There is no durable **100% free** API that runs **those exact** largest weights 
 
 ## Local OpenAI-compatible server
 
-Point vLLM/TGI at a downloaded tree; **`--served-model-name`** should match the hub id (e.g. `google/gemma-2-9b-it`). Then:
+Point vLLM/TGI at a downloaded tree; **`--served-model-name`** should match the hub id (e.g. `Qwen/Qwen2.5-1.5B-Instruct`). Then:
 
 ```bash
 export HERMES_LOCAL_INFERENCE_BASE_URL=http://127.0.0.1:8000/v1

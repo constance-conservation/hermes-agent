@@ -26,10 +26,10 @@ from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
+from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
-    is_gemma_model_id,
-    opm_blocks_gemma,
-    opm_non_gemma_replacement_model,
+    opm_enabled,
+    opm_auxiliary_model,
     opm_suppresses_free_model_fallback,
     resolve_openai_primary_mode,
 )
@@ -61,15 +61,15 @@ def _opm_delegation_target_model(parent_agent, goal_or_prompt_text: str) -> str:
     )
 
 
-def _try_delegation_gemini_non_gemma_creds(parent_agent) -> Optional[dict]:
-    """Direct Gemini runtime with :func:`opm_non_gemma_replacement_model` (no Gemma)."""
+def _try_delegation_opm_auxiliary_gemini_creds(parent_agent) -> Optional[dict]:
+    """Direct Gemini runtime using :func:`opm_auxiliary_model` when OpenAI native is unavailable."""
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
 
         rt = resolve_runtime_provider(requested="gemini")
         if not (rt.get("api_key") or "").strip():
             return None
-        nm = opm_non_gemma_replacement_model(parent_agent)
+        nm = opm_auxiliary_model(parent_agent)
         return {
             "model": nm,
             "provider": rt.get("provider"),
@@ -92,7 +92,7 @@ def _dbg98(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]
     try:
         payload = {
             "sessionId": "98bb66",
-            "runId": "gemma-debug-1",
+            "runId": "delegate-debug-1",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -266,12 +266,7 @@ def _build_child_progress_callback(task_index: int, parent_agent, task_count: in
 
 
 def _delegation_creds_need_opm_uplift(creds: Optional[dict]) -> bool:
-    """True when delegation credentials point at a free / Gemma / Gemini stack OPM should replace.
-
-    OpenAI-primary mode is meant to keep subprocesses on native GPT, not Gemma or
-    zero-cost stacks, even when ``delegation.provider`` is ``gemini``/OpenRouter or
-    the model slug is a non-gemma free tier (local hub, etc.).
-    """
+    """True when delegation credentials point at a free / disallowed-family / Gemini stack OPM should replace."""
     if not creds:
         return True
     m = str((creds or {}).get("model") or "").strip().lower()
@@ -290,14 +285,12 @@ def _delegation_creds_need_opm_uplift(creds: Optional[dict]) -> bool:
             return True
     except Exception:
         pass
-    if m in ("gemma-4-31b-it", "gemma-4", "google/gemma-4-31b-it") or m.endswith("/gemma-4-31b-it"):
-        return True
-    if "gemma-4-31b" in m or m.startswith("google/gemma-"):
+    if model_id_contains_disallowed_family(m):
         return True
     if p == "gemini":
         return True
     if "openrouter" in p or "openrouter.ai" in bu_l:
-        if "gemma" in m or m == "openrouter/auto" or m.startswith("google/gemma"):
+        if model_id_contains_disallowed_family(m) or m == "openrouter/auto":
             return True
     return False
 
@@ -438,14 +431,12 @@ def _build_child_agent(
     return child
 
 def _resolve_free_fallback_runtime(child: Any, parent_agent: Any) -> Optional[Dict[str, Any]]:
-    """HTTP stack for rerunning a subprocess with the free model (gemma-4-31b-it).
+    """HTTP stack for rerunning a subprocess with the configured free-tier Gemini model.
 
-    Always resolves Gemini API credentials first — gemma-4-31b-it is a Google
-    model and must never be sent to OpenAI, OpenRouter, or other non-Gemini
-    endpoints.  Falls back to parent/child credentials ONLY if they point to a
-    Gemini-compatible endpoint.
+    Always resolves Gemini API credentials first. Falls back to parent/child credentials
+    ONLY if they point to a Gemini-compatible endpoint.
     """
-    # Always prefer explicit Gemini resolution — correct provider for gemma
+    # Always prefer explicit Gemini resolution
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
 
@@ -523,7 +514,7 @@ def _run_single_child(
             parent_agent=parent_agent,
         )
         if not _gov_approved:
-            # When OpenAI-primary mode is on, never auto-fallback to Gemma for
+            # When OpenAI-primary mode is on, never auto-fallback to a free-tier model for
             # denied paid delegates. Keep GPT baseline semantics by blocking.
             _, _opm_meta = resolve_openai_primary_mode(parent_agent)
             _opm_on = bool(_opm_meta.get("enabled", False))
@@ -541,7 +532,7 @@ def _run_single_child(
                 session_id=str(getattr(parent_agent, "session_id", "") or ""),
             )
 
-            # Auto-fallback: rerun with configured free model (gemma-4-31b-it on Gemini API)
+            # Auto-fallback: rerun with configured free model (Gemini API)
             # instead of blocking and forcing the parent to deliberate / ask for approval.
             if (
                 not _opm_on
@@ -621,7 +612,7 @@ def _run_single_child(
             blocked_msg = (
                 f"Subprocess blocked by governance policy: model {child_model!r} "
                 f"requires operator approval for background/subprocess use. "
-                f"Only free local models (gemma-4-31b-it or local inference) are permitted without approval. "
+                f"Only free local models (local inference or local/ slugs) are permitted without approval. "
                 f"Reason: {_gov_reason}"
             )
             logger.warning("delegate_tool: %s", blocked_msg)
@@ -953,9 +944,9 @@ def delegate_task(
         return json.dumps({"error": "delegate_task requires a parent agent context."})
 
     def _enforce_opm_baseline(creds: dict, goal_text: str) -> dict:
-        """Under OPM: never delegate on Gemma; prefer native GPT when available."""
+        """Under OPM: never delegate on disallowed-family ids; prefer native GPT when available."""
         try:
-            if not opm_blocks_gemma(parent_agent):
+            if not opm_enabled(parent_agent):
                 return creds
             c = dict(creds or {})
             m = str(c.get("model") or "")
@@ -981,8 +972,8 @@ def delegate_task(
                 _opm.get("codex_model") if _coding else _opm.get("default_model")
             ).strip() or ("gpt-5.3-codex" if _coding else "gpt-5.4")
 
-            # Hard block Gemma (any provider) while OPM is active.
-            if is_gemma_model_id(m):
+            # Hard block disallowed-family ids (any provider) while OPM is active.
+            if model_id_contains_disallowed_family(m):
                 if opm_suppresses_free_model_fallback(parent_agent):
                     from agent.openai_native_runtime import native_openai_runtime_tuple
 
@@ -1001,7 +992,7 @@ def delegate_task(
                             stage="delegation_credentials_resolution",
                             chosen_model=str(_next.get("model") or ""),
                             chosen_provider=str(_next.get("provider") or ""),
-                            reason_code="opm_baseline_override_gemma_blocked",
+                            reason_code="opm_baseline_override_disallowed_family",
                             opm_enabled=True,
                             opm_source=str(_opm_meta.get("source", "")),
                             tier_source="delegation_baseline",
@@ -1016,7 +1007,7 @@ def delegate_task(
 
                     rt = resolve_runtime_provider(requested="gemini")
                     if (rt.get("api_key") or "").strip():
-                        nm = opm_non_gemma_replacement_model(parent_agent)
+                        nm = opm_auxiliary_model(parent_agent)
                         _next = {
                             **c,
                             "model": nm,
@@ -1031,7 +1022,7 @@ def delegate_task(
                             stage="delegation_credentials_resolution",
                             chosen_model=str(nm),
                             chosen_provider=str(rt.get("provider") or ""),
-                            reason_code="opm_replace_gemma_with_non_gemma_gemini",
+                            reason_code="opm_replace_disallowed_with_auxiliary_gemini",
                             opm_enabled=True,
                             opm_source=str(_opm_meta.get("source", "")),
                             tier_source="delegation_baseline",
@@ -1043,7 +1034,7 @@ def delegate_task(
                         return _next
                 except Exception:
                     pass
-                c["model"] = opm_non_gemma_replacement_model(parent_agent)
+                c["model"] = opm_auxiliary_model(parent_agent)
                 return c
 
             if not opm_suppresses_free_model_fallback(parent_agent):
@@ -1393,12 +1384,16 @@ def _resolve_delegation_credentials(
             rm = resolve_tier_dynamic_model(prompt_for_tier, gov)
             if rm:
                 configured_model = rm
-            if opm_blocks_gemma(parent_agent) and is_gemma_model_id(str(configured_model or "")):
+            if opm_enabled(parent_agent) and model_id_contains_disallowed_family(str(configured_model or "")):
                 configured_model = _opm_delegation_target_model(parent_agent, prompt_for_tier)
                 _tier_opm_uplifted_to_gpt = True
     configured_provider = str(cfg.get("provider") or "").strip() or None
     configured_base_url = str(cfg.get("base_url") or "").strip() or None
     configured_api_key = str(cfg.get("api_key") or "").strip() or None
+    if configured_model and model_id_contains_disallowed_family(str(configured_model)):
+        # OPM must still see the disallowed id so it can uplift to native GPT; rewrite only when OPM is off.
+        if not opm_enabled(parent_agent):
+            configured_model = "gemini-2.5-flash"
     # region agent log
     _dbg98(
         "H1",
@@ -1413,16 +1408,16 @@ def _resolve_delegation_credentials(
     # endregion
 
     _cmid = (configured_model or "").strip().lower()
-    _is_gemma_configured = is_gemma_model_id(_cmid)
+    _is_disallowed_configured = model_id_contains_disallowed_family(_cmid)
 
     # OpenAI primary mode baseline for delegations:
     # when no explicit delegation model/provider/base_url is set, delegate with
     # native OpenAI GPT defaults (E/F) instead of silently inheriting a cheap model.
-    # Also override stale Gemma delegation defaults when OPM is on.
-    # ``_tier_opm_uplifted_to_gpt``: tier:dynamic resolved to Gemma then rewritten — still
+    # Also override stale disallowed-family delegation defaults when OPM is on.
+    # ``_tier_opm_uplifted_to_gpt``: tier:dynamic resolved to a disallowed id then rewritten — still
     # need native OpenAI creds (otherwise we would inherit parent's non-OpenAI runtime).
     if (
-        (not configured_model or _is_gemma_configured or _tier_opm_uplifted_to_gpt)
+        (not configured_model or _is_disallowed_configured or _tier_opm_uplifted_to_gpt)
         and not configured_provider
         and not configured_base_url
     ):
@@ -1509,14 +1504,14 @@ def _resolve_delegation_credentials(
                     )
                     # endregion
                     return out
-                # OPM on but no native OpenAI tuple: never fall through to Gemma delegation.
-                gem = _try_delegation_gemini_non_gemma_creds(parent_agent)
+                # OPM on but no native OpenAI tuple: use auxiliary Gemini stack, not disallowed ids.
+                gem = _try_delegation_opm_auxiliary_gemini_creds(parent_agent)
                 if gem:
                     emit_routing_decision_trace(
                         stage="delegation_credentials_resolution",
                         chosen_model=str(gem.get("model") or ""),
                         chosen_provider=str(gem.get("provider") or ""),
-                        reason_code="opm_delegate_no_native_openai_use_non_gemma_gemini",
+                        reason_code="opm_delegate_no_native_openai_use_auxiliary_gemini",
                         opm_enabled=True,
                         opm_source=str(opm_meta.get("source", "")),
                         tier_source="delegation_baseline",
@@ -1549,94 +1544,6 @@ def _resolve_delegation_credentials(
                     "command": None,
                     "args": [],
                 }
-        except Exception:
-            pass
-
-    # Gemma routing hard rule:
-    # If Gemma is selected for delegation and no explicit provider/base_url was
-    # requested, prefer direct Gemini API first. OpenRouter is a paid last resort.
-    _cmid = (configured_model or "").strip().lower()
-    _is_gemma = is_gemma_model_id(_cmid)
-    if (
-        _is_gemma
-        and not configured_provider
-        and not configured_base_url
-        and not opm_blocks_gemma(parent_agent)
-    ):
-        from agent.tier_model_routing import canonical_gemma_model_id
-        from hermes_cli.runtime_provider import resolve_runtime_provider
-
-        configured_model = canonical_gemma_model_id(configured_model)
-        # First try direct Google Gemini API.
-        try:
-            rt = resolve_runtime_provider(requested="gemini")
-            if (rt.get("api_key") or "").strip():
-                out = {
-                    "model": configured_model,
-                    "provider": rt.get("provider"),
-                    "base_url": rt.get("base_url"),
-                    "api_key": rt.get("api_key"),
-                    "api_mode": rt.get("api_mode"),
-                    "command": rt.get("command"),
-                    "args": list(rt.get("args") or []),
-                }
-                emit_routing_decision_trace(
-                    stage="delegation_credentials_resolution",
-                    chosen_model=str(out.get("model") or ""),
-                    chosen_provider=str(out.get("provider") or ""),
-                    reason_code="gemma_direct_gemini",
-                    opm_enabled=False,
-                    opm_source="",
-                    tier_source="delegation_gemma_path",
-                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                )
-                # region agent log
-                _dbg98(
-                    "H2",
-                    "tools/delegate_tool.py:_resolve_delegation_credentials",
-                    "gemma branch selected direct gemini",
-                    {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
-                )
-                # endregion
-                return out
-        except Exception:
-            pass
-        # Only if Gemini is unavailable, fall back to OpenRouter.
-        try:
-            rt = resolve_runtime_provider(requested="openrouter")
-            if (rt.get("api_key") or "").strip():
-                _or_model = configured_model
-                if "/" not in _or_model:
-                    _or_model = f"google/{_or_model}"
-                out = {
-                    "model": _or_model,
-                    "provider": rt.get("provider"),
-                    "base_url": rt.get("base_url"),
-                    "api_key": rt.get("api_key"),
-                    "api_mode": rt.get("api_mode"),
-                    "command": rt.get("command"),
-                    "args": list(rt.get("args") or []),
-                }
-                emit_routing_decision_trace(
-                    stage="delegation_credentials_resolution",
-                    chosen_model=str(out.get("model") or ""),
-                    chosen_provider=str(out.get("provider") or ""),
-                    reason_code="gemma_openrouter_last_resort",
-                    opm_enabled=False,
-                    opm_source="",
-                    tier_source="delegation_gemma_path",
-                    fallback_activated=True,
-                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
-                )
-                # region agent log
-                _dbg98(
-                    "H2",
-                    "tools/delegate_tool.py:_resolve_delegation_credentials",
-                    "gemma branch selected openrouter fallback",
-                    {"selected_model": str(out.get("model") or ""), "provider": str(out.get("provider") or "")},
-                )
-                # endregion
-                return out
         except Exception:
             pass
 

@@ -7,6 +7,10 @@ import yaml
 
 from unittest.mock import patch
 
+from agent.disallowed_model_family import (
+    disallowed_family_fixture_slug,
+    disallowed_family_openrouter_hub_slug,
+)
 from agent.token_governance_runtime import (
     RUNTIME_FILENAME,
     apply_per_turn_tier_model,
@@ -286,7 +290,7 @@ def test_per_turn_skipped_when_fallback_active(gov_env):
 
     class _A:
         def __init__(self):
-            self.model = "gemma-4-31b-it"
+            self.model = "gemini-2.5-flash"
             self.api_mode = "chat_completions"
             self._base_url_lower = "googleapis"
             self._fallback_activated = True
@@ -297,7 +301,7 @@ def test_per_turn_skipped_when_fallback_active(gov_env):
     a = _A()
     a._token_governance_cfg = load_runtime_config()
     apply_per_turn_tier_model(a, "summarize the following paragraph in three bullets")
-    assert a.model == "gemma-4-31b-it"
+    assert a.model == "gemini-2.5-flash"
 
 
 def test_per_turn_skipped_when_pipeline_model_once(gov_env):
@@ -392,7 +396,7 @@ def test_inherit_token_governance_from_parent_opm_forces_tier_routed():
         "openai_primary_mode": {"enabled": True},
     }
     child = type("_C", (), {})()
-    child.model = "gemini/gemma-4-31b-it"
+    child.model = disallowed_family_openrouter_hub_slug()
     child._token_governance_cfg = None
     child._model_is_tier_routed = False
 
@@ -449,7 +453,7 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
     agent = object()
     with (
         patch(
-            "agent.token_governance_runtime.opm_blocks_gemma",
+            "agent.token_governance_runtime.opm_enabled",
             return_value=True,
         ),
         patch(
@@ -467,11 +471,11 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
 
 
 def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
-    """Even when apply_per_turn exited early, run_conversation enforcement can fix Gemma."""
+    """Even when apply_per_turn exited early, run_conversation enforcement can fix disallowed ids."""
 
     class _StubAgent:
         def __init__(self):
-            self.model = "gemma-4-31b-it"
+            self.model = disallowed_family_fixture_slug()
             self.provider = "gemini"
             self.base_url = "https://generativelanguage.googleapis.com/v1beta"
             self._reconcile_called = False
@@ -482,7 +486,7 @@ def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
     agent = _StubAgent()
     with (
         patch(
-            "agent.token_governance_runtime.opm_blocks_gemma",
+            "agent.token_governance_runtime.opm_enabled",
             return_value=True,
         ),
         patch(

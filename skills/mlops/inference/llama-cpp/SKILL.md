@@ -241,7 +241,7 @@ cat prompts.txt | ./llama-cli \
 
 **Other**:
 - Falcon, BLOOM, GPT-J
-- Phi-3, Gemma, Qwen
+- Phi-3, Qwen
 - LLaVA (vision), Whisper (audio)
 
 **Find models**: https://huggingface.co/models?library=gguf

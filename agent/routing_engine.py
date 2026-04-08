@@ -59,7 +59,7 @@ class UnifiedRouteDecision:
 
     background_task: bool = False
     """True when the request explicitly involves a background/subprocess task.
-    Background tasks must use only free local models (gemma-4-31b-it or local inference).
+    Background tasks must use only free local models (Gemini Flash via direct API or local inference).
     Chief orchestrator must be consulted before any paid background task launches."""
 
     audit: Dict[str, Any] = field(default_factory=dict)
@@ -83,13 +83,13 @@ TIER TABLE (ascending capability/cost — ALL tiers cost money via API):
   F = gpt-5.3-codex      — deep engineering, architecture, refactors, complex codegen
 
 COST HIERARCHY (cheapest to most expensive):
-  FREE:     gemma-4-31b-it via direct Google Gemini API, self-hosted local inference
+  FREE:     Gemini Flash via direct Google Gemini API, self-hosted local inference
   LOW-COST: Gemini Flash/Pro via direct Google API (tiers A/B/C)
-  PAID:     ANY model routed via OpenRouter (including gemma-4-31b-it on OpenRouter)
+  PAID:     ANY model routed via OpenRouter (even when the same id is cheaper natively)
   HIGH:     claude-sonnet-4.6, gpt-5.4, gpt-5.3-codex, claude-opus-4.6
 
 CRITICAL: OpenRouter is ALWAYS paid — even for models that are free via their native API.
-Always prefer the direct API source (Google for Gemini/Gemma, OpenAI for GPT, Anthropic for \
+Always prefer the direct API source (Google for Gemini, OpenAI for GPT, Anthropic for \
 Claude) before falling back to OpenRouter. OpenRouter is a last resort when direct APIs fail.
 
 ROUTING RULES:
@@ -108,7 +108,7 @@ ROUTING RULES:
 8. profile: suggest the most suitable profile by EXACT name, or null for default.
 9. background_task: true if the request explicitly asks to run something in the background,
    spawn a subprocess, or run a parallel process. Background tasks MUST use only free
-   models (gemma-4-31b-it via direct Gemini API, local inference) — any paid model \
+   models (Gemini Flash via direct Gemini API, local inference) — any paid model \
 requires operator approval.
 
 PROFILES:
@@ -427,12 +427,12 @@ def review_agent_summary(
 
     try:
         from agent.auxiliary_client import call_llm
-        from agent.openai_primary_mode import opm_blocks_gemma, opm_non_gemma_replacement_model
+        from agent.openai_primary_mode import opm_enabled, opm_auxiliary_model
 
-        _m = "gemma-4-31b-it"
+        _m = "gemini-2.5-flash"
         _p = "gemini"
-        if opm_blocks_gemma(None):
-            _m = opm_non_gemma_replacement_model(None)
+        if opm_enabled(None):
+            _m = opm_auxiliary_model(None)
             _low = _m.lower()
             if "gpt-" in _low or _low.startswith("gpt"):
                 _p = "openai"

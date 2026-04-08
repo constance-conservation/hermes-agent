@@ -108,7 +108,7 @@ reconstruction_error = (activations - reconstructed).norm()
 | Release | Model | Layers |
 |---------|-------|--------|
 | `gpt2-small-res-jb` | GPT-2 Small | Multiple residual streams |
-| `gemma-2b-res` | Gemma 2B | Residual streams |
+| `example-tiny-lm-res` | Tiny LM (example) | Residual streams |
 | Various on HuggingFace | Search tag `saelens` | Various |
 
 ### Checklist
