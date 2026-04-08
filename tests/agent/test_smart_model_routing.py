@@ -17,9 +17,9 @@ def test_returns_none_when_disabled():
     assert choose_cheap_model_route("what time is it in tokyo?", cfg) is None
 
 
-def test_skips_cheap_route_when_opm_suppresses_free_fallback():
+def test_skips_cheap_route_when_opm_blocks_gemma():
     with patch(
-        "agent.openai_primary_mode.opm_suppresses_free_model_fallback",
+        "agent.openai_primary_mode.opm_blocks_gemma",
         return_value=True,
     ):
         assert choose_cheap_model_route("hi", _BASE_CONFIG) is None
@@ -48,7 +48,7 @@ def test_skips_tool_heavy_prompt_keywords():
     assert choose_cheap_model_route(prompt, _BASE_CONFIG) is None
 
 
-def test_resolve_turn_route_primary_when_opm_suppresses_cheap():
+def test_resolve_turn_route_primary_when_opm_blocks_cheap():
     from agent.smart_model_routing import resolve_turn_route
 
     primary = {
@@ -61,7 +61,7 @@ def test_resolve_turn_route_primary_when_opm_suppresses_cheap():
         "args": [],
     }
     with patch(
-        "agent.openai_primary_mode.opm_suppresses_free_model_fallback",
+        "agent.openai_primary_mode.opm_blocks_gemma",
         return_value=True,
     ):
         result = resolve_turn_route("what time is it in tokyo?", _BASE_CONFIG, primary)

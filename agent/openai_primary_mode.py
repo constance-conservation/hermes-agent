@@ -150,7 +150,8 @@ def filter_fallback_chain_strip_gemma(chain: Any) -> list:
                     if isinstance(t, dict):
                         for x in t.get("models") or []:
                             flat.append(str(x).strip().lower())
-            if flat and all(is_gemma_model_id(x) for x in flat if x):
+            # Drop tier routers that can select Gemma for any tier target (strict OPM).
+            if any(is_gemma_model_id(x) for x in flat if x):
                 continue
         if e.get("openrouter_last_resort") and is_gemma_model_id(mid):
             continue

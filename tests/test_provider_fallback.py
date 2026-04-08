@@ -15,6 +15,7 @@ def _sample_free_routing_config():
         "fallback_providers": None,
         "free_model_routing": {
             "enabled": True,
+            "openrouter_last_resort": {"enabled": False},
             "kimi_router": {
                 "router_model": "test/router",
                 "tiers": [{"id": "t0", "models": ["test/a", "test/b"]}],
@@ -92,6 +93,25 @@ class TestFallbackChainInit:
         agent = _make_agent(fallback_model=[])
         assert agent._fallback_chain == []
         assert agent._fallback_model is None
+
+    def test_explicit_gemma_fallback_replaced_when_opm_blocks(self):
+        """Gateway passes config fallback_providers verbatim; OPM must still strip Gemma."""
+        with (
+            patch("agent.token_governance_runtime.apply_token_governance_runtime", lambda a: None),
+            patch("agent.openai_primary_mode.opm_blocks_gemma", return_value=True),
+            patch("agent.openai_primary_mode.opm_suppresses_free_model_fallback", return_value=False),
+            patch(
+                "agent.openai_primary_mode.opm_non_gemma_replacement_model",
+                return_value="gemini-2.5-flash",
+            ),
+        ):
+            agent = _make_agent(
+                fallback_model=[{"provider": "gemini", "model": "gemma-4-31b-it"}],
+            )
+            agent.client = MagicMock()
+        assert len(agent._fallback_chain) == 1
+        assert agent._fallback_chain[0]["provider"] == "gemini"
+        assert agent._fallback_chain[0]["model"] == "gemini-2.5-flash"
 
     def test_invalid_dict_no_provider(self):
         agent = _make_agent(fallback_model={"model": "gpt-4o"})

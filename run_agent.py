@@ -966,6 +966,25 @@ class AIAgent:
                 self._fallback_chain = []
         except Exception:
             pass
+        # Explicit fallback_providers from config (e.g. gateway) bypass resolve_fallback_providers;
+        # strip Gemma whenever OPM is enabled — same as _opm_finalize_fallback_chain.
+        try:
+            from agent.openai_primary_mode import (
+                filter_fallback_chain_strip_gemma,
+                opm_blocks_gemma,
+                opm_non_gemma_replacement_model,
+                opm_suppresses_free_model_fallback,
+            )
+
+            if opm_blocks_gemma(self) and self._fallback_chain:
+                self._fallback_chain = filter_fallback_chain_strip_gemma(self._fallback_chain)
+                if not self._fallback_chain and not opm_suppresses_free_model_fallback(self):
+                    _aux = opm_non_gemma_replacement_model(self)
+                    self._fallback_chain = [
+                        {"provider": "gemini", "model": _aux, "only_rate_limit": False}
+                    ]
+        except Exception:
+            logger.debug("opm fallback chain gemma strip failed", exc_info=True)
         self._fallback_index = 0
         self._fallback_activated = False
         # Legacy attribute kept for backward compat (tests, external callers)

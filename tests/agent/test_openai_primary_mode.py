@@ -124,6 +124,20 @@ def test_filter_fallback_chain_strip_gemma():
     assert "gemini-2.5" in out[0]["model"]
 
 
+def test_filter_fallback_chain_drops_tier_router_if_any_candidate_is_gemma():
+    chain = [
+        {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "gemini_tier_router": True,
+            "gemini_tier_router_tiers": [
+                {"models": ["gemini-2.5-flash", "gemma-4-31b-it"]},
+            ],
+        },
+    ]
+    assert filter_fallback_chain_strip_gemma(chain) == []
+
+
 def test_opm_runtime_overrides_config_field_by_field(monkeypatch):
     monkeypatch.setattr(
         "hermes_cli.config.load_config",

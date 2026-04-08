@@ -66,9 +66,9 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
     long-form work, keep the primary model.
     """
     try:
-        from agent.openai_primary_mode import opm_suppresses_free_model_fallback
+        from agent.openai_primary_mode import opm_blocks_gemma
 
-        if opm_suppresses_free_model_fallback():
+        if opm_blocks_gemma():
             return None
     except Exception:
         pass
@@ -86,9 +86,9 @@ def choose_cheap_model_route(user_message: str, routing_config: Optional[Dict[st
         return None
 
     try:
-        from agent.openai_primary_mode import opm_blocks_gemma, is_gemma_model_id
+        from agent.openai_primary_mode import is_gemma_model_id
 
-        if opm_blocks_gemma() and is_gemma_model_id(model):
+        if is_gemma_model_id(model):
             return None
     except Exception:
         pass
