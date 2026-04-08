@@ -259,12 +259,29 @@ def _call_routing_llm(system: str, user: str) -> str:
         except Exception as exc:
             logger.debug("routing_engine: Gemini Flash fallback failed: %s", exc)
 
+    logger.warning(
+        "routing_engine: both GPT-5.4 and Gemini Flash routers failed — "
+        "using deterministic fallback tier"
+    )
     return ""
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def _get_openai_primary_mode() -> Optional[dict]:
+    """Return openai_primary_mode config dict if enabled, else None."""
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+        opm = cfg.get("openai_primary_mode") or {}
+        if opm.get("enabled", False):
+            return opm
+    except Exception:
+        pass
+    return None
 
 
 def route_prompt(
@@ -279,14 +296,30 @@ def route_prompt(
     Uses GPT-5.4 (native OpenAI) as the primary router — it produces genuinely
     dynamic decisions rather than static fallbacks. Gemini Flash is the fallback.
 
+    When ``openai_primary_mode`` is enabled, the default tier is E (gpt-5.4)
+    and coding tasks are routed to F (gpt-5.3-codex) unless the router
+    determines a cheaper model is more suitable.
+
     Returns an ``UnifiedRouteDecision`` with:
     - tier: A–F matched to prompt complexity
     - profile: named profile or None
     - free_model_brief: condensed brief for free-tier models (A/B/C only)
     - coding_task: hint for tier-F preference when escalating
     """
+    opm = _get_openai_primary_mode()
+
     profiles_desc = _profiles_description(available_profiles)
     system_prompt = _ROUTING_SYSTEM_PROMPT.format(profiles_desc=profiles_desc)
+
+    # When openai_primary_mode is on, bias the router toward E/F
+    if opm:
+        system_prompt += (
+            "\n\nOPENAI PRIMARY MODE ACTIVE: Default to tier E (gpt-5.4) for most tasks. "
+            "Route coding/engineering tasks to tier F (gpt-5.3-codex). "
+            "Use A/B/C ONLY for genuinely trivial tasks (greetings, simple lookups). "
+            "GPT-5.4 and gpt-5.3-codex are permitted for subprocesses in this mode."
+        )
+
     context_summary = _summarise_context(conversation_messages)
     user_prompt = _ROUTING_USER_TMPL.format(
         user_message=(user_message or "")[:800],
@@ -305,19 +338,32 @@ def route_prompt(
         # If brief is missing for a low-cost tier, synthesise a minimal one
         if parsed["tier"] in ("A", "B", "C") and not brief:
             brief = (user_message or "").strip()[:400] or None
+
+        tier = parsed["tier"]
+        coding_task = parsed.get("coding_task", False)
+
+        # openai_primary_mode: uplift tiers unless router explicitly chose low-cost
+        if opm and tier in ("D",):
+            tier = "E"
+        if opm and coding_task and tier in ("D", "E"):
+            tier = "F"
+
         return UnifiedRouteDecision(
-            tier=parsed["tier"],
+            tier=tier,
             profile=parsed.get("profile"),
             free_model_brief=brief,
-            coding_task=parsed.get("coding_task", False),
+            coding_task=coding_task,
             background_task=parsed.get("background_task", False),
-            audit={"raw_excerpt": raw[:300], "parsed": True},
+            audit={"raw_excerpt": raw[:300], "parsed": True,
+                   "openai_primary_mode": bool(opm)},
         )
 
-    # Fallback: return deterministic tier without brief
+    # Fallback: when openai_primary_mode is on, default to E not D
+    _fb = "E" if opm else fallback_tier
     return UnifiedRouteDecision(
-        tier=fallback_tier,
-        audit={"raw_excerpt": raw[:100] if raw else "", "parsed": False},
+        tier=_fb,
+        audit={"raw_excerpt": raw[:100] if raw else "", "parsed": False,
+               "openai_primary_mode": bool(opm)},
     )
 
 

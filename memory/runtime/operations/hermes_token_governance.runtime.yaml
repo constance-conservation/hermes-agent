@@ -29,6 +29,15 @@ delegation:
   prefer_free_for_large_context: true
   large_context_threshold_tokens: 10000
 
+openai_primary_mode:
+  enabled: true
+  default_model: gpt-5.4
+  codex_model: gpt-5.3-codex
+  allowed_subprocess_models:
+    - gpt-5.4
+    - gpt-5.3-codex
+  require_direct_openai: true
+
 notes: |
   Runtime governance source of truth is the active file under
   WORKSPACE/memory/runtime/state/hermes-token-governance.runtime.yaml.

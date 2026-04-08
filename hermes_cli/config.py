@@ -227,6 +227,13 @@ DEFAULT_CONFIG = {
     # free tier). Provider is left unset so ``resolve_provider(auto)`` picks from API keys.
     "model": {"default": "gemini-2.5-flash"},
     "fallback_providers": None,
+    "openai_primary_mode": {
+        "enabled": False,
+        "default_model": "gpt-5.4",
+        "codex_model": "gpt-5.3-codex",
+        "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex"],
+        "require_direct_openai": True,
+    },
     "cost_governance": {
         "daily_budget_usd": 10.0,
         "session_budget_usd": 2.50,

@@ -280,6 +280,31 @@ def request_operator_approval(
 # Policy enforcement entry point (called from delegate_tool.py)
 # ---------------------------------------------------------------------------
 
+def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> bool:
+    """Check if model is allowed by the openai_primary_mode feature flag.
+
+    When enabled, OpenAI models listed in allowed_subprocess_models are
+    permitted in subprocesses IF routed directly from OpenAI (not OpenRouter).
+    """
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+        opm = cfg.get("openai_primary_mode") or {}
+        if not opm.get("enabled", False):
+            return False
+        allowed = opm.get("allowed_subprocess_models") or []
+        mid = (model_id or "").strip().lower()
+        if not any(a.strip().lower() == mid for a in allowed):
+            return False
+        if opm.get("require_direct_openai", True) and parent_agent is not None:
+            bu = (getattr(parent_agent, "base_url", None) or "").strip().lower()
+            if "openrouter" in bu:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def enforce_subprocess_model_policy(
     model_id: str,
     goal: str,
@@ -306,6 +331,15 @@ def enforce_subprocess_model_policy(
     if cost_class == "free":
         register_subprocess(task_id, model_id, goal, approved=True)
         return True, "free_model"
+
+    # openai_primary_mode: bypass paid-model block for whitelisted OpenAI models
+    if _is_openai_primary_mode_allowed(model_id, parent_agent):
+        register_subprocess(task_id, model_id, goal, approved=True)
+        logger.info(
+            "subprocess_governance: openai_primary_mode allows %r for task %s",
+            model_id, task_id,
+        )
+        return True, "openai_primary_mode"
 
     if cost_class == "low_cost" and allow_low_cost:
         logger.info(
