@@ -39,6 +39,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.routing_trace import emit_routing_decision_trace
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -287,14 +290,7 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
     permitted in subprocesses IF routed directly from OpenAI (not OpenRouter).
     """
     try:
-        from hermes_cli.config import load_config
-        from agent.token_governance_runtime import load_runtime_config
-
-        cfg = load_config() or {}
-        rt = load_runtime_config() or {}
-
-        # Runtime YAML is authoritative for deployment-time governance knobs.
-        opm = rt.get("openai_primary_mode") or cfg.get("openai_primary_mode") or {}
+        opm, opm_meta = resolve_openai_primary_mode(parent_agent)
         if not opm.get("enabled", False):
             return False
 
@@ -318,6 +314,21 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
             from agent.openai_native_runtime import native_openai_runtime_tuple
 
             if not native_openai_runtime_tuple():
+                emit_routing_decision_trace(
+                    stage="subprocess_governance_gate",
+                    chosen_model=str(model_id or ""),
+                    chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+                    reason_code="opm_denied_no_native_openai",
+                    opm_enabled=bool(opm_meta.get("enabled", False)),
+                    opm_source=str(opm_meta.get("source", "")),
+                    tier_source="subprocess_policy",
+                    skip_flags={},
+                    fallback_activated=False,
+                    explicit_user_model=False,
+                    profile=str(getattr(parent_agent, "profile", "") or ""),
+                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                    emit_status=getattr(parent_agent, "_emit_status", None),
+                )
                 return False
         return True
     except Exception:
@@ -349,6 +360,17 @@ def enforce_subprocess_model_policy(
 
     if cost_class == "free":
         register_subprocess(task_id, model_id, goal, approved=True)
+        emit_routing_decision_trace(
+            stage="subprocess_governance_gate",
+            chosen_model=str(model_id or ""),
+            chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+            reason_code="free_model_allowed",
+            opm_enabled=False,
+            opm_source="",
+            tier_source="subprocess_policy",
+            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
+            session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+        )
         return True, "free_model"
 
     # openai_primary_mode: bypass paid-model block for whitelisted OpenAI models
@@ -358,6 +380,17 @@ def enforce_subprocess_model_policy(
             "subprocess_governance: openai_primary_mode allows %r for task %s",
             model_id, task_id,
         )
+        emit_routing_decision_trace(
+            stage="subprocess_governance_gate",
+            chosen_model=str(model_id or ""),
+            chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+            reason_code="openai_primary_mode_allowed",
+            opm_enabled=True,
+            opm_source="policy_helper",
+            tier_source="subprocess_policy",
+            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
+            session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+        )
         return True, "openai_primary_mode"
 
     if cost_class == "low_cost" and allow_low_cost:
@@ -365,6 +398,17 @@ def enforce_subprocess_model_policy(
             "subprocess_governance: allow_low_cost=True, permitting Gemini model %r", model_id
         )
         register_subprocess(task_id, model_id, goal, approved=True)
+        emit_routing_decision_trace(
+            stage="subprocess_governance_gate",
+            chosen_model=str(model_id or ""),
+            chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+            reason_code="low_cost_allowed",
+            opm_enabled=False,
+            opm_source="",
+            tier_source="subprocess_policy",
+            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
+            session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+        )
         return True, "low_cost_allowed"
 
     # Needs approval
@@ -384,11 +428,33 @@ def enforce_subprocess_model_policy(
         logger.info(
             "subprocess_governance: operator approved paid model %r for task %s", model_id, task_id
         )
+        emit_routing_decision_trace(
+            stage="subprocess_governance_gate",
+            chosen_model=str(model_id or ""),
+            chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+            reason_code="operator_approved",
+            opm_enabled=False,
+            opm_source="",
+            tier_source="subprocess_policy",
+            emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
+            session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+        )
         return True, "operator_approved"
 
     logger.warning(
         "subprocess_governance: subprocess BLOCKED — paid model %r not approved for task %s",
         model_id, task_id,
+    )
+    emit_routing_decision_trace(
+        stage="subprocess_governance_gate",
+        chosen_model=str(model_id or ""),
+        chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+        reason_code="denied_paid_model",
+        opm_enabled=False,
+        opm_source="",
+        tier_source="subprocess_policy",
+        emit_status=getattr(parent_agent, "_emit_status", None) if parent_agent else None,
+        session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
     )
     return False, f"denied_paid_model:{model_id}"
 

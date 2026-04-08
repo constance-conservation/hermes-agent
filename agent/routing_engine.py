@@ -26,6 +26,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.routing_trace import emit_routing_decision_trace
+
 logger = logging.getLogger(__name__)
 
 _TIER_LETTERS = frozenset("ABCDEFG")
@@ -271,33 +274,6 @@ def _call_routing_llm(system: str, user: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _get_openai_primary_mode() -> Optional[dict]:
-    """Return openai_primary_mode config dict if enabled, else None.
-
-    Checks both config.yaml and the runtime governance YAML since
-    the flag may live in either location.
-    """
-    # Check config.yaml first
-    try:
-        from hermes_cli.config import load_config
-        cfg = load_config() or {}
-        opm = cfg.get("openai_primary_mode") or {}
-        if opm.get("enabled", False):
-            return opm
-    except Exception:
-        pass
-    # Check runtime governance YAML (where it's typically deployed)
-    try:
-        from agent.token_governance_runtime import load_runtime_config
-        rt = load_runtime_config() or {}
-        opm = rt.get("openai_primary_mode") or {}
-        if opm.get("enabled", False):
-            return opm
-    except Exception:
-        pass
-    return None
-
-
 def route_prompt(
     user_message: str,
     *,
@@ -320,7 +296,8 @@ def route_prompt(
     - free_model_brief: condensed brief for free-tier models (A/B/C only)
     - coding_task: hint for tier-F preference when escalating
     """
-    opm = _get_openai_primary_mode()
+    opm_cfg, opm_meta = resolve_openai_primary_mode(None)
+    opm = opm_cfg if opm_meta.get("enabled", False) else None
 
     profiles_desc = _profiles_description(available_profiles)
     system_prompt = _ROUTING_SYSTEM_PROMPT.format(profiles_desc=profiles_desc)
@@ -362,7 +339,7 @@ def route_prompt(
         if opm and coding_task and tier in ("D", "E"):
             tier = "F"
 
-        return UnifiedRouteDecision(
+        decision = UnifiedRouteDecision(
             tier=tier,
             profile=parsed.get("profile"),
             free_model_brief=brief,
@@ -371,9 +348,32 @@ def route_prompt(
             audit={"raw_excerpt": raw[:300], "parsed": True,
                    "openai_primary_mode": bool(opm)},
         )
+        emit_routing_decision_trace(
+            stage="main_route_selection",
+            chosen_model=f"tier:{decision.tier}",
+            chosen_provider="routing_engine",
+            reason_code="llm_parsed",
+            opm_enabled=bool(opm),
+            opm_source=str(opm_meta.get("source", "")),
+            tier_source="router_llm",
+            fallback_activated=False,
+            explicit_user_model=False,
+        )
+        return decision
 
     # Fallback: when openai_primary_mode is on, default to E not D
     _fb = "E" if opm else fallback_tier
+    emit_routing_decision_trace(
+        stage="main_route_selection",
+        chosen_model=f"tier:{_fb}",
+        chosen_provider="routing_engine",
+        reason_code="llm_parse_fallback",
+        opm_enabled=bool(opm),
+        opm_source=str(opm_meta.get("source", "")),
+        tier_source="fallback_tier",
+        fallback_activated=False,
+        explicit_user_model=False,
+    )
     return UnifiedRouteDecision(
         tier=_fb,
         audit={"raw_excerpt": raw[:100] if raw else "", "parsed": False,

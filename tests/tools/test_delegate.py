@@ -1066,6 +1066,41 @@ class TestDelegationProviderIntegration(unittest.TestCase):
                 self.assertEqual(call.kwargs.get("override_api_key"), "sk-or-batch")
                 self.assertEqual(call.kwargs.get("override_api_mode"), "chat_completions")
 
+    @patch("tools.delegate_tool._build_child_agent")
+    @patch("agent.subprocess_governance.is_free_subprocess_model", return_value=True)
+    @patch("agent.subprocess_governance.default_free_subprocess_model_id", return_value="gemma-4-31b-it")
+    @patch(
+        "agent.subprocess_governance.enforce_subprocess_model_policy",
+        return_value=(False, "denied_paid_model:gpt-5.4"),
+    )
+    def test_opm_denied_paid_model_does_not_autofallback_to_gemma(
+        self,
+        _mock_policy,
+        _mock_default_free,
+        _mock_is_free,
+        mock_build_child,
+    ):
+        from tools import delegate_tool as dt
+
+        parent = _make_mock_parent(depth=0)
+        parent._token_governance_cfg = {
+            "openai_primary_mode": {
+                "enabled": True,
+                "default_model": "gpt-5.4",
+                "codex_model": "gpt-5.3-codex",
+            }
+        }
+        child = MagicMock()
+        child.model = "gpt-5.4"
+        child._delegate_meta = {"task_index": 0, "goal": "x", "max_iterations": 5}
+        mock_build_child.return_value = MagicMock()
+
+        result = dt._run_single_child(0, "do work", child=child, parent_agent=parent)
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("subprocess_governance_blocked", result["exit_reason"])
+        # No free-model rebuild should happen while OPM is enabled.
+        mock_build_child.assert_not_called()
+
     @patch("tools.delegate_tool._load_config")
     @patch("tools.delegate_tool._resolve_delegation_credentials")
     def test_model_only_no_provider_inherits_parent_credentials(self, mock_creds, mock_cfg):

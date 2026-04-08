@@ -19,6 +19,9 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.routing_trace import emit_routing_decision_trace
+
 logger = logging.getLogger(__name__)
 
 RUNTIME_FILENAME = "hermes_token_governance.runtime.yaml"
@@ -141,8 +144,8 @@ def apply_token_governance_runtime(agent: Any) -> None:
     )
     # With OpenAI-primary mode enabled, keep per-turn routing active even if
     # model.default is currently a concrete slug (legacy/stale profile config).
-    _opm_cfg = (cfg.get("openai_primary_mode") or {}) if isinstance(cfg, dict) else {}
-    if _opm_cfg.get("enabled", False):
+    _, _opm_meta = resolve_openai_primary_mode(agent)
+    if _opm_meta.get("enabled", False):
         _is_tier_placeholder = True
     agent._model_is_tier_routed = _is_tier_placeholder
 
@@ -264,6 +267,22 @@ def apply_token_governance_runtime(agent: Any) -> None:
         except Exception:
             logger.info("Token governance: baseline → %s", agent.model)
 
+    emit_routing_decision_trace(
+        stage="token_governance_baseline",
+        chosen_model=str(agent.model or ""),
+        chosen_provider=str(getattr(agent, "provider", "") or ""),
+        reason_code="baseline_apply_runtime",
+        opm_enabled=bool(_opm_meta.get("enabled", False)),
+        opm_source=str(_opm_meta.get("source", "")),
+        tier_source="chief_default",
+        skip_flags={},
+        fallback_activated=bool(getattr(agent, "_fallback_activated", False)),
+        explicit_user_model=not bool(agent._model_is_tier_routed),
+        profile=str(getattr(agent, "profile", "") or ""),
+        session_id=str(getattr(agent, "session_id", "") or ""),
+        emit_status=getattr(agent, "_emit_status", None),
+    )
+
 
 def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     """Optional per-turn model pick from ``tier_models`` (dynamic tier routing)."""
@@ -307,8 +326,8 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     audit: dict = {}
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
-    _opm = cfg.get("openai_primary_mode") or {}
-    if _opm.get("enabled", False) and tier in ("A", "B", "C"):
+    _opm, _opm_meta = resolve_openai_primary_mode(agent)
+    if _opm_meta.get("enabled", False) and tier in ("A", "B", "C"):
         _is_coding = any(
             kw in (user_message or "").lower()
             for kw in ("code", "implement", "debug", "refactor", "function",
@@ -349,7 +368,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # Enforce OpenAI-primary mode after consultant routing too, so no later
     # router step can drop back to low-cost Gemma tiers when the flag is on.
-    if _opm.get("enabled", False) and tier in ("A", "B", "C", "D"):
+    if _opm_meta.get("enabled", False) and tier in ("A", "B", "C", "D"):
         _router_rec2 = audit.get("router") if isinstance(audit, dict) else {}
         _coding_hint = bool(
             isinstance(_router_rec2, dict) and _router_rec2.get("coding_task", False)
@@ -437,6 +456,26 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
                 logger.info("%s", extra)
     except Exception:
         logger.info("Token governance: this turn Tier %s → %s", tier, mid)
+
+    emit_routing_decision_trace(
+        stage="per_turn_tier_override",
+        chosen_model=str(mid or ""),
+        chosen_provider=str(getattr(agent, "provider", "") or ""),
+        reason_code="tier_selected",
+        opm_enabled=bool(_opm_meta.get("enabled", False)),
+        opm_source=str(_opm_meta.get("source", "")),
+        tier_source=f"deterministic:{deterministic_tier}",
+        skip_flags={
+            "skip_per_turn": bool(getattr(agent, "_skip_per_turn_tier_routing", False)),
+            "fallback_activated": bool(getattr(agent, "_fallback_activated", False)),
+            "model_is_tier_routed": bool(getattr(agent, "_model_is_tier_routed", True)),
+        },
+        fallback_activated=bool(getattr(agent, "_fallback_activated", False)),
+        explicit_user_model=not bool(getattr(agent, "_model_is_tier_routed", True)),
+        profile=str(getattr(agent, "profile", "") or ""),
+        session_id=str(getattr(agent, "session_id", "") or ""),
+        emit_status=getattr(agent, "_emit_status", None),
+    )
 
     # Native OpenAI consultant tiers need api.openai.com + OPENAI_API_KEY; restore baseline otherwise.
     _rebind = getattr(agent, "_reconcile_runtime_after_tier_model_change", None)

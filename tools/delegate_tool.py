@@ -26,6 +26,9 @@ from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
+from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.routing_trace import emit_routing_decision_trace
+
 # Serialize delegate_task when switching HERMES_HOME for a child profile (process-global env).
 _HERMES_PROFILE_DELEGATE_LOCK = threading.RLock()
 
@@ -392,17 +395,22 @@ def _run_single_child(
         if not _gov_approved:
             # When OpenAI-primary mode is on, never auto-fallback to Gemma for
             # denied paid delegates. Keep GPT baseline semantics by blocking.
-            _opm_on = False
-            try:
-                from hermes_cli.config import load_config as _lc
-                _rt_cfg = getattr(parent_agent, "_token_governance_cfg", None) or {}
-                if not isinstance(_rt_cfg, dict):
-                    _rt_cfg = {}
-                _cfg = _lc() or {}
-                _opm = _rt_cfg.get("openai_primary_mode") or _cfg.get("openai_primary_mode") or {}
-                _opm_on = bool(_opm.get("enabled", False))
-            except Exception:
-                _opm_on = False
+            _, _opm_meta = resolve_openai_primary_mode(parent_agent)
+            _opm_on = bool(_opm_meta.get("enabled", False))
+            emit_routing_decision_trace(
+                stage="delegation_governance_decision",
+                chosen_model=str(child_model or ""),
+                chosen_provider=str(getattr(child, "provider", "") or ""),
+                reason_code="denied_paid_model",
+                opm_enabled=_opm_on,
+                opm_source=str(_opm_meta.get("source", "")),
+                tier_source="delegation_subprocess_governance",
+                fallback_activated=False,
+                explicit_user_model=False,
+                profile=str(getattr(parent_agent, "profile", "") or ""),
+                session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                emit_status=getattr(parent_agent, "_emit_status", None),
+            )
 
             # Auto-fallback: rerun with configured free model (gemma-4-31b-it on Gemini API)
             # instead of blocking and forcing the parent to deliberate / ask for approval.
@@ -430,6 +438,20 @@ def _run_single_child(
                                     f"delegation — switching to free model {fb_model!r} and continuing.",
                                     "subprocess_governance",
                                 )
+                            emit_routing_decision_trace(
+                                stage="delegation_governance_decision",
+                                chosen_model=str(fb_model or ""),
+                                chosen_provider=str(rt.get("provider") or ""),
+                                reason_code="fallback_to_free_after_denied_paid_model",
+                                opm_enabled=_opm_on,
+                                opm_source=str(_opm_meta.get("source", "")),
+                                tier_source="delegation_subprocess_governance",
+                                fallback_activated=True,
+                                explicit_user_model=False,
+                                profile=str(getattr(parent_agent, "profile", "") or ""),
+                                session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                                emit_status=getattr(parent_agent, "_emit_status", None),
+                            )
                             # Drop blocked child from interrupt list; replacement re-registers
                             if hasattr(parent_agent, "_active_children") and child in getattr(
                                 parent_agent, "_active_children", []
@@ -790,14 +812,9 @@ def delegate_task(
         """Hard baseline override: OPM-on delegations default to GPT, never Gemma."""
         try:
             from agent.openai_native_runtime import native_openai_runtime_tuple
-            from hermes_cli.config import load_config
 
-            _rt = (getattr(parent_agent, "_token_governance_cfg", None) or {})
-            if not isinstance(_rt, dict):
-                _rt = {}
-            _cfg = load_config() or {}
-            _opm = _rt.get("openai_primary_mode") or _cfg.get("openai_primary_mode") or {}
-            if not _opm.get("enabled", False):
+            _opm, _opm_meta = resolve_openai_primary_mode(parent_agent)
+            if not _opm_meta.get("enabled", False):
                 return creds
 
             _m = (str((creds or {}).get("model") or "")).strip().lower()
@@ -849,7 +866,7 @@ def delegate_task(
             if not tup:
                 return creds
             bu, ak = tup
-            return {
+            _next = {
                 **(creds or {}),
                 "model": _target,
                 "provider": "custom",
@@ -857,6 +874,21 @@ def delegate_task(
                 "api_key": ak,
                 "api_mode": "codex_responses",
             }
+            emit_routing_decision_trace(
+                stage="delegation_credentials_resolution",
+                chosen_model=str(_next.get("model") or ""),
+                chosen_provider=str(_next.get("provider") or ""),
+                reason_code="opm_baseline_override",
+                opm_enabled=True,
+                opm_source=str(_opm_meta.get("source", "")),
+                tier_source="delegation_baseline",
+                fallback_activated=False,
+                explicit_user_model=False,
+                profile=str(getattr(parent_agent, "profile", "") or ""),
+                session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                emit_status=getattr(parent_agent, "_emit_status", None),
+            )
+            return _next
         except Exception:
             return creds
 
@@ -1160,21 +1192,10 @@ def _resolve_delegation_credentials(
     # Also override stale Gemma delegation defaults when OPM is on.
     if (not configured_model or _is_gemma_configured) and not configured_provider and not configured_base_url:
         try:
-            from agent.token_governance_runtime import load_runtime_config
             from agent.openai_native_runtime import native_openai_runtime_tuple
-            from hermes_cli.config import load_config
 
-            # Prefer live per-turn governance already attached to the parent agent.
-            _parent_raw = (
-                getattr(parent_agent, "_token_governance_cfg", None)
-                if parent_agent is not None
-                else None
-            )
-            parent_rt = _parent_raw if isinstance(_parent_raw, dict) else {}
-            rt_cfg = parent_rt or load_runtime_config() or {}
-            cfg_full = load_config() or {}
-            opm = rt_cfg.get("openai_primary_mode") or cfg_full.get("openai_primary_mode") or {}
-            if opm.get("enabled", False):
+            opm, opm_meta = resolve_openai_primary_mode(parent_agent)
+            if opm_meta.get("enabled", False):
                 tup = None
                 # If parent already runs on direct OpenAI, reuse that runtime.
                 if parent_agent is not None:
@@ -1210,7 +1231,7 @@ def _resolve_delegation_credentials(
                     mid = str(
                         opm.get("codex_model") if coding else opm.get("default_model")
                     ).strip() or ("gpt-5.3-codex" if coding else "gpt-5.4")
-                    return {
+                    out = {
                         "model": mid,
                         "provider": "custom",
                         "base_url": bu,
@@ -1219,6 +1240,21 @@ def _resolve_delegation_credentials(
                         "command": None,
                         "args": [],
                     }
+                    emit_routing_decision_trace(
+                        stage="delegation_credentials_resolution",
+                        chosen_model=str(out.get("model") or ""),
+                        chosen_provider=str(out.get("provider") or ""),
+                        reason_code="opm_default_delegate_model",
+                        opm_enabled=True,
+                        opm_source=str(opm_meta.get("source", "")),
+                        tier_source="delegation_baseline",
+                        fallback_activated=False,
+                        explicit_user_model=False,
+                        profile=str(getattr(parent_agent, "profile", "") or ""),
+                        session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                        emit_status=getattr(parent_agent, "_emit_status", None),
+                    )
+                    return out
         except Exception:
             pass
 
@@ -1236,7 +1272,7 @@ def _resolve_delegation_credentials(
         try:
             rt = resolve_runtime_provider(requested="gemini")
             if (rt.get("api_key") or "").strip():
-                return {
+                out = {
                     "model": configured_model,
                     "provider": rt.get("provider"),
                     "base_url": rt.get("base_url"),
@@ -1245,6 +1281,18 @@ def _resolve_delegation_credentials(
                     "command": rt.get("command"),
                     "args": list(rt.get("args") or []),
                 }
+                emit_routing_decision_trace(
+                    stage="delegation_credentials_resolution",
+                    chosen_model=str(out.get("model") or ""),
+                    chosen_provider=str(out.get("provider") or ""),
+                    reason_code="gemma_direct_gemini",
+                    opm_enabled=False,
+                    opm_source="",
+                    tier_source="delegation_gemma_path",
+                    emit_status=getattr(parent_agent, "_emit_status", None),
+                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                )
+                return out
         except Exception:
             pass
         # Only if Gemini is unavailable, fall back to OpenRouter.
@@ -1254,7 +1302,7 @@ def _resolve_delegation_credentials(
                 _or_model = configured_model
                 if "/" not in _or_model:
                     _or_model = f"google/{_or_model}"
-                return {
+                out = {
                     "model": _or_model,
                     "provider": rt.get("provider"),
                     "base_url": rt.get("base_url"),
@@ -1263,6 +1311,19 @@ def _resolve_delegation_credentials(
                     "command": rt.get("command"),
                     "args": list(rt.get("args") or []),
                 }
+                emit_routing_decision_trace(
+                    stage="delegation_credentials_resolution",
+                    chosen_model=str(out.get("model") or ""),
+                    chosen_provider=str(out.get("provider") or ""),
+                    reason_code="gemma_openrouter_last_resort",
+                    opm_enabled=False,
+                    opm_source="",
+                    tier_source="delegation_gemma_path",
+                    fallback_activated=True,
+                    emit_status=getattr(parent_agent, "_emit_status", None),
+                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                )
+                return out
         except Exception:
             pass
 
@@ -1324,7 +1385,7 @@ def _resolve_delegation_credentials(
             f"Set the appropriate environment variable or run 'hermes login'."
         )
 
-    return {
+    out = {
         "model": configured_model,
         "provider": runtime.get("provider"),
         "base_url": runtime.get("base_url"),
@@ -1333,6 +1394,18 @@ def _resolve_delegation_credentials(
         "command": runtime.get("command"),
         "args": list(runtime.get("args") or []),
     }
+    emit_routing_decision_trace(
+        stage="delegation_credentials_resolution",
+        chosen_model=str(out.get("model") or ""),
+        chosen_provider=str(out.get("provider") or ""),
+        reason_code="configured_provider_runtime",
+        opm_enabled=False,
+        opm_source="",
+        tier_source="delegation_provider_cfg",
+        emit_status=getattr(parent_agent, "_emit_status", None),
+        session_id=str(getattr(parent_agent, "session_id", "") or ""),
+    )
+    return out
 
 
 def _load_config() -> dict:

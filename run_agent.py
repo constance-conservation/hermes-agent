@@ -103,6 +103,7 @@ from agent.prompt_builder import build_skills_system_prompt, build_context_files
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.provider_health import ProviderHealthTracker
 from agent.cost_monitor import CostMonitor
+from agent.routing_trace import emit_routing_decision_trace
 from agent.display import (
     KawaiiSpinner, build_tool_preview as _build_tool_preview,
     get_cute_tool_message as _get_cute_tool_message_impl,
@@ -5114,6 +5115,21 @@ class AIAgent:
                 old_model, fb_model, fb_provider,
                 " [openrouter_last_resort]" if _or_last else "",
             )
+            emit_routing_decision_trace(
+                stage="fallback_activation",
+                chosen_model=str(fb_model or ""),
+                chosen_provider=str(fb_provider or ""),
+                reason_code="openrouter_last_resort" if _or_last else "fallback_chain_activation",
+                opm_enabled=False,
+                opm_source="",
+                tier_source="fallback_chain",
+                skip_flags={"triggered_by_rate_limit": bool(triggered_by_rate_limit)},
+                fallback_activated=True,
+                explicit_user_model=False,
+                profile=str(getattr(self, "profile", "") or ""),
+                session_id=str(getattr(self, "session_id", "") or ""),
+                emit_status=getattr(self, "_emit_status", None),
+            )
             return True
         except Exception as e:
             logging.error("Failed to activate fallback %s: %s", fb_model, e)
@@ -7022,6 +7038,24 @@ class AIAgent:
             from agent.token_governance_runtime import apply_per_turn_tier_model
 
             apply_per_turn_tier_model(self, user_message)
+            emit_routing_decision_trace(
+                stage="main_turn_selection",
+                chosen_model=str(self.model or ""),
+                chosen_provider=str(self.provider or ""),
+                reason_code="post_per_turn_tier_routing",
+                opm_enabled=False,
+                opm_source="",
+                tier_source="run_conversation",
+                skip_flags={
+                    "skip_per_turn": bool(getattr(self, "_skip_per_turn_tier_routing", False)),
+                    "fallback_activated": bool(getattr(self, "_fallback_activated", False)),
+                },
+                fallback_activated=bool(getattr(self, "_fallback_activated", False)),
+                explicit_user_model=not bool(getattr(self, "_model_is_tier_routed", True)),
+                profile=str(getattr(self, "profile", "") or ""),
+                session_id=str(getattr(self, "session_id", "") or ""),
+                emit_status=getattr(self, "_emit_status", None),
+            )
         except Exception:
             logger.debug("apply_per_turn_tier_model failed", exc_info=True)
         finally:
