@@ -1063,9 +1063,11 @@ def _resolve_delegation_credentials(
         try:
             from agent.token_governance_runtime import load_runtime_config
             from agent.openai_native_runtime import native_openai_runtime_tuple
+            from hermes_cli.config import load_config
 
             rt_cfg = load_runtime_config() or {}
-            opm = rt_cfg.get("openai_primary_mode") or {}
+            cfg_full = load_config() or {}
+            opm = rt_cfg.get("openai_primary_mode") or cfg_full.get("openai_primary_mode") or {}
             if opm.get("enabled", False):
                 tup = native_openai_runtime_tuple()
                 if tup:
