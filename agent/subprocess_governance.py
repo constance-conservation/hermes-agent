@@ -18,6 +18,10 @@ MID/HIGH COST (always require explicit approval for subprocess use):
   - gpt-5.3-codex (tier F)
   - Any other OpenRouter/OpenAI model
 
+Under **openai_primary_mode**, native **api.openai.com** subprocesses also honor
+**routing_canon** ``opm_native_quota_downgrade`` chat/codex lists (merged into the
+effective allowlist and free-subprocess fallback candidate order).
+
 Policy rules:
 1. Background/subprocess tasks MUST use only genuinely free local models.
 2. Gemini API models (low-cost) ALSO require approval for subprocess use.
@@ -40,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from agent.disallowed_model_family import model_id_contains_disallowed_family
+from agent.opm_quota_ladder import opm_quota_ladder_subprocess_core_ids
 from agent.openai_primary_mode import (
     opm_auxiliary_model,
     opm_enabled,
@@ -62,16 +67,59 @@ def _opm_subprocess_core_model(mid: str) -> str:
 
 
 def _opm_effective_subprocess_allowlist_cores(opm: Dict[str, Any]) -> Set[str]:
-    """Canonical short model ids allowed for subprocesses under OPM."""
+    """Canonical short model ids allowed for subprocesses under OPM.
+
+    Includes **routing_canon** ``opm_native_quota_downgrade`` chat/codex slugs when that
+    ladder is enabled (same set the main agent steps through on native quota errors).
+    """
+    ladder = opm_quota_ladder_subprocess_core_ids()
     raw = opm.get("allowed_subprocess_models")
     if isinstance(raw, list) and len(raw) > 0:
-        return {_opm_subprocess_core_model(str(a)) for a in raw if str(a).strip()}
+        explicit = {_opm_subprocess_core_model(str(a)) for a in raw if str(a).strip()}
+        return {c for c in (explicit | set(ladder)) if c}
     cores = {_opm_subprocess_core_model(x) for x in _DEFAULT_OPM_SUBPROCESS_CORE_MODELS}
     for key in ("default_model", "codex_model", "fallback_model"):
         s = str(opm.get(key) or "").strip()
         if s:
             cores.add(_opm_subprocess_core_model(s))
-    return {c for c in cores if c}
+    return {c for c in (cores | set(ladder)) if c}
+
+
+def _iter_opm_subprocess_fallback_model_candidates(opm: Dict[str, Any]) -> List[str]:
+    """Ordered ids to try for ``default_free_subprocess_model_id`` under OPM."""
+    seen: Set[str] = set()
+    out: List[str] = []
+
+    def add(mid: str) -> None:
+        c = _opm_subprocess_core_model(mid)
+        if not c or model_id_contains_disallowed_family(c):
+            return
+        k = c.lower()
+        if k in seen:
+            return
+        seen.add(k)
+        out.append(c)
+
+    raw = opm.get("allowed_subprocess_models")
+    if isinstance(raw, list):
+        for a in raw:
+            add(str(a))
+    for key in ("default_model", "codex_model", "fallback_model"):
+        add(str(opm.get(key) or ""))
+    try:
+        from agent.opm_quota_ladder import load_opm_native_quota_downgrade_config
+
+        lcfg = load_opm_native_quota_downgrade_config()
+        if lcfg.get("enabled"):
+            for m in lcfg.get("chat_models") or []:
+                add(str(m))
+            for m in lcfg.get("codex_models") or []:
+                add(str(m))
+    except Exception:
+        logger.debug("opm subprocess fallback ladder merge failed", exc_info=True)
+    for x in _DEFAULT_OPM_SUBPROCESS_CORE_MODELS:
+        add(str(x))
+    return out
 
 
 def _refresh_openai_credentials_for_subprocess(parent_agent: Any = None) -> None:
@@ -209,16 +257,9 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     try:
         if opm_enabled(parent_agent):
             opm_cfg, _ = resolve_openai_primary_mode(parent_agent)
-            allowed = opm_cfg.get("allowed_subprocess_models") or []
-            if isinstance(allowed, list):
-                for a in allowed:
-                    s = str(a).strip()
-                    if s and not model_id_contains_disallowed_family(s):
-                        return s
-            for key in ("default_model", "codex_model"):
-                s = str(opm_cfg.get(key) or "").strip()
-                if s and not model_id_contains_disallowed_family(s):
-                    return s
+            for cand in _iter_opm_subprocess_fallback_model_candidates(opm_cfg):
+                if cand and not model_id_contains_disallowed_family(cand):
+                    return cand
             return opm_auxiliary_model(parent_agent)
     except Exception:
         pass
@@ -419,17 +460,10 @@ def _is_openai_primary_mode_allowed(model_id: str, parent_agent: Any = None) -> 
 
         mid = _opm_subprocess_core_model(model_id)
         pattern_ok = _model_is_native_openai_api_slug(model_id)
-        raw_allowed = opm.get("allowed_subprocess_models")
-        if isinstance(raw_allowed, list) and len(raw_allowed) > 0:
-            allowed_explicit = {
-                _opm_subprocess_core_model(str(a)) for a in raw_allowed if str(a).strip()
-            }
-            in_explicit = mid in allowed_explicit
-            if not (pattern_ok or in_explicit):
-                return False
-        else:
-            if not pattern_ok:
-                return False
+        combined_allow = _opm_effective_subprocess_allowlist_cores(opm)
+        mid_ok = mid.lower() in {c.lower() for c in combined_allow if c}
+        if not (pattern_ok or mid_ok):
+            return False
 
         if opm.get("require_direct_openai", True) and parent_agent is not None:
             # Direct-OpenAI requirement applies to the subprocess runtime, not

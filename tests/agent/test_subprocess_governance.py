@@ -313,3 +313,87 @@ def test_openai_primary_mode_allows_gemini_parent_when_openai_runtime_available(
         provider="gemini",
     )
     assert sg._is_openai_primary_mode_allowed("gpt-5.4", parent) is True
+
+
+def test_opm_subprocess_allowlist_unions_routing_canon_quota_ladder(tmp_path, monkeypatch):
+    """Explicit allowed_subprocess_models plus routing_canon ladder slugs (OPM subprocess gate)."""
+    from agent import subprocess_governance as sg
+    from agent.routing_canon import invalidate_routing_canon_cache
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "routing_canon.yaml").write_text(
+        "opm_native_quota_downgrade:\n"
+        "  enabled: true\n"
+        "  chat_models: [gpt-5.4, gpt-5.3, gpt-5.2]\n"
+        "  codex_models: [gpt-5.3-codex, gpt-5.2-codex]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    invalidate_routing_canon_cache()
+    try:
+        monkeypatch.setattr(
+            "agent.openai_native_runtime.native_openai_runtime_tuple",
+            lambda: ("https://api.openai.com/v1", "key"),
+        )
+        monkeypatch.setattr(
+            "agent.token_governance_runtime.load_runtime_config",
+            lambda: {
+                "openai_primary_mode": {
+                    "enabled": True,
+                    "allowed_subprocess_models": ["gpt-5.4"],
+                    "require_direct_openai": True,
+                }
+            },
+        )
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+
+        parent = SimpleNamespace(base_url="https://api.openai.com/v1", provider="custom")
+        assert sg._is_openai_primary_mode_allowed("gpt-5.3", parent) is True
+        assert sg._is_openai_primary_mode_allowed("gpt-5.2", parent) is True
+        assert sg._is_openai_primary_mode_allowed("gpt-5.3-codex", parent) is True
+
+        cores = sg._opm_effective_subprocess_allowlist_cores(
+            {
+                "enabled": True,
+                "allowed_subprocess_models": ["gpt-5.4"],
+            }
+        )
+        assert "gpt-5.3" in cores
+        assert "gpt-5.2-codex" in cores
+    finally:
+        invalidate_routing_canon_cache()
+
+
+def test_default_free_subprocess_prefers_canon_ladder_before_builtin_defaults(tmp_path, monkeypatch):
+    from agent import subprocess_governance as sg
+    from agent.routing_canon import invalidate_routing_canon_cache
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    (home / "routing_canon.yaml").write_text(
+        "opm_native_quota_downgrade:\n"
+        "  enabled: true\n"
+        "  chat_models: [gpt-5.2]\n"
+        "  codex_models: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    invalidate_routing_canon_cache()
+    try:
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda: {
+                "openai_primary_mode": {
+                    "enabled": True,
+                    "allowed_subprocess_models": [],
+                    "require_direct_openai": True,
+                }
+            },
+        )
+        monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+        mid = sg.default_free_subprocess_model_id(None)
+        assert mid == "gpt-5.2"
+    finally:
+        invalidate_routing_canon_cache()

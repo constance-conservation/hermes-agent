@@ -55,6 +55,19 @@ def load_opm_native_quota_downgrade_config() -> Dict[str, Any]:
     }
 
 
+def opm_quota_ladder_subprocess_core_ids() -> frozenset[str]:
+    """Bare model ids in ``chat_models`` ∪ ``codex_models`` when the ladder is enabled."""
+    try:
+        cfg = load_opm_native_quota_downgrade_config()
+        if not cfg.get("enabled"):
+            return frozenset()
+        ls = cfg.get("ladder_model_set") or frozenset()
+        return ls if isinstance(ls, frozenset) else frozenset(ls)
+    except Exception:
+        logger.debug("opm_quota_ladder_subprocess_core_ids failed", exc_info=True)
+        return frozenset()
+
+
 def opm_native_ladder_model_uses_openai_tuple(agent: Any, model_id: str) -> bool:
     """True when *model_id* is listed in the quota ladder and OPM + ladder are enabled."""
     try:
