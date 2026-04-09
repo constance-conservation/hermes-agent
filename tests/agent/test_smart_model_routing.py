@@ -48,6 +48,25 @@ def test_skips_tool_heavy_prompt_keywords():
     assert choose_cheap_model_route(prompt, _BASE_CONFIG) is None
 
 
+def test_resolve_turn_route_allow_cheap_false_keeps_primary_for_short_message():
+    """Manual /models merge must not run choose_cheap_model_route first (Gemini Flash)."""
+    from agent.smart_model_routing import resolve_turn_route
+
+    primary = {
+        "model": "openai/gpt-4",
+        "provider": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_mode": "chat_completions",
+        "api_key": "sk-primary",
+        "command": None,
+        "args": [],
+    }
+    result = resolve_turn_route("hi", _BASE_CONFIG, primary, allow_cheap_route=False)
+    assert result["model"] == "openai/gpt-4"
+    assert result["runtime"]["provider"] == "openrouter"
+    assert result["label"] is None
+
+
 def test_resolve_turn_route_primary_when_opm_blocks_cheap():
     from agent.smart_model_routing import resolve_turn_route
 

@@ -810,9 +810,18 @@ class GatewayRunner:
             "args": list(runtime_kwargs.get("args") or []),
             "credential_pool": runtime_kwargs.get("credential_pool"),
         }
-        base = resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
         _sticky_lock = getattr(self, "_gateway_models_sticky_lock", None)
         _sticky_map = getattr(self, "_gateway_models_sticky", None)
+        _sticky_preview = None
+        if session_key and _sticky_lock is not None and isinstance(_sticky_map, dict):
+            with _sticky_lock:
+                _sticky_preview = _sticky_map.get(session_key)
+        base = resolve_turn_route(
+            user_message,
+            getattr(self, "_smart_model_routing", {}),
+            primary,
+            allow_cheap_route=not _sticky_preview,
+        )
         if not session_key or _sticky_lock is None or not isinstance(_sticky_map, dict):
             return base
         sticky = None
@@ -5998,20 +6007,6 @@ class GatewayRunner:
                 pass
 
             pr_precomputed = None
-            _pr_cfg_early = (user_config.get("agent") or {}).get("profile_router") or {}
-            if isinstance(message, str) and _pr_cfg_early.get("enabled"):
-                try:
-                    from agent.profile_router import classify_profile_for_prompt, list_routable_profile_names
-                    from hermes_cli.profiles import get_active_profile_name
-
-                    pr_precomputed = classify_profile_for_prompt(
-                        message,
-                        candidates=list_routable_profile_names(),
-                        current_profile=get_active_profile_name(),
-                        router_cfg=_pr_cfg_early,
-                    )
-                except Exception as _pr_early_exc:
-                    logger.debug("profile_router early classify: %s", _pr_early_exc)
 
             model = _resolve_gateway_model(user_config)
 
@@ -6082,6 +6077,40 @@ class GatewayRunner:
                 message, model, runtime_kwargs, session_key=session_key
             )
 
+            # Manual /models picks: skip profile_router LLM (aux Gemini, noisy on quota) and
+            # delegate routing so the sticky pipeline model is the only authority this turn.
+            # Also skip when a sticky row exists for this session even if merge failed to set
+            # skip_per_turn_tier_routing on turn_route (otherwise Gemini quota errors flood logs).
+            _pr_skip_manual = bool(turn_route.get("skip_per_turn_tier_routing"))
+            if not _pr_skip_manual and session_key:
+                _sl_pr = getattr(self, "_gateway_models_sticky_lock", None)
+                _sm_pr = getattr(self, "_gateway_models_sticky", None)
+                if _sl_pr is not None and isinstance(_sm_pr, dict):
+                    try:
+                        with _sl_pr:
+                            if _sm_pr.get(session_key):
+                                _pr_skip_manual = True
+                    except Exception:
+                        pass
+            _pr_cfg_early = (user_config.get("agent") or {}).get("profile_router") or {}
+            if (
+                isinstance(message, str)
+                and _pr_cfg_early.get("enabled")
+                and not _pr_skip_manual
+            ):
+                try:
+                    from agent.profile_router import classify_profile_for_prompt, list_routable_profile_names
+                    from hermes_cli.profiles import get_active_profile_name
+
+                    pr_precomputed = classify_profile_for_prompt(
+                        message,
+                        candidates=list_routable_profile_names(),
+                        current_profile=get_active_profile_name(),
+                        router_cfg=_pr_cfg_early,
+                    )
+                except Exception as _pr_early_exc:
+                    logger.debug("profile_router early classify: %s", _pr_early_exc)
+
             # Convert history to agent format (needed for profile-router delegate return and
             # run_conversation; does not depend on AIAgent).
             agent_history = []
@@ -6125,6 +6154,7 @@ class GatewayRunner:
                 and _pr_cfg.get("enabled")
                 and pr_precomputed
                 and pr_precomputed[0]
+                and not _pr_skip_manual
             ):
                 profile_router_stub_attempted = True
                 try:
@@ -6148,7 +6178,7 @@ class GatewayRunner:
                         provider_sort=_prov.get("sort"),
                         tool_progress_callback=progress_callback if tool_progress_enabled else None,
                         prefill_messages=self._prefill_messages or None,
-                        defer_opm_manual=bool(turn_route.get("skip_per_turn_tier_routing")),
+                        defer_opm_manual=_pr_skip_manual,
                     )
                     routed_early = route_and_delegate_if_configured(
                         user_message=message,
@@ -6264,7 +6294,11 @@ class GatewayRunner:
             # CLI profile router parity: optional delegate to another Hermes profile before
             # the main loop (same config as agent.profile_router).
             routed_resp = None
-            if isinstance(message, str) and not profile_router_stub_attempted:
+            if (
+                isinstance(message, str)
+                and not profile_router_stub_attempted
+                and not _pr_skip_manual
+            ):
                 _pr_cfg2 = (user_config.get("agent") or {}).get("profile_router") or {}
                 if _pr_cfg2.get("enabled"):
                     try:

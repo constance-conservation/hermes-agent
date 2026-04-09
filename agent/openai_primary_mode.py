@@ -7,6 +7,12 @@ import os
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+# Thread-local session agent for the active :meth:`AIAgent.run_conversation` turn.
+# Lets auxiliary code paths (e.g. ``call_llm(..., agent=None)``) respect ``/models``
+# manual overrides via ``_defer_opm_primary_coercion`` without threading *agent* through
+# every helper.
+_tls_opm_session = threading.local()
+
 from agent.disallowed_model_family import model_id_contains_disallowed_family
 from utils import is_truthy_value
 
@@ -195,6 +201,99 @@ def opm_enabled(agent: Any = None) -> bool:
         return False
 
 
+def attach_opm_session_agent_for_turn(agent: Any) -> None:
+    """Bind *agent* on this thread for OPM coercion checks (paired with detach)."""
+    _tls_opm_session.agent = agent
+
+
+def detach_opm_session_agent_for_turn() -> None:
+    if hasattr(_tls_opm_session, "agent"):
+        delattr(_tls_opm_session, "agent")
+
+
+def manual_pipeline_opm_bypass_enabled() -> bool:
+    """Config/env hint for callers that branch on “strict” manual-pipeline behavior.
+
+    Env ``HERMES_MANUAL_PIPELINE_BYPASS_OPM``: ``1``/``0`` forces on/off; when unset,
+    uses ``openai_primary_mode.manual_pipeline_forces_opm_bypass`` (default true).
+
+    Note: :func:`opm_coercion_effective` no longer consults this — manual ``/models`` defer
+    always disables OPM coercion so OpenRouter stacks are not reconciled to native OpenAI.
+    """
+    v = (os.environ.get("HERMES_MANUAL_PIPELINE_BYPASS_OPM") or "").strip().lower()
+    if v in ("0", "false", "no", "off"):
+        return False
+    if v in ("1", "true", "yes", "on"):
+        return True
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        opm = cfg.get("openai_primary_mode") if isinstance(cfg.get("openai_primary_mode"), dict) else {}
+        return is_truthy_value(opm.get("manual_pipeline_forces_opm_bypass"), default=True)
+    except Exception:
+        return True
+
+
+def manual_pipeline_no_provider_fallback_enabled() -> bool:
+    """True when manual ``/models`` turns must not advance the provider fallback chain."""
+    v = (os.environ.get("HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK") or "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        opm = cfg.get("openai_primary_mode") if isinstance(cfg.get("openai_primary_mode"), dict) else {}
+        return is_truthy_value(opm.get("manual_pipeline_no_provider_fallback"), default=False)
+    except Exception:
+        return False
+
+
+def opm_coercion_effective(agent: Any = None) -> bool:
+    """True when OPM should apply model/runtime coercion for *agent* this turn.
+
+    False when OPM is off, or when a manual ``/models`` pipeline pick is active
+    (``_defer_opm_primary_coercion``): the user's chosen provider/base/model must
+    not be rewritten — including to native ``api.openai.com`` for ``openai/gpt-*``
+    slugs. The ``manual_pipeline_forces_opm_bypass`` config only affects auxiliary
+    tooling that reads :func:`manual_pipeline_opm_bypass_enabled`; it does **not**
+    re-enable coercion on manual picks (that broke OpenRouter routing).
+    """
+    if not opm_enabled(agent):
+        return False
+    if opm_manual_override_active(agent):
+        return False
+    return True
+
+
+def opm_manual_override_active(agent: Any = None) -> bool:
+    """True when a CLI ``/models`` (or pipeline) pick forbids OPM runtime coercion this turn.
+
+    Checks *agent* when provided, else the thread-local session from
+    :func:`attach_opm_session_agent_for_turn` (inside ``run_conversation``).
+
+    Uses ``__dict__`` / ``object.__getattribute__`` so :class:`unittest.mock.MagicMock`
+    parents without an explicit flag are not treated as opted-in (``getattr`` on mocks
+    returns truthy child mocks).
+    """
+    subj = agent
+    if subj is None:
+        subj = getattr(_tls_opm_session, "agent", None)
+    if subj is None:
+        return False
+    d = getattr(subj, "__dict__", None)
+    if isinstance(d, dict) and "_defer_opm_primary_coercion" in d:
+        # Do not ``bool()`` — :class:`~unittest.mock.MagicMock` is truthy.
+        return d["_defer_opm_primary_coercion"] is True
+    try:
+        return object.__getattribute__(subj, "_defer_opm_primary_coercion") is True
+    except AttributeError:
+        return False
+
+
 def is_opm_blocked_openrouter_auto_slug(model_id: str) -> bool:
     """True for OpenRouter server-side auto routing (unpredictable downstream model)."""
     m = str(model_id or "").strip().lower().replace("_", "/").replace(" ", "")
@@ -233,9 +332,9 @@ def coerce_opm_disallowed_routing_slugs(model_id: Any, agent: Any = None) -> Any
     s = str(model_id).strip()
     if not s:
         return s
-    s = coerce_under_opm_if_disallowed_family(s, agent)
-    if not opm_enabled(agent):
+    if not opm_coercion_effective(agent):
         return s
+    s = coerce_under_opm_if_disallowed_family(s, agent)
     if is_opm_blocked_openrouter_auto_slug(s):
         return _opm_primary_non_auto_model(agent)
     return s
@@ -248,7 +347,9 @@ def coerce_under_opm_if_disallowed_family(model: Any, agent: Any = None) -> Any:
     s = str(model).strip()
     if not s:
         return s
-    if not opm_enabled(agent) or not model_id_contains_disallowed_family(s):
+    if not opm_coercion_effective(agent):
+        return s
+    if not model_id_contains_disallowed_family(s):
         return s
     try:
         opm, _ = resolve_openai_primary_mode(agent)

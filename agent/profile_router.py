@@ -512,8 +512,9 @@ def classify_profile_for_prompt(
         resp = _call_profile_router_llm(_messages, router_cfg)
         text = extract_content_or_reasoning(resp)
     except Exception as exc:
-        logger.warning("profile_router LLM call failed: %s", exc)
-        return None, 0.0, f"router error: {exc}"
+        # DEBUG — full provider bodies (e.g. Gemini 429 JSON) must not spam user-facing logs.
+        logger.debug("profile_router LLM call failed: %s", exc, exc_info=True)
+        return None, 0.0, "router error"
 
     if not (text and str(text).strip()):
         return None, 0.0, "empty router model output"

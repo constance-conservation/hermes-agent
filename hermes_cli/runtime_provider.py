@@ -27,6 +27,12 @@ def _normalize_custom_provider_name(value: str) -> str:
     return value.strip().lower().replace(" ", "-")
 
 
+def _looks_like_native_openai_base_url(base_url: str) -> bool:
+    """True when *base_url* targets OpenAI's API — must not satisfy ``requested=openrouter``."""
+    u = (base_url or "").strip().lower()
+    return bool(u) and "api.openai.com" in u and "openrouter" not in u
+
+
 def _detect_api_mode_for_url(base_url: str) -> Optional[str]:
     """Auto-detect api_mode from the resolved base URL.
 
@@ -156,7 +162,9 @@ def _resolve_runtime_from_pool_entry(
             cfg_base_url = str(model_cfg.get("base_url") or "").strip().rstrip("/")
         base_url = cfg_base_url or base_url or "https://api.anthropic.com"
     elif provider == "openrouter":
-        base_url = base_url or OPENROUTER_BASE_URL
+        # Mis-keyed pool rows sometimes store api.openai.com — would send OR model ids to OpenAI.
+        if _looks_like_native_openai_base_url(base_url):
+            base_url = OPENROUTER_BASE_URL.rstrip("/")
     elif provider == "nous":
         api_mode = "chat_completions"
     elif provider == "copilot":
@@ -402,6 +410,21 @@ def _resolve_openrouter_runtime(
 
     if effective_provider == "custom" and not api_key and not _is_openrouter_url:
         api_key = "no-key-required"
+
+    # Explicit ``requested=openrouter`` must not resolve to api.openai.com (bad env, pool, or
+    # OPENROUTER_BASE_URL) while the model id is still an OpenRouter slug (e.g. ``/models``).
+    if requested_norm == "openrouter" and _looks_like_native_openai_base_url(base_url):
+        base_url = OPENROUTER_BASE_URL.rstrip("/")
+        _is_openrouter_url = True
+        api_key_candidates = [
+            explicit_api_key,
+            os.getenv("OPENROUTER_API_KEY"),
+            os.getenv("OPENAI_API_KEY"),
+        ]
+        api_key = next(
+            (str(candidate or "").strip() for candidate in api_key_candidates if has_usable_secret(candidate)),
+            "",
+        )
 
     return {
         "provider": effective_provider,

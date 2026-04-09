@@ -235,7 +235,7 @@ The registry handles schema collection, dispatch, availability checking, and err
 
 ### config.yaml options:
 1. Add to `DEFAULT_CONFIG` in `hermes_cli/config.py`
-2. Bump `_config_version` (currently 5) to trigger migration for existing users
+2. Bump `_config_version` (currently 28) to trigger migration for existing users
 
 ### .env variables:
 1. Add to `OPTIONAL_ENV_VARS` in `hermes_cli/config.py` with metadata:
@@ -365,6 +365,10 @@ Hermes-Agent ensures caching remains valid throughout a conversation. **Do NOT i
 - Reload memories or rebuild system prompts mid-conversation
 
 Cache-breaking forces dramatically higher costs. The ONLY time we alter context is during context compression.
+
+### Manual `/models` picks vs OpenAI-primary mode (OPM)
+
+`openai_primary_mode` in `config.yaml` can bias routing toward native OpenAI. A manual **`/models`** selection sets **`_defer_opm_primary_coercion`** so OPM **coercion** does not rewrite the chosen stack (including avoiding native **`api.openai.com`** for OpenRouter slugs like **`openai/gpt-5.4`**). **`manual_pipeline_forces_opm_bypass`** / **`HERMES_MANUAL_PIPELINE_BYPASS_OPM`** tune auxiliary behavior via **`manual_pipeline_opm_bypass_enabled()`**; they do **not** re-enable OPM coercion on manual picks. **Cheap-model routing** (`smart_model_routing` → short prompts sent to a small model such as Gemini Flash) is **not** applied while a sticky or one-shot pipeline pick is pending (CLI/gateway resolve the primary stack first, then merge). For manual pipeline agents, the **free_model_routing** provider fallback chain is cleared so failures do not hop Gemini → native GPT unless you re-enable fallbacks via config/env (see **`manual_pipeline_no_provider_fallback`**). Under **`openai_primary_mode`**: **`manual_pipeline_no_provider_fallback`** (default false; when true, `_try_activate_fallback` does not run for manual picks). Environment override: **`HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK`**. For debugging wrong endpoint vs OpenRouter, set **`HERMES_PRE_LLM_ROUTING_TRACE=1`** or enable agent **`verbose_logging`** to emit a **`pre_llm_api_stack`** trace (includes **`base_url`**, **`opm_coercion_effective`**). See **`agent/openai_primary_mode.py`** (`opm_coercion_effective`, `manual_pipeline_opm_bypass_enabled`).
 
 ### Working Directory Behavior
 - **CLI**: Uses current directory (`.` → `os.getcwd()`)

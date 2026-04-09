@@ -208,6 +208,23 @@ def test_resolve_runtime_provider_openrouter_explicit(monkeypatch):
     assert resolved["source"] == "explicit"
 
 
+def test_resolve_runtime_provider_openrouter_rejects_poisoned_openai_base(monkeypatch):
+    """Bad OPENROUTER_BASE_URL (api.openai.com) must not win for explicit openrouter resolution."""
+    from hermes_constants import OPENROUTER_BASE_URL
+
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "openrouter")
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key-poison-test")
+
+    resolved = rp.resolve_runtime_provider(requested="openrouter")
+
+    assert "openrouter.ai" in (resolved.get("base_url") or "").lower()
+    assert resolved["base_url"].rstrip("/") == OPENROUTER_BASE_URL.rstrip("/")
+    assert resolved["api_key"] == "or-key-poison-test"
+
+
 def test_resolve_runtime_provider_auto_uses_openrouter_pool(monkeypatch):
     class _Entry:
         access_token = "pool-key"

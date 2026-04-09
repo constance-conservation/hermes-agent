@@ -25,9 +25,13 @@ def _opm_clamp_routed_model(selected: str, routing_agent: Any) -> str:
     """Never return a disallowed-family id when openai_primary_mode is enabled."""
     try:
         from agent.disallowed_model_family import model_id_contains_disallowed_family
-        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
+        from agent.openai_primary_mode import (
+            opm_auxiliary_model,
+            opm_enabled,
+            opm_manual_override_active,
+        )
 
-        if not opm_enabled(routing_agent):
+        if opm_manual_override_active(routing_agent) or not opm_enabled(routing_agent):
             return selected
         if not model_id_contains_disallowed_family(selected):
             return selected
@@ -57,9 +61,13 @@ def first_tier_hub_fallback(
     flat = _flatten_tier_models(tiers)
     try:
         from agent.disallowed_model_family import model_id_contains_disallowed_family
-        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
+        from agent.openai_primary_mode import (
+            opm_auxiliary_model,
+            opm_enabled,
+            opm_manual_override_active,
+        )
 
-        if opm_enabled(routing_agent):
+        if opm_enabled(routing_agent) and not opm_manual_override_active(routing_agent):
             for m in flat:
                 if m and not model_id_contains_disallowed_family(m):
                     return m
@@ -83,9 +91,17 @@ def resolve_gemini_routed_model(
     router_model = canonical_native_tier_model_id((router_model or "").strip())
     try:
         from agent.disallowed_model_family import model_id_contains_disallowed_family
-        from agent.openai_primary_mode import opm_auxiliary_model, opm_enabled
+        from agent.openai_primary_mode import (
+            opm_auxiliary_model,
+            opm_enabled,
+            opm_manual_override_active,
+        )
 
-        if opm_enabled(routing_agent) and model_id_contains_disallowed_family(router_model):
+        if (
+            opm_enabled(routing_agent)
+            and not opm_manual_override_active(routing_agent)
+            and model_id_contains_disallowed_family(router_model)
+        ):
             router_model = opm_auxiliary_model(routing_agent)
     except Exception:
         pass

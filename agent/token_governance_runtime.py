@@ -25,6 +25,7 @@ from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
     opm_auxiliary_model,
     opm_enabled,
+    opm_manual_override_active,
     resolve_openai_primary_mode,
 )
 from agent.routing_trace import emit_routing_decision_trace
@@ -169,8 +170,10 @@ def apply_token_governance_runtime(agent: Any) -> None:
     )
     # With OpenAI-primary mode + native OpenAI, keep per-turn routing active even if
     # model.default is currently a concrete slug (legacy/stale profile config).
+    # Manual ``/models`` routes set ``_defer_opm_primary_coercion`` — treat as explicit
+    # concrete model so OPM does not force tier placeholders or blocklist swaps.
     _, _opm_meta = resolve_openai_primary_mode(agent)
-    if opm_enabled(agent):
+    if opm_enabled(agent) and not getattr(agent, "_defer_opm_primary_coercion", False):
         _is_tier_placeholder = True
     agent._model_is_tier_routed = _is_tier_placeholder
     # region agent log
@@ -225,7 +228,7 @@ def apply_token_governance_runtime(agent: Any) -> None:
     if isinstance(blocked, str):
         blocked = [blocked]
 
-    if not allow_premium and blocked:
+    if not allow_premium and blocked and not getattr(agent, "_defer_opm_primary_coercion", False):
         replacement = blocked_replace if tier_models else default_resolved
         for sub in blocked:
             if sub and str(sub).lower() in mlow:
@@ -344,7 +347,7 @@ def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
     _raw = (getattr(child, "model", None) or "").strip()
     _is_tier_placeholder = is_tier_dynamic(_raw) or bool(TIER_SENTINEL_RE.match(_raw))
     _, _opm_meta = resolve_openai_primary_mode(child)
-    if opm_enabled(child):
+    if opm_enabled(child) and not getattr(child, "_defer_opm_primary_coercion", False):
         _is_tier_placeholder = True
     child._model_is_tier_routed = _is_tier_placeholder
     child._last_opm_meta = _opm_meta
@@ -363,7 +366,7 @@ def _opm_clamp_tier_resolved_model(
     ``_reconcile_runtime_after_tier_model_change`` may leave the Gemini snapshot
     while the model id is wrong, or keep the subagent on a free tier despite OPM.
     """
-    if not mid or not opm_enabled(agent):
+    if not mid or opm_manual_override_active(agent) or not opm_enabled(agent):
         return mid
     mlow = str(mid).lower()
     try:
@@ -446,6 +449,8 @@ def enforce_opm_runtime_after_per_turn_routing(agent: Any, user_message: str) ->
     any remaining disallowed-family / Gemini / free model id before the first LLM call.
     """
     try:
+        if getattr(agent, "_defer_opm_primary_coercion", False):
+            return
         if not opm_enabled(agent):
             return
         cur = (getattr(agent, "model", None) or "").strip()
@@ -585,7 +590,11 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
     _opm_meta = getattr(agent, "_last_opm_meta", None) or {}
-    if opm_enabled(agent) and tier in ("A", "B", "C"):
+    if (
+        opm_enabled(agent)
+        and not getattr(agent, "_defer_opm_primary_coercion", False)
+        and tier in ("A", "B", "C")
+    ):
         _is_coding = any(
             kw in (user_message or "").lower()
             for kw in ("code", "implement", "debug", "refactor", "function",
@@ -626,7 +635,11 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # Enforce OpenAI-primary mode after consultant routing too, so no later
     # router step can drop back to low-cost tiers when the flag is on.
-    if opm_enabled(agent) and tier in ("A", "B", "C", "D"):
+    if (
+        opm_enabled(agent)
+        and not getattr(agent, "_defer_opm_primary_coercion", False)
+        and tier in ("A", "B", "C", "D")
+    ):
         _router_rec2 = audit.get("router") if isinstance(audit, dict) else {}
         _coding_hint = bool(
             isinstance(_router_rec2, dict) and _router_rec2.get("coding_task", False)

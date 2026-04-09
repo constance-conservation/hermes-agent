@@ -30,6 +30,7 @@ from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
     opm_auxiliary_model,
     opm_enabled_for_session_agent,
+    opm_manual_override_active,
     opm_suppresses_free_model_fallback,
     resolve_openai_primary_mode_for_session_agent,
 )
@@ -953,6 +954,8 @@ def delegate_task(
     def _enforce_opm_baseline(creds: dict, goal_text: str) -> dict:
         """Under OPM: never delegate on disallowed-family ids; prefer native GPT when available."""
         try:
+            if opm_manual_override_active(parent_agent):
+                return creds
             if not opm_enabled_for_session_agent(parent_agent):
                 return creds
             c = dict(creds or {})
@@ -1398,8 +1401,10 @@ def _resolve_delegation_credentials(
             rm = resolve_tier_dynamic_model(prompt_for_tier, gov)
             if rm:
                 configured_model = rm
-            if opm_enabled_for_session_agent(parent_agent) and model_id_contains_disallowed_family(
-                str(configured_model or "")
+            if (
+                opm_enabled_for_session_agent(parent_agent)
+                and not opm_manual_override_active(parent_agent)
+                and model_id_contains_disallowed_family(str(configured_model or ""))
             ):
                 configured_model = _opm_delegation_target_model(parent_agent, prompt_for_tier)
                 _tier_opm_uplifted_to_gpt = True
@@ -1433,7 +1438,8 @@ def _resolve_delegation_credentials(
     # ``_tier_opm_uplifted_to_gpt``: tier:dynamic resolved to a disallowed id then rewritten — still
     # need native OpenAI creds (otherwise we would inherit parent's non-OpenAI runtime).
     if (
-        (not configured_model or _is_disallowed_configured or _tier_opm_uplifted_to_gpt)
+        not opm_manual_override_active(parent_agent)
+        and (not configured_model or _is_disallowed_configured or _tier_opm_uplifted_to_gpt)
         and not configured_provider
         and not configured_base_url
     ):

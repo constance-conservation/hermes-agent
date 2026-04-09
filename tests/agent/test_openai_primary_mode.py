@@ -7,11 +7,16 @@ from agent.disallowed_model_family import (
 )
 from agent.openai_primary_mode import (
     _opm_merge_parent_anchor,
+    attach_opm_session_agent_for_turn,
     coerce_opm_disallowed_routing_slugs,
     coerce_under_opm_if_disallowed_family,
+    detach_opm_session_agent_for_turn,
     filter_fallback_chain_disallowed,
     is_opm_blocked_openrouter_auto_slug,
+    manual_pipeline_opm_bypass_enabled,
+    opm_coercion_effective,
     opm_enabled,
+    opm_manual_override_active,
     opm_suppresses_free_model_fallback,
     resolve_openai_primary_mode,
 )
@@ -190,6 +195,87 @@ def test_coerce_opm_passthrough_auto_when_opm_off(monkeypatch):
     )
     monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
     assert coerce_opm_disallowed_routing_slugs("openrouter/auto", None) == "openrouter/auto"
+
+
+def test_opm_coercion_effective_false_when_manual_bypass_default(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "openai_primary_mode": {
+                "enabled": True,
+                "manual_pipeline_forces_opm_bypass": True,
+            }
+        },
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Manual:
+        _defer_opm_primary_coercion = True
+
+    assert manual_pipeline_opm_bypass_enabled() is True
+    assert opm_coercion_effective(_Manual()) is False
+    assert opm_coercion_effective(None) is True
+
+
+def test_opm_coercion_effective_false_when_bypass_disabled_but_manual_defer(monkeypatch):
+    """Manual /models defer must disable OPM coercion even if YAML disables 'bypass' flag."""
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {
+            "openai_primary_mode": {
+                "enabled": True,
+                "manual_pipeline_forces_opm_bypass": False,
+            }
+        },
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Manual:
+        _defer_opm_primary_coercion = True
+
+    assert manual_pipeline_opm_bypass_enabled() is False
+    assert opm_coercion_effective(_Manual()) is False
+
+
+def test_manual_pipeline_bypass_env_forces_off(monkeypatch):
+    monkeypatch.setenv("HERMES_MANUAL_PIPELINE_BYPASS_OPM", "0")
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True, "manual_pipeline_forces_opm_bypass": True}},
+    )
+    assert manual_pipeline_opm_bypass_enabled() is False
+
+
+def test_coerce_opm_skips_when_manual_override_on_agent(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True, "default_model": "gpt-5.4"}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Manual:
+        _defer_opm_primary_coercion = True
+
+    assert opm_manual_override_active(_Manual()) is True
+    assert coerce_opm_disallowed_routing_slugs("openrouter/auto", _Manual()) == "openrouter/auto"
+
+
+def test_coerce_opm_skips_when_session_thread_bound(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True, "default_model": "gpt-5.4"}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Manual:
+        _defer_opm_primary_coercion = True
+
+    attach_opm_session_agent_for_turn(_Manual())
+    try:
+        assert opm_manual_override_active(None) is True
+        assert coerce_opm_disallowed_routing_slugs("openrouter/auto", None) == "openrouter/auto"
+    finally:
+        detach_opm_session_agent_for_turn()
 
 
 def test_filter_fallback_chain_disallowed():

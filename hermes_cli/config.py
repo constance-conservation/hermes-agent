@@ -235,6 +235,12 @@ DEFAULT_CONFIG = {
         "require_direct_openai": True,
         # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty (then gemini-2.5-flash).
         "opm_auxiliary_model": "",
+        # When true (default), a manual ``/models`` pick disables OPM model/runtime coercion for that agent.
+        # Override with env HERMES_MANUAL_PIPELINE_BYPASS_OPM=0 to force OPM even on manual picks (rare).
+        "manual_pipeline_forces_opm_bypass": True,
+        # When true, manual ``/models`` turns do not advance the provider fallback chain (fail on the chosen stack).
+        # Default false: rate-limit / quota paths may still try configured fallbacks (policy B).
+        "manual_pipeline_no_provider_fallback": False,
     },
     "cost_governance": {
         "daily_budget_usd": 10.0,
@@ -687,7 +693,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 27,
+    "_config_version": 28,
 }
 
 # =============================================================================
@@ -697,6 +703,10 @@ DEFAULT_CONFIG = {
 # Track which env vars were introduced in each config version.
 # Migration only mentions vars new since the user's previous version.
 ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
+    28: [
+        "HERMES_MANUAL_PIPELINE_BYPASS_OPM",
+        "HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK",
+    ],
     3: ["FIRECRAWL_API_KEY", "BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID", "FAL_KEY"],
     4: ["VOICE_TOOLS_OPENAI_KEY", "ELEVENLABS_API_KEY"],
     5: ["WHATSAPP_ENABLED", "WHATSAPP_MODE", "WHATSAPP_ALLOWED_USERS",
@@ -730,6 +740,22 @@ OPTIONAL_ENV_VARS = {
         "prompt": "Local inference server API key (leave empty for default)",
         "url": None,
         "password": True,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_MANUAL_PIPELINE_BYPASS_OPM": {
+        "description": "When 1 (default unset), manual /models picks disable OPM model coercion; set to 0 to force OPM even on manual picks.",
+        "prompt": "HERMES_MANUAL_PIPELINE_BYPASS_OPM (1/0, optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK": {
+        "description": "When 1, manual /models turns do not advance the provider fallback chain on errors.",
+        "prompt": "HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK (1/0, optional)",
+        "url": None,
+        "password": False,
         "category": "setting",
         "advanced": True,
     },
@@ -2423,6 +2449,29 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v27 legacy-removal migration skipped: {e}")
             results["warnings"].append(f"v27 migration: {e}")
             merge_user_config_yaml({"_config_version": 27})
+
+    # ── Version 27 → 28: openai_primary_mode manual pipeline / OPM bypass keys ──
+    if current_ver < 28:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 28,
+                    "openai_primary_mode": {
+                        "manual_pipeline_forces_opm_bypass": True,
+                        "manual_pipeline_no_provider_fallback": False,
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v28: openai_primary_mode.manual_pipeline_forces_opm_bypass / "
+                    "manual_pipeline_no_provider_fallback (see AGENTS.md)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v28 OPM manual-pipeline migration skipped: {e}")
+            results["warnings"].append(f"v28 migration: {e}")
+            merge_user_config_yaml({"_config_version": 28})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

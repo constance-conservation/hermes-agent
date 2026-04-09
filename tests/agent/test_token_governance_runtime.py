@@ -386,6 +386,81 @@ def test_openai_primary_mode_enforced_after_consultant_routing(gov_env, monkeypa
     assert a.model == "gpt-5.4"
 
 
+def test_apply_token_governance_skips_blocklist_when_defer_pipeline_opm(gov_env):
+    """CLI /models manual route must not downgrade openai/gpt-5.4 via blocked_model_substrings."""
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "enabled": True,
+                "blocked_model_substrings": ["gpt-5"],
+                "default_model": "google/gemini-2.5-flash",
+                "tier_models": {"D": "google/gemini-2.5-flash"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _A:
+        def __init__(self):
+            self.model = "openai/gpt-5.4"
+            self.api_mode = "chat_completions"
+            self.max_iterations = 90
+            self._base_url_lower = "openrouter.ai"
+            self._delegate_depth = 0
+
+        def _is_openrouter_url(self):
+            return True
+
+    a = _A()
+    a._defer_opm_primary_coercion = True
+    apply_token_governance_runtime(a)
+    assert a.model == "openai/gpt-5.4"
+
+
+def test_apply_token_governance_opm_does_not_force_tier_placeholder_when_defer(gov_env):
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump({"enabled": True, "tier_models": {"D": "google/gemini-2.5-flash"}}),
+        encoding="utf-8",
+    )
+
+    class _A:
+        def __init__(self):
+            self.model = "openai/gpt-5.4"
+            self.api_mode = "chat_completions"
+            self.max_iterations = 90
+            self._base_url_lower = "openrouter"
+            self._delegate_depth = 0
+
+        def _is_openrouter_url(self):
+            return True
+
+    a = _A()
+    a._defer_opm_primary_coercion = True
+    with patch("agent.token_governance_runtime.opm_enabled", return_value=True):
+        apply_token_governance_runtime(a)
+    assert a._model_is_tier_routed is False
+
+
+def test_inherit_respects_child_defer_opm_for_tier_routed_flag():
+    parent = type("_P", (), {})()
+    parent._token_governance_cfg = {
+        "enabled": True,
+        "openai_primary_mode": {"enabled": True},
+    }
+    child = type("_C", (), {})()
+    child.model = "openai/gpt-5.4"
+    child._token_governance_cfg = None
+    child._defer_opm_primary_coercion = True
+    with patch(
+        "agent.token_governance_runtime.resolve_openai_primary_mode",
+        return_value=({}, {"enabled": True}),
+    ):
+        inherit_token_governance_from_parent(child, parent)
+    assert child._model_is_tier_routed is False
+
+
 def test_inherit_token_governance_from_parent_opm_forces_tier_routed():
     """Child with no cached cfg inherits parent's runtime dict so OPM can uplift tiers."""
     parent = type("_P", (), {})()
@@ -500,3 +575,65 @@ def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
         enforce_opm_runtime_after_per_turn_routing(agent, "summarize the doc")
     assert agent.model == "gpt-5.4"
     assert agent._reconcile_called is True
+
+
+def test_enforce_opm_runtime_respects_defer_opm_primary_coercion():
+    """CLI /models route sets _defer_opm_primary_coercion; OPM must not rewrite the model."""
+
+    class _StubAgent:
+        def __init__(self):
+            self.model = "google/gemini-2.5-flash"
+            self.provider = "openrouter"
+            self.base_url = "https://openrouter.ai/api/v1"
+            self._defer_opm_primary_coercion = True
+            self._reconcile_called = False
+
+        def _reconcile_runtime_after_tier_model_change(self):
+            self._reconcile_called = True
+
+    agent = _StubAgent()
+    with patch("agent.token_governance_runtime.opm_enabled", return_value=True):
+        enforce_opm_runtime_after_per_turn_routing(agent, "summarize the doc")
+    assert agent.model == "google/gemini-2.5-flash"
+    assert agent._reconcile_called is False
+
+
+def test_opm_reconcile_skips_when_defer_opm_primary_coercion():
+    from run_agent import AIAgent
+
+    agent = object.__new__(AIAgent)
+    agent.model = "openrouter/auto"
+    agent._defer_opm_primary_coercion = True
+    AIAgent._opm_reconcile_primary_if_disallowed(agent)
+    assert agent.model == "openrouter/auto"
+
+
+def test_reconcile_runtime_leaves_openrouter_when_defer_pipeline_opm():
+    """openai/gpt-5.4 is a native-consultant core id once stripped; /models OpenRouter shortcut must not jump to api.openai.com."""
+    from run_agent import AIAgent
+
+    agent = object.__new__(AIAgent)
+    agent.model = "openai/gpt-5.4"
+    agent.provider = "openrouter"
+    agent.base_url = "https://openrouter.ai/api/v1"
+    agent.api_key = "sk-or-test"
+    agent.api_mode = "chat_completions"
+    agent._client_kwargs = {"api_key": agent.api_key, "base_url": agent.base_url}
+    agent._defer_opm_primary_coercion = True
+    agent._inference_runtime_snapshot = {
+        "provider": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-or-test",
+        "api_mode": "chat_completions",
+    }
+    AIAgent._reconcile_runtime_after_tier_model_change(agent)
+    assert agent.base_url == "https://openrouter.ai/api/v1"
+    assert agent.model == "openai/gpt-5.4"
+
+
+def test_tier_targets_native_consultant_false_when_defer_pipeline_opm():
+    from run_agent import AIAgent
+
+    agent = object.__new__(AIAgent)
+    agent._defer_opm_primary_coercion = True
+    assert AIAgent._tier_targets_openai_native_consultant(agent, "openai/gpt-5.4") is False

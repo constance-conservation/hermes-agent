@@ -40,6 +40,24 @@ def _isolate_hermes_home(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _clear_opm_session_thread_locals():
+    """Avoid leaking ``attach_opm_session_agent_for_turn`` across tests on the same worker."""
+    try:
+        from agent.openai_primary_mode import detach_opm_session_agent_for_turn
+
+        detach_opm_session_agent_for_turn()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent.openai_primary_mode import detach_opm_session_agent_for_turn
+
+        detach_opm_session_agent_for_turn()
+    except Exception:
+        pass
+
+
 @pytest.fixture()
 def tmp_dir(tmp_path):
     """Provide a temporary directory that is cleaned up automatically."""

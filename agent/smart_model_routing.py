@@ -155,12 +155,18 @@ def resolve_turn_route(
     routing_config: Optional[Dict[str, Any]],
     primary: Dict[str, Any],
     agent: Any = None,
+    *,
+    allow_cheap_route: bool = True,
 ) -> Dict[str, Any]:
     """Resolve the effective model/runtime for one turn.
 
     Returns a dict with model/runtime/signature/label fields.
+
+    When *allow_cheap_route* is False (e.g. ``/models`` sticky is about to apply), skip
+    ``choose_cheap_model_route`` so a short user message cannot be sent to Gemini Flash
+    before the manual pipeline runtime is merged.
     """
-    route = choose_cheap_model_route(user_message, routing_config)
+    route = choose_cheap_model_route(user_message, routing_config) if allow_cheap_route else None
     if not route:
         out = {
             "model": primary.get("model"),
@@ -245,5 +251,4 @@ def resolve_turn_route(
             tuple(runtime.get("args") or ()),
         ),
     }
-    return _apply_opm_model_coercion(out, agent)
     return _apply_opm_model_coercion(out, agent)

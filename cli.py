@@ -2239,6 +2239,10 @@ class HermesCLI:
         """Resolve model/runtime overrides for a single user turn."""
         from agent.smart_model_routing import resolve_turn_route
 
+        sticky = getattr(self, "_models_sticky_pick", None)
+        once = getattr(self, "_pipeline_model_once", None)
+        # Manual /models: do not run cheap-model routing (often Gemini) before merge.
+        _allow_cheap = sticky is None and once is None
         base = resolve_turn_route(
             user_message,
             self._smart_model_routing,
@@ -2252,9 +2256,9 @@ class HermesCLI:
                 "args": list(self.acp_args or []),
                 "credential_pool": getattr(self, "_credential_pool", None),
             },
+            getattr(self, "agent", None),
+            allow_cheap_route=_allow_cheap,
         )
-        sticky = getattr(self, "_models_sticky_pick", None)
-        once = getattr(self, "_pipeline_model_once", None)
         if sticky is not None:
             return self._route_for_pipeline_model_once(base, sticky, consume=False)
         if once is not None:
@@ -6747,6 +6751,12 @@ class HermesCLI:
             return None
 
         turn_route = self._resolve_turn_agent_config(message)
+        # Skip profile_router whenever /models sticky or one-shot pipeline is active, even if
+        # merge partially failed and skip_per_turn_tier_routing did not land on turn_route.
+        _manual_pipeline_turn = bool(turn_route.get("skip_per_turn_tier_routing")) or (
+            getattr(self, "_models_sticky_pick", None) is not None
+            or getattr(self, "_pipeline_model_once", None) is not None
+        )
         if turn_route["signature"] != self._active_agent_route_signature:
             self.agent = None
         # Signature can match while the agent was mutated (e.g. tier reconcile, fallback).
@@ -6762,7 +6772,7 @@ class HermesCLI:
         pr_cfg = (self.config.get("agent") or {}).get("profile_router") or {}
         pr_precomputed = None
         profile_router_stub_attempted = False
-        if isinstance(message, str) and pr_cfg.get("enabled"):
+        if isinstance(message, str) and pr_cfg.get("enabled") and not _manual_pipeline_turn:
             try:
                 from agent.profile_router import (
                     classify_profile_for_prompt,
@@ -6788,7 +6798,12 @@ class HermesCLI:
                 pr_precomputed = None
 
         routed_resp = None
-        if isinstance(message, str) and pr_precomputed and pr_precomputed[0]:
+        if (
+            isinstance(message, str)
+            and pr_precomputed
+            and pr_precomputed[0]
+            and not _manual_pipeline_turn
+        ):
             profile_router_stub_attempted = True
             try:
                 from agent.profile_router import (
@@ -6915,6 +6930,7 @@ class HermesCLI:
             and self.agent is not None
             and pr_cfg.get("enabled")
             and not profile_router_stub_attempted
+            and not _manual_pipeline_turn
         ):
             try:
                 from agent.profile_router import route_and_delegate_if_configured

@@ -217,6 +217,34 @@ def test_cli_turn_routing_uses_primary_when_disabled(monkeypatch):
     assert result["label"] is None
 
 
+def test_resolve_turn_agent_config_passes_cli_agent_to_resolve_turn_route(monkeypatch):
+    cli = _import_cli()
+    captured = {}
+    from agent import smart_model_routing as _smr
+
+    _orig = _smr.resolve_turn_route
+
+    def _spy(user_message, routing_config, primary, agent=None, *, allow_cheap_route=True):
+        captured["agent"] = agent
+        captured["allow_cheap_route"] = allow_cheap_route
+        return _orig(user_message, routing_config, primary, agent, allow_cheap_route=allow_cheap_route)
+
+    monkeypatch.setattr(_smr, "resolve_turn_route", _spy)
+
+    shell = cli.HermesCLI(model="gpt-5", compact=True, max_turns=1)
+    shell.provider = "openrouter"
+    shell.api_mode = "chat_completions"
+    shell.base_url = "https://openrouter.ai/api/v1"
+    shell.api_key = "sk-primary"
+    shell._smart_model_routing = {"enabled": False}
+    dummy = object()
+    shell.agent = dummy
+
+    shell._resolve_turn_agent_config("hello")
+
+    assert captured.get("agent") is dummy
+
+
 def test_cli_turn_routing_uses_cheap_model_when_simple(monkeypatch):
     cli = _import_cli()
 
@@ -353,6 +381,11 @@ def test_models_sticky_pick_persists_across_resolve_turns(monkeypatch):
         }
 
     monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+
+    def _cheap_forbidden(*_a, **_k):
+        raise AssertionError("choose_cheap_model_route must not run when /models sticky is set")
+
+    monkeypatch.setattr("agent.smart_model_routing.choose_cheap_model_route", _cheap_forbidden)
 
     shell = cli.HermesCLI(model="anthropic/claude-sonnet-4", compact=True, max_turns=1)
     shell.provider = "openrouter"
