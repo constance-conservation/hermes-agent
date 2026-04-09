@@ -76,6 +76,7 @@ class RouterDelegateParentStub:
         "_active_children_lock",
         "_token_governance_delegation_max",
         "on_delegate_child_model",
+        "_defer_opm_primary_coercion",
     )
 
     def __init__(
@@ -94,6 +95,7 @@ class RouterDelegateParentStub:
         tool_progress_callback: Any = None,
         prefill_messages: Any = None,
         on_delegate_child_model: Optional[Callable[[str], None]] = None,
+        defer_opm_manual: bool = False,
     ) -> None:
         self._delegate_depth = 0
         # Match AIAgent: chief Hermes home before delegate_task switches HERMES_HOME to child profile.
@@ -131,6 +133,7 @@ class RouterDelegateParentStub:
         self._active_children_lock = threading.Lock()
         self._token_governance_delegation_max = None
         self.on_delegate_child_model = on_delegate_child_model
+        self._defer_opm_primary_coercion = bool(defer_opm_manual)
 
 
 def build_router_delegate_parent_stub(
@@ -148,6 +151,7 @@ def build_router_delegate_parent_stub(
     tool_progress_callback: Any = None,
     prefill_messages: Any = None,
     on_delegate_child_model: Optional[Callable[[str], None]] = None,
+    defer_opm_manual: bool = False,
 ) -> RouterDelegateParentStub:
     """Build a lightweight parent for profile-router delegation without constructing ``AIAgent``."""
     return RouterDelegateParentStub(
@@ -164,6 +168,7 @@ def build_router_delegate_parent_stub(
         tool_progress_callback=tool_progress_callback,
         prefill_messages=prefill_messages,
         on_delegate_child_model=on_delegate_child_model,
+        defer_opm_manual=defer_opm_manual,
     )
 
 
@@ -191,6 +196,9 @@ def build_router_delegate_parent_stub_for_cli(
         tool_progress_callback=getattr(cli, "_on_tool_progress", None),
         prefill_messages=getattr(cli, "prefill_messages", None),
         on_delegate_child_model=on_delegate_child_model,
+        defer_opm_manual=bool(
+            (turn_route or {}).get("skip_per_turn_tier_routing")
+        ),
     )
 
 

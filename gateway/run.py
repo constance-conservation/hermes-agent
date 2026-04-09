@@ -28,7 +28,7 @@ import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, Any, List
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # SSL certificate auto-detection for NixOS and other non-standard systems.
@@ -527,6 +527,9 @@ class GatewayRunner:
         import threading as _threading
         self._agent_cache: Dict[str, tuple] = {}
         self._agent_cache_lock = _threading.Lock()
+        # Per-session /models sticky pick (Telegram/Discord/…); same semantics as CLI ``_models_sticky_pick``.
+        self._gateway_models_sticky: Dict[str, Dict[str, Any]] = {}
+        self._gateway_models_sticky_lock = _threading.Lock()
 
         # Track active fallback model/provider when primary is rate-limited.
         # Set after an agent run where fallback was activated; cleared when
@@ -786,8 +789,16 @@ class GatewayRunner:
             group_sessions_per_user=getattr(config, "group_sessions_per_user", True),
         )
 
-    def _resolve_turn_agent_config(self, user_message: str, model: str, runtime_kwargs: dict) -> dict:
+    def _resolve_turn_agent_config(
+        self,
+        user_message: str,
+        model: str,
+        runtime_kwargs: dict,
+        *,
+        session_key: Optional[str] = None,
+    ) -> dict:
         from agent.smart_model_routing import resolve_turn_route
+        from hermes_cli.pipeline_turn_route import merge_pipeline_models_choice_into_turn_route
 
         primary = {
             "model": model,
@@ -799,7 +810,49 @@ class GatewayRunner:
             "args": list(runtime_kwargs.get("args") or []),
             "credential_pool": runtime_kwargs.get("credential_pool"),
         }
-        return resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
+        base = resolve_turn_route(user_message, getattr(self, "_smart_model_routing", {}), primary)
+        _sticky_lock = getattr(self, "_gateway_models_sticky_lock", None)
+        _sticky_map = getattr(self, "_gateway_models_sticky", None)
+        if not session_key or _sticky_lock is None or not isinstance(_sticky_map, dict):
+            return base
+        sticky = None
+        with _sticky_lock:
+            sticky = _sticky_map.get(session_key)
+        if not sticky:
+            return base
+        try:
+            mr = merge_pipeline_models_choice_into_turn_route(
+                base,
+                sticky,
+                profile_api_key=runtime_kwargs.get("api_key") or "",
+                profile_base_url=runtime_kwargs.get("base_url") or "",
+                profile_provider=runtime_kwargs.get("provider") or "",
+                profile_api_mode=runtime_kwargs.get("api_mode") or "",
+                profile_command=runtime_kwargs.get("command"),
+                profile_args=list(runtime_kwargs.get("args") or []),
+                profile_credential_pool=runtime_kwargs.get("credential_pool"),
+                consume=False,
+            )
+            if mr.clear_sticky_pick:
+                with _sticky_lock:
+                    _sticky_map.pop(session_key, None)
+            return mr.route
+        except Exception as exc:
+            logger.warning("gateway pipeline /models merge failed: %s", exc)
+            return base
+
+    def _sync_gateway_agent_turn_route(self, agent: Any, turn_route: dict) -> None:
+        """Align cached/new gateway agents with sticky OpenRouter (etc.) picks each turn."""
+        if agent is None or not isinstance(turn_route, dict):
+            return
+        _sk = bool(turn_route.get("skip_per_turn_tier_routing"))
+        agent._skip_per_turn_tier_routing = _sk
+        agent._defer_opm_primary_coercion = _sk
+        if _sk:
+            try:
+                agent.rebind_from_cli_turn_route(turn_route)
+            except Exception:
+                logger.debug("gateway rebind_from_cli_turn_route failed", exc_info=True)
 
     async def _handle_adapter_fatal_error(self, adapter: BasePlatformAdapter) -> None:
         """React to an adapter failure after startup.
@@ -2072,6 +2125,9 @@ class GatewayRunner:
         if canonical == "btw":
             return await self._handle_btw_command(event)
 
+        if canonical == "models":
+            return await self._handle_models_command(event)
+
         if canonical == "voice":
             return await self._handle_voice_command(event)
 
@@ -3098,6 +3154,14 @@ class GatewayRunner:
         except Exception as e:
             logger.debug("Gateway memory flush on reset failed: %s", e)
         self._evict_cached_agent(session_key)
+        _sl = getattr(self, "_gateway_models_sticky_lock", None)
+        _sm = getattr(self, "_gateway_models_sticky", None)
+        if _sl is not None and isinstance(_sm, dict):
+            try:
+                with _sl:
+                    _sm.pop(session_key, None)
+            except Exception:
+                pass
         
         # Reset the session
         new_entry = self.session_store.reset_session(session_key)
@@ -3132,6 +3196,85 @@ class GatewayRunner:
         if session_info:
             return f"{header}\n\n{session_info}"
         return header
+
+    async def _handle_models_command(self, event: MessageEvent) -> str:
+        """Gateway /models — text menu (list + /models <n>) and clear; full curses submenus stay CLI-only."""
+        session_key = self._session_key_for_source(event.source)
+        rest = event.get_command_args().strip()
+
+        if rest.lower() in ("clear", "none", "reset"):
+            _sl = getattr(self, "_gateway_models_sticky_lock", None)
+            _sm = getattr(self, "_gateway_models_sticky", None)
+            if _sl is not None and isinstance(_sm, dict):
+                with _sl:
+                    _sm.pop(session_key, None)
+            return "Cleared /models selection — default routing until you pick again."
+
+        if rest.lower().replace("_", "-") in ("router clear", "router-clear", "router reset"):
+            return (
+                "Session router overrides are only configurable from the interactive CLI "
+                "(`hermes chat` → `/models router clear`)."
+            )
+
+        try:
+            from agent.pipeline_models import collect_models_menu_entries
+        except Exception as e:
+            return f"/models unavailable: {e}"
+
+        user_config = _load_gateway_config()
+        try:
+            entries = collect_models_menu_entries(user_config)
+        except Exception as e:
+            return f"/models unavailable: {e}"
+        if not entries:
+            return "/models: empty menu (check config)."
+
+        if rest.lower() == "list":
+            lines = [
+                f"/models — pick by number: `/models <n>` (1–{len(entries)}).",
+                "",
+            ]
+            for i, e in enumerate(entries, start=1):
+                if e.get("kind") == "action":
+                    lines.append(f"{i}. {e.get('label')}")
+                else:
+                    lines.append(f"{i}. {e['model']} — {e['source']}")
+            lines.append("")
+            lines.append("Lines that open submenus (OpenRouter browse, Choose-Router) need `hermes chat`.")
+            lines.append("Use `/models clear` to reset.")
+            return "\n".join(lines)
+
+        if rest.isdigit():
+            idx = int(rest) - 1
+            if not (0 <= idx < len(entries)):
+                return f"Invalid index. Use 1–{len(entries)} or `/models list`."
+            picked = entries[idx]
+            if picked.get("kind") == "action":
+                return (
+                    "That menu line opens an interactive submenu. "
+                    "Use `/models list`, pick a concrete model index, or run `hermes chat` locally."
+                )
+            row = {
+                "model": picked["model"],
+                "source": picked["source"],
+                "provider_kind": picked.get("provider_kind") or "primary",
+            }
+            _sl = getattr(self, "_gateway_models_sticky_lock", None)
+            _sm = getattr(self, "_gateway_models_sticky", None)
+            if _sl is not None and isinstance(_sm, dict):
+                with _sl:
+                    _sm[session_key] = dict(row)
+            return (
+                f"Using `{picked['model']}` ({picked['source']}) in this chat until `/models clear`."
+            )
+
+        return (
+            "Usage:\n"
+            "• `/models list` — show numbered menu\n"
+            "• `/models <n>` — select line n\n"
+            "• `/models clear` — default routing\n"
+            "Full OpenRouter browse / session-router pickers: `hermes chat`."
+        )
     
     async def _handle_profile_command(self, event: MessageEvent) -> str:
         """Handle /profile — show active profile, optional list / use (sticky)."""
@@ -4078,7 +4221,10 @@ class GatewayRunner:
             max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
             reasoning_config = self._load_reasoning_config()
             self._reasoning_config = reasoning_config
-            turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
+            _bg_session_key = self._session_key_for_source(source)
+            turn_route = self._resolve_turn_agent_config(
+                prompt, model, runtime_kwargs, session_key=_bg_session_key
+            )
 
             def run_sync():
                 agent = AIAgent(
@@ -4100,7 +4246,9 @@ class GatewayRunner:
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                     skip_context_files=_gateway_skip_context_files(),
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 )
+                self._sync_gateway_agent_turn_route(agent, turn_route)
 
                 return agent.run_conversation(
                     user_message=prompt,
@@ -4244,7 +4392,9 @@ class GatewayRunner:
             model = _resolve_gateway_model(user_config)
             platform_key = _platform_config_key(source.platform)
             reasoning_config = self._load_reasoning_config()
-            turn_route = self._resolve_turn_agent_config(question, model, runtime_kwargs)
+            turn_route = self._resolve_turn_agent_config(
+                question, model, runtime_kwargs, session_key=session_key
+            )
             pr = self._provider_routing
 
             # Snapshot history from running agent or stored transcript
@@ -4283,7 +4433,9 @@ class GatewayRunner:
                     skip_memory=True,
                     skip_context_files=True,
                     persist_session=False,
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 )
+                self._sync_gateway_agent_turn_route(agent, turn_route)
                 return agent.run_conversation(
                     user_message=btw_prompt,
                     conversation_history=history_snapshot,
@@ -5926,7 +6078,9 @@ class GatewayRunner:
                 except Exception as _sc_err:
                     logger.debug("Could not set up stream consumer: %s", _sc_err)
 
-            turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
+            turn_route = self._resolve_turn_agent_config(
+                message, model, runtime_kwargs, session_key=session_key
+            )
 
             # Convert history to agent format (needed for profile-router delegate return and
             # run_conversation; does not depend on AIAgent).
@@ -5994,6 +6148,7 @@ class GatewayRunner:
                         provider_sort=_prov.get("sort"),
                         tool_progress_callback=progress_callback if tool_progress_enabled else None,
                         prefill_messages=self._prefill_messages or None,
+                        defer_opm_manual=bool(turn_route.get("skip_per_turn_tier_routing")),
                     )
                     routed_early = route_and_delegate_if_configured(
                         user_message=message,
@@ -6066,11 +6221,14 @@ class GatewayRunner:
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
                     skip_context_files=_skip_ctx,
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:
                         _cache[session_key] = (agent, _sig)
                 logger.debug("Created new agent for session %s (sig=%s)", session_key, _sig)
+
+            self._sync_gateway_agent_turn_route(agent, turn_route)
 
             # Per-message state — callbacks and reasoning config change every
             # turn and must not be baked into the cached agent constructor.

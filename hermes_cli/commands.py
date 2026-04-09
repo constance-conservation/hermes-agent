@@ -116,7 +116,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
         "models",
         "Pick next-prompt model (native OpenAI vs OpenRouter GPT-5 shortcuts, full OR list, session router)",
         "Configuration",
-        cli_only=True,
+        cli_only=False,
         args_hint="[list|clear|router clear|<n>]",
         subcommands=("list", "clear", "router clear"),
     ),
