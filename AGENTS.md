@@ -403,7 +403,7 @@ in config.yaml (or `HERMES_BACKGROUND_NOTIFICATIONS` env var):
 
 ### Turn-done notify (Mac sound over Tailscale)
 
-Optional: when **`HERMES_TURN_DONE_NOTIFY_URL`** is set on the **runtime that finishes the turn** (e.g. droplet `~/.hermes/.env`), Hermes issues a fire-and-forget HTTP GET at the end of each **root** `run_conversation` (not delegate subagents). Point it at a tiny listener on your Mac — **outbound-only from the VPS**, no open ports on the server. Typical setup: **`tailscale ip -4`** on the Mac, run **`scripts/macos/hermes_turn_chime_server.py --bind <that-ip> --port 8765`**, then set **`HERMES_TURN_DONE_NOTIFY_URL=http://<mac-tailscale-ip>:8765/`** on the VPS. Default sound is **`Funk`** (`/System/Library/Sounds/Funk.aiff`); override with **`--sound`** or **`HERMES_TURN_DONE_SOUND`**.
+Optional: when **`HERMES_TURN_DONE_NOTIFY_URL`** is set on the **runtime that finishes the turn** (e.g. droplet `~/.hermes/.env`), Hermes issues a fire-and-forget HTTP GET at the end of each **root** `run_conversation` (not delegate subagents). Point it at a tiny listener on your Mac — **outbound-only from the VPS**, no open ports on the server. Typical setup: **`tailscale ip -4`** on the Mac, run **`scripts/macos/hermes_turn_chime_server.py --bind 0.0.0.0 --port 8765`** (or bind the Tailscale IP only), **from Terminal.app / launchd** if an IDE-embedded shell blocks inbound tailnet connections, then set **`HERMES_TURN_DONE_NOTIFY_URL=http://<mac-tailscale-ip>:8765/`** on the VPS. Default sound is **`Funk`** (`/System/Library/Sounds/Funk.aiff`); override with **`--sound`** or **`HERMES_TURN_DONE_SOUND`**.
 
 ### Gateway watchdog (production uptime)
 
