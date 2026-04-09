@@ -14,5 +14,13 @@ if [[ -z "${_PY}" ]]; then
     _PY="$(command -v python3)"
   fi
 fi
+# Match ``source venv/bin/activate`` so subprocesses and env inspection see VIRTUAL_ENV.
+if [[ "${_PY}" == "${_REPO}/venv/bin/python" && -f "${_REPO}/venv/pyvenv.cfg" ]]; then
+  export VIRTUAL_ENV="${_REPO}/venv"
+  case ":${PATH}:" in *":${VIRTUAL_ENV}/bin:"*) ;; *)
+    export PATH="${VIRTUAL_ENV}/bin:${PATH}"
+    ;;
+  esac
+fi
 cd "${_REPO}"
 exec "${_PY}" -m hermes_cli.main "$@"

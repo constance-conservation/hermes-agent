@@ -511,6 +511,24 @@ def list_profiles() -> List[ProfileInfo]:
     return profiles
 
 
+def resolve_profile_home_for_gateway(slug: str) -> Optional[Path]:
+    """Return the profile directory for *slug* if it exists (gateway @mention).
+
+    Accepts ``default`` for the top-level ``~/.hermes`` home. Names must match
+    ``_PROFILE_ID_RE`` (lowercase ids under ``~/.hermes/profiles/``).
+    """
+    raw = (slug or "").strip().lower()
+    if not raw:
+        return None
+    if not _PROFILE_ID_RE.match(raw):
+        return None
+    if raw == "default":
+        dh = _get_default_hermes_home()
+        return dh if dh.is_dir() else None
+    entry = _get_profiles_root() / raw
+    return entry if entry.is_dir() else None
+
+
 def create_profile(
     name: str,
     clone_from: Optional[str] = None,

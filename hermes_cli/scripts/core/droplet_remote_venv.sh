@@ -21,7 +21,11 @@ _droplet_remote_venv_prefix() {
   local repo="$1"
   local rq
   rq=$(printf '%q' "$repo")
+  # Explicit VIRTUAL_ENV/PATH so child processes and tooling match an activated venv
+  # (Hermes runs via ./venv/bin/python; this keeps the shell session consistent after sudo).
   printf 'cd %s 2>/dev/null || true; [ -f %s/venv/bin/activate ] && . %s/venv/bin/activate; ' "$rq" "$rq" "$rq"
+  local ve="${repo}/venv"
+  printf 'export VIRTUAL_ENV=%q; export PATH="${VIRTUAL_ENV}/bin:${PATH}"; ' "$ve"
 }
 
 # Prefix a remote bash -lc command body with venv activation.

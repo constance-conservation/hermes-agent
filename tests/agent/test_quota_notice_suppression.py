@@ -51,3 +51,22 @@ def test_session_note_quota_exhausted_sets_flag(agent):
     agent._session_suppress_quota_user_notices = False
     agent._session_note_quota_cascade_exhausted_if_applicable()
     assert agent._session_suppress_quota_user_notices is True
+
+
+def test_emit_quota_user_notice_suppresses_repeats_even_when_verbose(agent):
+    """verbose_logging must not bypass CLI session repeat suppression."""
+    agent.verbose_logging = True
+    agent._session_suppress_quota_user_notices = False
+
+    def _should_suppress():
+        return True
+
+    agent.quota_user_notice_should_suppress = _should_suppress
+    emitted = []
+
+    def _cb(_et, msg):
+        emitted.append(msg)
+
+    agent.status_callback = _cb
+    agent._emit_quota_user_notice("⚠️ ladder step")
+    assert emitted == []

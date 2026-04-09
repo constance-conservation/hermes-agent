@@ -32,3 +32,35 @@ def test_safe_hermes_home_directory_rejects_mock_and_non_dirs(tmp_path):
     assert safe_hermes_home_directory(str(d)) == str(d.resolve())
 
     assert safe_hermes_home_directory(str(tmp_path / "nope")) is None
+
+
+def test_get_hermes_home_context_override_takes_precedence(monkeypatch, tmp_path):
+    import hermes_constants as hc
+
+    env_home = tmp_path / "from-env"
+    env_home.mkdir()
+    override_home = tmp_path / "override"
+    override_home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(env_home))
+
+    tok = hc.set_hermes_home_override(override_home)
+    try:
+        assert hc.get_hermes_home().resolve() == override_home.resolve()
+    finally:
+        hc.reset_hermes_home_override(tok)
+
+    assert hc.get_hermes_home().resolve() == env_home.resolve()
+
+
+def test_hermes_home_override_context_manager(tmp_path, monkeypatch):
+    import hermes_constants as hc
+
+    base = tmp_path / "base"
+    base.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(base))
+
+    with hc.hermes_home_override(other):
+        assert hc.get_hermes_home().resolve() == other.resolve()
+    assert hc.get_hermes_home().resolve() == base.resolve()

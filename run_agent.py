@@ -1471,6 +1471,8 @@ class AIAgent:
         self._hard_budget_operator_approval_required = False
         self._hard_budget_operator_decision = None
         self._hard_budget_operator_session_id = None
+        # One user-visible nag when daily cap is hit and approval is pending (not after approve).
+        self._hard_budget_daily_cap_notice_emitted = False
         try:
             from agent.budget_ledger import BudgetLedger
             from agent.routing_canon import load_hard_budget_config
@@ -1573,6 +1575,7 @@ class AIAgent:
         self._turn_bar_start_usd = 0.0
         self._last_completed_turn_cost_usd = 0.0
         self._hard_budget_operator_decision = None
+        self._hard_budget_daily_cap_notice_emitted = False
         self._session_suppress_quota_user_notices = False
         self._last_api_completion_model = None
 
@@ -1673,10 +1676,9 @@ class AIAgent:
         if self._quota_user_notices_suppressed():
             logger.info("%s(quota user notice suppressed) %s", self.log_prefix, message)
             return
-        if (
-            not self.verbose_logging
-            and callable(getattr(self, "quota_user_notice_should_suppress", None))
-        ):
+        # CLI session repeat suppression must apply even when verbose_logging is on — otherwise
+        # ladder / OpenRouter lines repeat on every user message after the first quota episode.
+        if callable(getattr(self, "quota_user_notice_should_suppress", None)):
             try:
                 if self.quota_user_notice_should_suppress():
                     logger.info(
@@ -1688,8 +1690,7 @@ class AIAgent:
             except Exception:
                 pass
         self._emit_status(message, event_type=event_type)
-        if not self.verbose_logging:
-            self._turn_had_quota_ux_for_cli_latch = True
+        self._turn_had_quota_ux_for_cli_latch = True
 
     def _session_note_quota_cascade_exhausted_if_applicable(self) -> None:
         """Mark session so further quota/rate-limit UX is muted (logging still runs).
@@ -7959,6 +7960,7 @@ class AIAgent:
             _prev_hb = getattr(self, "_hard_budget_operator_session_id", None)
             if _prev_hb is not None and _prev_hb != _q_sid:
                 self._hard_budget_operator_decision = None
+                self._hard_budget_daily_cap_notice_emitted = False
             self._hard_budget_operator_session_id = _q_sid
             self._turn_bar_start_usd = float(self.session_estimated_cost_usd or 0.0)
             # If the previous turn activated fallback, restore the primary
@@ -8989,10 +8991,19 @@ class AIAgent:
                                 _bl.add_spend_usd(_delta_led)
                                 if _bl.is_daily_exhausted():
                                     if getattr(self, "_hard_budget_operator_approval_required", False):
-                                        self._emit_status(
-                                            "⚠️ Daily budget cap reached — paid API calls will pause "
-                                            "until you approve or deny on the next model request.",
+                                        _dec = getattr(
+                                            self, "_hard_budget_operator_decision", None
                                         )
+                                        if _dec == HARD_BUDGET_APPROVE_CHOICE:
+                                            pass
+                                        elif not getattr(
+                                            self, "_hard_budget_daily_cap_notice_emitted", False
+                                        ):
+                                            self._emit_status(
+                                                "⚠️ Daily budget cap reached — paid API calls will pause "
+                                                "until you approve or deny on the next model request.",
+                                            )
+                                            self._hard_budget_daily_cap_notice_emitted = True
                                     else:
                                         self._emit_status(
                                             "⚠️ Daily budget cap (routing_canon hard_budget) reached "
@@ -9262,6 +9273,8 @@ class AIAgent:
                                         f"⚠️ Provider {self.provider} blacklisted for this session "
                                         f"({ph.blacklist_reason(self.provider)})",
                                     )
+                                    if not self.verbose_logging:
+                                        self._turn_had_quota_ux_for_cli_latch = True
                                 else:
                                     logger.info(
                                         "%s(provider blacklist status suppressed — CLI session) %s",
@@ -10578,17 +10591,28 @@ class AIAgent:
                     )
             except Exception:
                 pass
-            if (
-                not getattr(self, "verbose_logging", False)
-                and getattr(self, "_turn_had_quota_ux_for_cli_latch", False)
-                and callable(getattr(self, "quota_ux_episode_completed_callback", None))
+            if not getattr(self, "verbose_logging", False) and callable(
+                getattr(self, "quota_ux_episode_completed_callback", None)
             ):
-                try:
-                    self.quota_ux_episode_completed_callback()
-                except Exception:
-                    logger.debug(
-                        "quota_ux_episode_completed_callback failed", exc_info=True,
-                    )
+                _quota_ux_latch = bool(
+                    getattr(self, "_turn_had_quota_ux_for_cli_latch", False)
+                )
+                _detail_marked = False
+                if callable(getattr(self, "quota_error_detail_should_suppress", None)):
+                    try:
+                        _detail_marked = bool(self.quota_error_detail_should_suppress())
+                    except Exception:
+                        _detail_marked = False
+                _sess_quota_ux = bool(
+                    getattr(self, "_session_suppress_quota_user_notices", False)
+                )
+                if _quota_ux_latch or _detail_marked or _sess_quota_ux:
+                    try:
+                        self.quota_ux_episode_completed_callback()
+                    except Exception:
+                        logger.debug(
+                            "quota_ux_episode_completed_callback failed", exc_info=True,
+                        )
             detach_opm_session_agent_for_turn()
 
     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:

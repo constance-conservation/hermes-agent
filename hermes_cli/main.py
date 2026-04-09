@@ -4041,8 +4041,37 @@ def cmd_completion(args):
         print(generate_bash_completion())
 
 
+def _ensure_venv_env_for_subprocesses() -> None:
+    """When the CLI runs as ``<repo>/venv/bin/python``, set ``VIRTUAL_ENV``/``PATH``.
+
+    Matches what ``source venv/bin/activate`` would do so subprocesses and
+    post-exit diagnostics see a consistent venv (the shim already uses the venv
+    interpreter via ``exec``).
+    """
+    try:
+        from pathlib import Path
+
+        exe = Path(sys.executable).resolve()
+        bin_dir = exe.parent
+        if bin_dir.name != "bin":
+            return
+        vroot = bin_dir.parent
+        if not (vroot / "pyvenv.cfg").is_file():
+            return
+        os.environ.setdefault("VIRTUAL_ENV", str(vroot))
+        vbin = str(bin_dir)
+        path = os.environ.get("PATH", "")
+        if not path:
+            os.environ["PATH"] = vbin
+        elif path != vbin and not path.startswith(vbin + os.pathsep):
+            os.environ["PATH"] = vbin + os.pathsep + path
+    except Exception:
+        pass
+
+
 def main():
     """Main entry point for hermes CLI."""
+    _ensure_venv_env_for_subprocesses()
     parser = argparse.ArgumentParser(
         prog="hermes",
         description="Hermes Agent - AI assistant with tool-calling capabilities",

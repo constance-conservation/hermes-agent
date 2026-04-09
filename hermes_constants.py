@@ -5,8 +5,16 @@ without risk of circular imports.
 """
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
+
+# Per-task override (e.g. gateway @profile) — must not replace os.environ globally.
+_HERMES_HOME_OVERRIDE: ContextVar[Optional[str]] = ContextVar(
+    "hermes_home_override",
+    default=None,
+)
 
 
 def _sanitized_hermes_home_env() -> Optional[str]:
@@ -30,10 +38,38 @@ def get_hermes_home() -> Path:
     Reads HERMES_HOME env var, falls back to ~/.hermes.
     This is the single source of truth — all other copies should import this.
     """
+    _ctx = _HERMES_HOME_OVERRIDE.get()
+    if _ctx:
+        return Path(_ctx).expanduser()
     s = _sanitized_hermes_home_env()
     if s:
         return Path(s).expanduser()
     return Path(Path.home() / ".hermes").expanduser()
+
+
+def set_hermes_home_override(path: Path) -> Token:
+    """Bind ``get_hermes_home()`` to *path* for the current task (ContextVar).
+
+    Call :func:`reset_hermes_home_override` with the returned token when done.
+    Used by the messaging gateway for one-turn @profile routing without mutating
+    ``os.environ`` process-wide.
+    """
+    return _HERMES_HOME_OVERRIDE.set(str(path.expanduser().resolve()))
+
+
+def reset_hermes_home_override(token: Token) -> None:
+    """Reset a prior :func:`set_hermes_home_override` binding."""
+    _HERMES_HOME_OVERRIDE.reset(token)
+
+
+@contextmanager
+def hermes_home_override(path: Path) -> Iterator[None]:
+    """Context manager for a temporary ``get_hermes_home()`` override."""
+    tok = set_hermes_home_override(path)
+    try:
+        yield
+    finally:
+        reset_hermes_home_override(tok)
 
 
 def safe_hermes_home_directory(value: Any) -> Optional[str]:

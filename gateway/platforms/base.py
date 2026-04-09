@@ -342,6 +342,9 @@ class MessageEvent:
     
     # Auto-loaded skill for topic/channel bindings (e.g., Telegram DM Topics)
     auto_skill: Optional[str] = None
+
+    # Leading ``@profile-slug`` (messaging gateways): one-turn HERMES_HOME override
+    hermes_profile_slug: Optional[str] = None
     
     # Timestamps
     timestamp: datetime = field(default_factory=datetime.now)

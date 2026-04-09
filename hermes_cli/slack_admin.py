@@ -213,7 +213,10 @@ def slack_manifest_validate(*, app_id: Optional[str] = None) -> None:
             else:
                 print(f"  - {err}", file=sys.stderr)
         sys.exit(1)
+    _cmds = _slack_manifest_slash_command_features()
     print("ok=true Hermes Slack manifest validates against Slack's schema.")
+    print(f"Slash commands in manifest: {len(_cmds)} ( /hermes plus /hermes-* shortcuts ).")
+    print("After Hermes upgrades: hermes slack manifest-update --confirm --app-id <A0…>")
     if app_id:
         print("(Validated in context of existing app_id — safe to consider manifest.update.)")
 
