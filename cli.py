@@ -1653,6 +1653,41 @@ class HermesCLI:
         except Exception:
             return [("class:status-bar", f" {self._build_status_bar_text()} ")]
 
+    def _get_budget_bar_fragments(self):
+        """Bottom bar: per-turn cost, daily AUD/USD spend, hours to local midnight (routing_canon)."""
+        try:
+            from agent.budget_ledger import format_budget_bar_text
+            from agent.routing_canon import load_hard_budget_config
+
+            hb = load_hard_budget_config()
+            if not hb.get("enabled") or not hb.get("show_tui_bar"):
+                return []
+            ag = self.agent
+            if not ag:
+                return [("class:budget-bar", " 💳 budget: (start a session) ")]
+            led = getattr(ag, "_budget_ledger", None)
+            if not led:
+                return []
+            if getattr(self, "_agent_running", False):
+                turn_c = float(getattr(ag, "session_estimated_cost_usd", 0) or 0) - float(
+                    getattr(ag, "_turn_bar_start_usd", 0) or 0
+                )
+            else:
+                turn_c = float(getattr(ag, "_last_completed_turn_cost_usd", 0) or 0)
+            snap = led.snapshot(turn_cost_usd=max(0.0, turn_c), enabled=True)
+            try:
+                from prompt_toolkit.application import get_app
+
+                width = get_app().output.get_size().columns
+            except Exception:
+                width = shutil.get_terminal_size((80, 24)).columns
+            text = format_budget_bar_text(snap, max_width=max(20, width - 2))
+            if not text:
+                return []
+            return [("class:budget-bar", " " + text + " ")]
+        except Exception:
+            return []
+
     def _normalize_model_for_provider(self, resolved_provider: str) -> bool:
         """Normalize provider-specific model IDs and routing."""
         current_model = (self.model or "").strip()
@@ -7507,6 +7542,7 @@ class HermesCLI:
         input_area,
         input_rule_bot,
         voice_status_bar,
+        budget_bar,
         completions_menu,
     ) -> list:
         """Assemble the ordered list of children for the root ``HSplit``.
@@ -7530,6 +7566,7 @@ class HermesCLI:
             input_area,
             input_rule_bot,
             voice_status_bar,
+            budget_bar,
             completions_menu,
         ]
 
@@ -8541,6 +8578,25 @@ class HermesCLI:
             filter=Condition(lambda: cli_ref._voice_mode),
         )
 
+        def _budget_bar_height():
+            try:
+                from agent.routing_canon import load_hard_budget_config
+
+                hb = load_hard_budget_config()
+                if not hb.get("enabled") or not hb.get("show_tui_bar"):
+                    return 0
+                if cli_ref.agent is not None and getattr(cli_ref.agent, "_budget_ledger", None) is None:
+                    return 0
+                return 1
+            except Exception:
+                return 0
+
+        budget_bar = Window(
+            content=FormattedTextControl(lambda: cli_ref._get_budget_bar_fragments()),
+            height=Condition(lambda: _budget_bar_height() > 0),
+            wrap_lines=False,
+        )
+
         status_bar = ConditionalContainer(
             Window(
                 content=FormattedTextControl(lambda: cli_ref._get_status_bar_fragments()),
@@ -8581,6 +8637,7 @@ class HermesCLI:
                     input_area=input_area,
                     input_rule_bot=input_rule_bot,
                     voice_status_bar=voice_status_bar,
+                    budget_bar=budget_bar,
                     completions_menu=completions_menu,
                 )
             )
@@ -8635,6 +8692,8 @@ class HermesCLI:
             'voice-processing': '#FFA500 italic',
             'voice-status': 'bg:#1a1a2e #87CEEB',
             'voice-status-recording': 'bg:#1a1a2e #FF4444 bold',
+            # routing_canon hard_budget bottom bar
+            'budget-bar': 'bg:#0d1f0d #98FB98',
         }
         style = PTStyle.from_dict(self._build_tui_style_dict())
         

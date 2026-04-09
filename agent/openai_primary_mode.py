@@ -261,10 +261,28 @@ def opm_coercion_effective(agent: Any = None) -> bool:
     slugs. The ``manual_pipeline_forces_opm_bypass`` config only affects auxiliary
     tooling that reads :func:`manual_pipeline_opm_bypass_enabled`; it does **not**
     re-enable coercion on manual picks (that broke OpenRouter routing).
+
+    Also false when ``_opm_suppressed_for_turn`` is set (rate/quota-style API
+    failure this turn — see ``run_agent.AIAgent``).
     """
     if not opm_enabled(agent):
         return False
     if opm_manual_override_active(agent):
+        return False
+    ag = agent if agent is not None else getattr(_tls_opm_session, "agent", None)
+    if ag is not None and getattr(ag, "_opm_suppressed_for_turn", False):
+        return False
+    return True
+
+
+def opm_effective_for_tier_routing_uplift(agent: Any = None) -> bool:
+    """True when OPM-driven tier uplift (E/F) in token governance should run."""
+    if not opm_enabled(agent):
+        return False
+    if opm_manual_override_active(agent):
+        return False
+    ag = agent if agent is not None else getattr(_tls_opm_session, "agent", None)
+    if ag is not None and getattr(ag, "_opm_suppressed_for_turn", False):
         return False
     return True
 

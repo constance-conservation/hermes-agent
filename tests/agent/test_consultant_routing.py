@@ -165,6 +165,91 @@ def test_hybrid_router_escalation_triggers_deliberation(gov_env):
     assert audit.get("deliberation") is not None
 
 
+def test_operator_gate_force_consultant_via_clarify(gov_env):
+    g = _gov_base()
+
+    def fake_call(task, system, user, max_tokens=512, *, agent=None):
+        if "routing advisor" in system.lower() or "cost-aware" in system.lower():
+            return json.dumps(
+                {
+                    "recommended_tier": "F",
+                    "request_consultant_escalation": True,
+                    "rationale": "architecture review",
+                }
+            )
+        if "challenge" in user.lower() or "Challenger" in system:
+            return json.dumps({"challenge": "try D first", "max_reasonable_tier": "D"})
+        if "Chief Orchestrator" in system:
+            return json.dumps(
+                {
+                    "approved_consultant_tier": False,
+                    "final_tier": "D",
+                    "decision_summary": "Denied F; use D",
+                }
+            )
+        return "{}"
+
+    class _A:
+        session_id = "sess-gate"
+
+        def clarify_callback(self, question, choices):
+            return "force — use consultant tier F"
+
+    with patch("agent.consultant_routing._call_aux_task", side_effect=fake_call):
+        tier, audit = resolve_consultant_tier(
+            "Design the multi-region Kubernetes architecture for payments",
+            g,
+            "C",
+            g["tier_models"],
+            agent=_A(),
+        )
+    assert tier == "F"
+    assert audit.get("operator_gate", {}).get("final_tier") == "F"
+
+
+def test_operator_gate_skipped_when_manual_defer(gov_env):
+    g = _gov_base()
+
+    def fake_call(task, system, user, max_tokens=512, *, agent=None):
+        if "routing advisor" in system.lower() or "cost-aware" in system.lower():
+            return json.dumps(
+                {
+                    "recommended_tier": "F",
+                    "request_consultant_escalation": True,
+                    "rationale": "architecture review",
+                }
+            )
+        if "challenge" in user.lower():
+            return json.dumps({"challenge": "try D first", "max_reasonable_tier": "D"})
+        if "Chief Orchestrator" in system:
+            return json.dumps(
+                {
+                    "approved_consultant_tier": False,
+                    "final_tier": "D",
+                    "decision_summary": "Denied",
+                }
+            )
+        return "{}"
+
+    class _A:
+        session_id = "sess-manual"
+        _defer_opm_primary_coercion = True
+
+        def clarify_callback(self, question, choices):
+            raise AssertionError("operator gate should not run with manual defer")
+
+    with patch("agent.consultant_routing._call_aux_task", side_effect=fake_call):
+        tier, audit = resolve_consultant_tier(
+            "Design the multi-region Kubernetes architecture for payments",
+            g,
+            "C",
+            g["tier_models"],
+            agent=_A(),
+        )
+    assert tier == "D"
+    assert audit.get("operator_gate", {}).get("skipped") == "manual_pipeline_defer"
+
+
 def test_deliberation_log_written(gov_env):
     g = _gov_base()
     log_path = gov_env / "consultant_deliberations.jsonl"

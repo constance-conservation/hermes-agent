@@ -1382,7 +1382,31 @@ class AIAgent:
         self.session_cost_source = "none"
 
         self._provider_health = ProviderHealthTracker()
-        self._cost_monitor = CostMonitor()
+        self._budget_ledger = None
+        self._ledger_baseline_session_cost = 0.0
+        self._turn_bar_start_usd = 0.0
+        self._last_completed_turn_cost_usd = 0.0
+        try:
+            from agent.routing_canon import load_hard_budget_config
+
+            _hb = load_hard_budget_config()
+            if _hb.get("enabled"):
+                from agent.budget_ledger import BudgetLedger
+
+                self._budget_ledger = BudgetLedger(
+                    daily_budget_aud=_hb["daily_budget_aud"],
+                    aud_to_usd=_hb["aud_to_usd"],
+                )
+                self._cost_monitor = CostMonitor(
+                    session_budget_usd=_hb["session_budget_usd"],
+                    daily_budget_usd=_hb["daily_cap_usd"],
+                    spike_threshold_usd_per_min=_hb["spike_threshold_usd_per_min"],
+                )
+            else:
+                self._cost_monitor = CostMonitor()
+        except Exception:
+            logging.getLogger(__name__).debug("hard budget / CostMonitor init failed", exc_info=True)
+            self._cost_monitor = CostMonitor()
 
         if not self.quiet_mode:
             if compression_enabled:
@@ -1457,6 +1481,9 @@ class AIAgent:
             self._provider_health.reset()
         if hasattr(self, "_cost_monitor") and self._cost_monitor:
             self._cost_monitor.reset()
+        self._ledger_baseline_session_cost = 0.0
+        self._turn_bar_start_usd = 0.0
+        self._last_completed_turn_cost_usd = 0.0
 
         # Context compressor internal counters (if present)
         if hasattr(self, "context_compressor") and self.context_compressor:
@@ -7356,6 +7383,8 @@ class AIAgent:
         )
         attach_opm_session_agent_for_turn(self)
         try:
+            self._opm_suppressed_for_turn = False
+            self._turn_bar_start_usd = float(self.session_estimated_cost_usd or 0.0)
             # If the previous turn activated fallback, restore the primary
             # runtime so this turn gets a fresh attempt with the preferred model.
             # No-op when _fallback_activated is False (gateway, first turn, etc.).
@@ -7443,6 +7472,12 @@ class AIAgent:
                 logger.debug("apply_per_turn_tier_model failed", exc_info=True)
             finally:
                 self._skip_per_turn_tier_routing = False
+            try:
+                from agent.routing_canon import build_turn_routing_intent
+
+                self._turn_routing_intent = build_turn_routing_intent(self)
+            except Exception:
+                self._turn_routing_intent = None
 
             # Gated one-line stack trace before the first LLM call this turn (debug).
             try:
@@ -7454,9 +7489,26 @@ class AIAgent:
                 )
                 if _trace_gate:
                     from agent.openai_primary_mode import opm_coercion_effective
+                    from agent.routing_canon import load_merged_routing_canon
 
                     _om = getattr(self, "_last_opm_meta", None) or {}
                     _bu = (getattr(self, "base_url", None) or "").strip()
+                    _sf = {
+                        "base_url": _bu,
+                        "defer_opm": bool(getattr(self, "_defer_opm_primary_coercion", False)),
+                        "opm_coercion_effective": bool(opm_coercion_effective(self)),
+                        "opm_suppressed_turn": bool(getattr(self, "_opm_suppressed_for_turn", False)),
+                    }
+                    try:
+                        _canon = load_merged_routing_canon()
+                        _rtc = _canon.get("routing_trace") or {}
+                        if (
+                            isinstance(_rtc, dict)
+                            and _rtc.get("include_canon_version_in_pre_llm_trace", True)
+                        ):
+                            _sf["routing_canon_version"] = int(_canon.get("version") or 1)
+                    except Exception:
+                        pass
                     emit_routing_decision_trace(
                         stage="pre_llm_api_stack",
                         chosen_model=str(self.model or ""),
@@ -7465,11 +7517,7 @@ class AIAgent:
                         opm_enabled=bool(_om.get("enabled", False)),
                         opm_source=str(_om.get("source", "")),
                         tier_source="pre_llm",
-                        skip_flags={
-                            "base_url": _bu,
-                            "defer_opm": bool(getattr(self, "_defer_opm_primary_coercion", False)),
-                            "opm_coercion_effective": bool(opm_coercion_effective(self)),
-                        },
+                        skip_flags=_sf,
                         fallback_activated=bool(getattr(self, "_fallback_activated", False)),
                         explicit_user_model=not bool(getattr(self, "_model_is_tier_routed", True)),
                         profile=str(getattr(self, "profile", "") or ""),
@@ -8346,6 +8394,18 @@ class AIAgent:
                                     self._emit_status(
                                         f"💰 {_cm.status_line(self.session_estimated_cost_usd)}",
                                     )
+                            _prev_ledger = float(getattr(self, "_ledger_baseline_session_cost", 0.0) or 0.0)
+                            _delta_led = max(0.0, float(self.session_estimated_cost_usd or 0.0) - _prev_ledger)
+                            self._ledger_baseline_session_cost = float(self.session_estimated_cost_usd or 0.0)
+                            _bl = getattr(self, "_budget_ledger", None)
+                            if _bl is not None and _delta_led > 0:
+                                _bl.add_spend_usd(_delta_led)
+                                if _bl.is_daily_exhausted():
+                                    self._emit_status(
+                                        "⚠️ Daily budget cap (routing_canon hard_budget) reached "
+                                        "— switching to fallback model",
+                                    )
+                                    self._try_activate_fallback(triggered_by_rate_limit=True)
         
                             # Persist token counts to session DB for /insights.
                             # Do this for every platform with a session_id so non-CLI
@@ -8556,6 +8616,8 @@ class AIAgent:
         
                         # Eager fallback for rate limits, quota, or billing/credits errors.
                         is_rate_limited = self._quota_style_api_failure(api_error)
+                        if is_rate_limited:
+                            setattr(self, "_opm_suppressed_for_turn", True)
                         if is_rate_limited and self._fallback_index < len(self._fallback_chain):
                             # Don't eagerly fallback if credential pool rotation may
                             # still recover.  The pool's retry-then-rotate cycle needs
@@ -9777,6 +9839,22 @@ class AIAgent:
         
             return result
         finally:
+            try:
+                self._last_completed_turn_cost_usd = max(
+                    0.0,
+                    float(self.session_estimated_cost_usd or 0.0)
+                    - float(getattr(self, "_turn_bar_start_usd", 0.0) or 0.0),
+                )
+                _led = getattr(self, "_budget_ledger", None)
+                if _led is not None:
+                    logging.getLogger(__name__).debug(
+                        "budget: turn_est=$%.4f USD daily=$%.4f / cap=$%.4f USD",
+                        self._last_completed_turn_cost_usd,
+                        _led.spent_usd_today,
+                        _led.daily_cap_usd,
+                    )
+            except Exception:
+                pass
             detach_opm_session_agent_for_turn()
 
     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:

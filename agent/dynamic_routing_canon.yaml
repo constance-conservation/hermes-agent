@@ -1,0 +1,52 @@
+# Default routing / delegation canon (repo). Overlay: ${HERMES_HOME}/routing_canon.yaml
+# Merged with deep-merge; overlay keys override defaults.
+
+version: 1
+
+# Philosophy order (documentation; enforcement is in routing code paths):
+# 1) cost + compatibility  2) speed + efficiency  3) memory + usefulness
+
+openai_primary_mode:
+  # When true in config, native OpenAI slugs are treated as "free tier" for policy.
+  # When OPM is off or suppressed for the turn, native OpenAI is consultant-class for policy.
+  native_openai_policy_class_when_opm_active: free
+  native_openai_policy_class_when_opm_inactive: consultant
+
+consultant_escalation:
+  # Merged into token-governance consultant_routing (overlay wins on leaf keys).
+  tiers_requiring_deliberation: ["E", "F", "G"]
+  # Token caps for internal router/challenger/chief (advisory; code may clamp).
+  router_max_tokens: 400
+  challenger_max_tokens: 350
+  chief_max_tokens: 400
+
+openrouter_auto:
+  # When primary model is openrouter/auto, require deliberation for these tiers.
+  deliberation_tiers: ["D", "E", "F", "G"]
+  # Also force deliberation for tier G when model id contains "openrouter"
+  openrouter_tier_g_always_deliberate: true
+
+operator_gate:
+  enabled: true
+  # When Chief denies consultant-class use (merged tier was E/F/G), prompt operator via
+  # clarify_callback on the agent. Choices map to routing_canon operator_choice_* below.
+  timeout_hint_seconds: 120
+  # clarify_callback return substring match (case-insensitive)
+  choice_accept_cheaper: "accept"
+  choice_force_consultant: "force"
+
+# Telemetry
+routing_trace:
+  include_canon_version_in_pre_llm_trace: true
+
+# Hard budget (USD estimates from providers vs AUD display cap)
+# API costs are accumulated in USD; daily_budget_aud is converted with aud_to_usd (USD per 1 AUD).
+hard_budget:
+  enabled: true
+  daily_budget_aud: 10.0
+  # Approximate FX: how many USD equals one AUD (adjust in HERMES_HOME/routing_canon.yaml).
+  aud_to_usd: 0.65
+  session_budget_usd: 2.5
+  spike_threshold_usd_per_min: 0.5
+  # Bottom TUI bar (CLI): turn cost, daily AUD/USD, hours to local midnight
+  show_tui_bar: true

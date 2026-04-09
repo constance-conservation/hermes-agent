@@ -1,15 +1,21 @@
-"""Chief-orchestrator consultant routing (policy-aligned, no human operator approval).
+"""Chief-orchestrator consultant routing (policy-aligned).
 
-Implements a hybrid of deterministic tier heuristics + optional cheap-router LLM, with
-internal challenger + Chief deliberation for tiers that require it. Deliberation is logged
-to ``workspace/operations/consultant_deliberations.jsonl`` — not injected into the user
-dialogue (only a short status line may appear).
+Hybrid deterministic tier heuristics + optional cheap-router LLM, with internal
+challenger + Chief deliberation for tiers that require it. When Chief **denies**
+consultant-class use and ``routing_canon`` operator gate is enabled, the runtime
+may prompt the operator via :attr:`run_agent.AIAgent.clarify_callback` (CLI TUI).
+Manual ``/models`` (``_defer_opm_primary_coercion``) skips the operator gate.
+
+Deliberation is logged to ``workspace/operations/consultant_deliberations.jsonl``.
+
+Merged policy: repo ``agent/dynamic_routing_canon.yaml`` + ``${HERMES_HOME}/routing_canon.yaml``.
 
 Disable entirely with ``HERMES_CONSULTANT_ROUTING_DISABLE=1``.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -17,6 +23,8 @@ import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+
+from utils import is_truthy_value
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +286,68 @@ def is_pushback_message(text: str) -> bool:
     return any(p in low for p in _PUSHBACK_PHRASES)
 
 
+def _apply_operator_gate_after_chief_denial(
+    agent: Any,
+    merged: str,
+    fin: str,
+    max_rt: str,
+    tier_models: Dict[str, str],
+    audit: Dict[str, Any],
+) -> str:
+    """If Chief denied consultant use, optionally ask operator (clarify_callback)."""
+    from agent.routing_canon import operator_gate_config
+
+    og = operator_gate_config()
+    if not is_truthy_value(og.get("enabled"), default=True):
+        return fin
+    if getattr(agent, "_defer_opm_primary_coercion", False):
+        audit.setdefault("operator_gate", {})["skipped"] = "manual_pipeline_defer"
+        return fin
+    if getattr(agent, "_skip_per_turn_tier_routing", False):
+        audit.setdefault("operator_gate", {})["skipped"] = "skip_per_turn_tier_routing"
+        return fin
+    consult = {"E", "F", "G"}
+    if merged not in consult:
+        return fin
+    cb = getattr(agent, "clarify_callback", None)
+    if not callable(cb):
+        logger.debug(
+            "consultant_routing: operator gate skipped (no clarify_callback); tier=%s",
+            fin,
+        )
+        audit.setdefault("operator_gate", {})["skipped"] = "no_clarify_callback"
+        return fin
+    accept_tok = str(og.get("choice_accept_cheaper") or "accept").lower()
+    force_tok = str(og.get("choice_force_consultant") or "force").lower()
+    q = (
+        "Chief denied premium consultant use for this request. "
+        f"Recommended cap: tier {fin} ({tier_models.get(fin, '?')}). "
+        f"Choose: accept the cheaper tier, or force consultant tier {merged} "
+        f"({tier_models.get(merged, '?')}) for this turn only."
+    )
+    choices = [
+        f"{accept_tok} — use capped tier {fin}",
+        f"{force_tok} — use consultant tier {merged}",
+    ]
+    try:
+        ans = cb(q, choices)
+    except Exception as e:
+        logger.debug("operator gate clarify_callback failed: %s", e)
+        audit.setdefault("operator_gate", {})["error"] = str(e)
+        return fin
+    s = str(ans or "").lower()
+    audit.setdefault("operator_gate", {}).update(
+        {"response_excerpt": s[:240], "merged": merged, "fin_before": fin}
+    )
+    if force_tok in s:
+        fin2 = _normalize_tier_letter(merged, tier_models) or merged
+        if fin2 in tier_models:
+            audit["operator_gate"]["final_tier"] = fin2
+            return fin2
+    audit["operator_gate"]["final_tier"] = fin
+    return fin
+
+
 def resolve_consultant_tier(
     user_message: str,
     gov_cfg: Dict[str, Any],
@@ -294,7 +364,9 @@ def resolve_consultant_tier(
         pushback_signal: True when the user explicitly pushed back on the previous response.
         retry_count: Number of times this task has already been attempted at the same tier.
     """
-    cr = _cr_cfg(gov_cfg)
+    from agent.routing_canon import merge_canon_into_consultant_routing, openrouter_auto_deliberation_tiers
+
+    cr = merge_canon_into_consultant_routing(copy.deepcopy(_cr_cfg(gov_cfg)))
     mode = str(cr.get("mode") or "hybrid").strip().lower()
     audit: Dict[str, Any] = {
         "deterministic_tier": deterministic_tier,
@@ -337,6 +409,18 @@ def resolve_consultant_tier(
     router_task = str(cr.get("router_task") or "consultant_router").strip()
     challenger_task = str(cr.get("challenger_task") or "consultant_challenger").strip()
     chief_task = str(cr.get("chief_task") or "consultant_chief").strip()
+    try:
+        router_max = int(cr.get("router_max_tokens") or 400)
+    except (TypeError, ValueError):
+        router_max = 400
+    try:
+        challenger_max = int(cr.get("challenger_max_tokens") or 350)
+    except (TypeError, ValueError):
+        challenger_max = 350
+    try:
+        chief_max = int(cr.get("chief_max_tokens") or 400)
+    except (TypeError, ValueError):
+        chief_max = 400
 
     gov_sig = governance_activation_signal(user_message, cr)
     audit["governance_activation_signal"] = gov_sig
@@ -448,7 +532,7 @@ def resolve_consultant_tier(
             # Legacy fallback: _call_aux_task (also used by tests that mock it)
             try:
                 raw_r = _call_aux_task(
-                    router_task, sys_router, user_router, max_tokens=400, agent=agent
+                    router_task, sys_router, user_router, max_tokens=router_max, agent=agent
                 )
                 parsed = _extract_json_object(raw_r) or {}
                 rec = _normalize_tier_letter(str(parsed.get("recommended_tier") or ""), tier_models)
@@ -494,14 +578,19 @@ def resolve_consultant_tier(
                     audit["governance_deliberation_floor"] = fl
 
         need_delib = merged in tiers_delib_u or esc
-        # When the live model is openrouter/auto, require deliberation for upper tiers
-        # so expensive consultant-class routes are explicitly approved by challenger+chief.
+        # When the live model is openrouter/auto, require deliberation for configured tiers
+        # (defaults + routing_canon ``openrouter_auto``).
         _agent_model = str(getattr(agent, "model", "") or "").strip().lower() if agent is not None else ""
-        if _agent_model == "openrouter/auto" and merged in ("D", "E", "F", "G"):
+        _auto_tiers = openrouter_auto_deliberation_tiers(cr)
+        if _agent_model == "openrouter/auto" and merged in _auto_tiers:
             need_delib = True
             audit["auto_router_deliberation_guard"] = True
 
-        if "openrouter" in _agent_model and merged == "G":
+        if (
+            is_truthy_value(cr.get("openrouter_tier_g_always_deliberate"), default=True)
+            and "openrouter" in _agent_model
+            and merged == "G"
+        ):
             need_delib = True
             audit["openrouter_consultant_deliberation_guard"] = True
 
@@ -540,7 +629,7 @@ def resolve_consultant_tier(
         )
         try:
             raw_ch = _call_aux_task(
-                challenger_task, sys_ch, user_ch, max_tokens=350, agent=agent
+                challenger_task, sys_ch, user_ch, max_tokens=challenger_max, agent=agent
             )
             ch_p = _extract_json_object(raw_ch) or {}
         except Exception as e:
@@ -550,8 +639,10 @@ def resolve_consultant_tier(
             max_rt = "D"
 
         sys_chef = (
-            "You are the Chief Orchestrator. You alone approve use of premium consultant tiers "
-            "(E/F/G) after internal challenge. Operators are not asked for approval. "
+            "You are the Chief Orchestrator. You approve use of premium consultant tiers "
+            "(E/F/G) after internal challenge. If you deny, the operator may still be asked "
+            "(via clarify_callback) to accept the cheaper tier or force consultant for this turn "
+            "— unless the user manually pinned a model for the turn. "
             "Approve consultant-class tiers only when the request truly requires them. "
             "Tier G (Claude Opus 4.6) is the most expensive — approve ONLY for extraordinary "
             "tasks and only for a single turn. Reply JSON only."
@@ -572,7 +663,7 @@ def resolve_consultant_tier(
         )
         try:
             raw_cf = _call_aux_task(
-                chief_task, sys_chef, user_chef, max_tokens=400, agent=agent
+                chief_task, sys_chef, user_chef, max_tokens=chief_max, agent=agent
             )
             cf_p = _extract_json_object(raw_cf) or {}
         except Exception as e:
@@ -609,6 +700,10 @@ def resolve_consultant_tier(
             # Cap at challenger's max_reasonable_tier (chief denied premium consultant use).
             fin = _normalize_tier_letter(str(cf_p.get("final_tier") or max_rt), tier_models) or max_rt
             fin = _min_tier_cost(fin, max_rt)
+            if agent is not None:
+                fin = _apply_operator_gate_after_chief_denial(
+                    agent, merged, fin, max_rt, tier_models, audit
+                )
 
         audit["deliberation"] = {
             "turn_id": turn_id,

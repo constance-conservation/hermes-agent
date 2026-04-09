@@ -15,6 +15,7 @@ from agent.openai_primary_mode import (
     is_opm_blocked_openrouter_auto_slug,
     manual_pipeline_opm_bypass_enabled,
     opm_coercion_effective,
+    opm_effective_for_tier_routing_uplift,
     opm_enabled,
     opm_manual_override_active,
     opm_suppresses_free_model_fallback,
@@ -215,6 +216,34 @@ def test_opm_coercion_effective_false_when_manual_bypass_default(monkeypatch):
     assert manual_pipeline_opm_bypass_enabled() is True
     assert opm_coercion_effective(_Manual()) is False
     assert opm_coercion_effective(None) is True
+
+
+def test_opm_coercion_effective_false_when_turn_suppressed(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Sup:
+        _defer_opm_primary_coercion = False
+        _opm_suppressed_for_turn = True
+
+    assert opm_coercion_effective(_Sup()) is False
+
+
+def test_opm_tier_uplift_false_when_turn_suppressed(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+
+    class _Sup:
+        _defer_opm_primary_coercion = False
+        _opm_suppressed_for_turn = True
+
+    assert opm_effective_for_tier_routing_uplift(_Sup()) is False
 
 
 def test_opm_coercion_effective_false_when_bypass_disabled_but_manual_defer(monkeypatch):

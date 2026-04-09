@@ -15,15 +15,14 @@ models to pass through with ``HERMES_GOVERNANCE_ALLOW_PREMIUM=1``.
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import os
-import time
 from typing import Any, Dict, Optional
 
 from agent.disallowed_model_family import model_id_contains_disallowed_family
 from agent.openai_primary_mode import (
     opm_auxiliary_model,
+    opm_effective_for_tier_routing_uplift,
     opm_enabled,
     opm_manual_override_active,
     resolve_openai_primary_mode,
@@ -35,24 +34,6 @@ logger = logging.getLogger(__name__)
 RUNTIME_FILENAME = "hermes_token_governance.runtime.yaml"
 ENV_DISABLE = "HERMES_TOKEN_GOVERNANCE_DISABLE"
 ENV_ALLOW_PREMIUM = "HERMES_GOVERNANCE_ALLOW_PREMIUM"
-_DEBUG_LOG_PATH = "/Users/agent-os/hermes-agent/.cursor/debug-98bb66.log"
-
-
-def _dbg98(hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
-    try:
-        payload = {
-            "sessionId": "98bb66",
-            "runId": "tgov-debug-1",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
-    except Exception:
-        pass
 
 
 def _operations_dir():
@@ -173,22 +154,9 @@ def apply_token_governance_runtime(agent: Any) -> None:
     # Manual ``/models`` routes set ``_defer_opm_primary_coercion`` — treat as explicit
     # concrete model so OPM does not force tier placeholders or blocklist swaps.
     _, _opm_meta = resolve_openai_primary_mode(agent)
-    if opm_enabled(agent) and not getattr(agent, "_defer_opm_primary_coercion", False):
+    if opm_effective_for_tier_routing_uplift(agent):
         _is_tier_placeholder = True
     agent._model_is_tier_routed = _is_tier_placeholder
-    # region agent log
-    _dbg98(
-        "H1",
-        "agent/token_governance_runtime.py:apply_token_governance_runtime",
-        "baseline tier routing flag",
-        {
-            "model": str(agent.model or ""),
-            "model_is_tier_routed": bool(agent._model_is_tier_routed),
-            "opm_enabled": bool(_opm_meta.get("enabled", False)),
-            "opm_source": str(_opm_meta.get("source", "")),
-        },
-    )
-    # endregion
 
     # Resolve tier: sentinel on agent.model before blocklist logic (fixed letter → slug).
     # tier:dynamic is left as-is until apply_per_turn_tier_model (per user message).
@@ -504,40 +472,13 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
         agent._last_opm_meta = getattr(agent, "_last_opm_meta", None) or {}
     # `/models` pipeline selection: honor user pick for this turn (see run_agent.AIAgent).
     if getattr(agent, "_skip_per_turn_tier_routing", False):
-        # region agent log
-        _dbg98(
-            "H3",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "per-turn skipped by flag",
-            {"model": str(getattr(agent, "model", "") or ""), "reason": "skip_per_turn"},
-        )
-        # endregion
         return
     # Stay on the active provider/model while provider fallback is pinned (e.g. rate limits).
     if getattr(agent, "_fallback_activated", False):
-        # region agent log
-        _dbg98(
-            "H5",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "per-turn skipped by active fallback",
-            {"model": str(getattr(agent, "model", "") or ""), "reason": "fallback_activated"},
-        )
-        # endregion
         return
     # If the user set a concrete model in config (not tier:X / tier:dynamic),
     # do not override it with per-turn routing. This ensures /model switches persist.
     if not getattr(agent, "_model_is_tier_routed", True):
-        # region agent log
-        _dbg98(
-            "H3",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "per-turn skipped by non-tier model",
-            {
-                "model": str(getattr(agent, "model", "") or ""),
-                "model_is_tier_routed": bool(getattr(agent, "_model_is_tier_routed", True)),
-            },
-        )
-        # endregion
         return
     from agent.consultant_routing import (
         consultant_routing_enabled,
@@ -554,14 +495,6 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     cfg = getattr(agent, "_token_governance_cfg", None) or load_runtime_config()
     if not cfg:
-        # region agent log
-        _dbg98(
-            "H1",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "per-turn skipped no runtime cfg",
-            {"model": str(getattr(agent, "model", "") or "")},
-        )
-        # endregion
         return
     tier_models = effective_tier_models(cfg.get("tier_models"))
     cr_on = consultant_routing_enabled(cfg)
@@ -571,18 +504,6 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
         and not should_apply_per_turn_routing(cfg)
         and not cr_on
     ):
-        # region agent log
-        _dbg98(
-            "H3",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "per-turn skipped not dynamic and routing off",
-            {
-                "model": str(getattr(agent, "model", "") or ""),
-                "dynamic": bool(is_tier_dynamic(agent.model)),
-                "consultant_on": bool(cr_on),
-            },
-        )
-        # endregion
         return
     deterministic_tier = select_tier_for_message(user_message, cfg)
     tier = deterministic_tier
@@ -590,11 +511,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
     _opm_meta = getattr(agent, "_last_opm_meta", None) or {}
-    if (
-        opm_enabled(agent)
-        and not getattr(agent, "_defer_opm_primary_coercion", False)
-        and tier in ("A", "B", "C")
-    ):
+    if opm_effective_for_tier_routing_uplift(agent) and tier in ("A", "B", "C"):
         _is_coding = any(
             kw in (user_message or "").lower()
             for kw in ("code", "implement", "debug", "refactor", "function",
@@ -635,11 +552,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # Enforce OpenAI-primary mode after consultant routing too, so no later
     # router step can drop back to low-cost tiers when the flag is on.
-    if (
-        opm_enabled(agent)
-        and not getattr(agent, "_defer_opm_primary_coercion", False)
-        and tier in ("A", "B", "C", "D")
-    ):
+    if opm_effective_for_tier_routing_uplift(agent) and tier in ("A", "B", "C", "D"):
         _router_rec2 = audit.get("router") if isinstance(audit, dict) else {}
         _coding_hint = bool(
             isinstance(_router_rec2, dict) and _router_rec2.get("coding_task", False)
@@ -701,14 +614,6 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     mid = tier_models.get(tier)
     if not mid:
-        # region agent log
-        _dbg98(
-            "H3",
-            "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-            "tier selected but no mapped model",
-            {"tier": str(tier), "deterministic_tier": str(deterministic_tier)},
-        )
-        # endregion
         return
     mid = _opm_clamp_tier_resolved_model(agent, str(mid), user_message, _opm_meta)
     if not mid:
@@ -724,20 +629,6 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
             agent._use_prompt_caching = (is_openrouter and is_claude) or is_native_anthropic
         except Exception:
             logger.debug("token governance: could not refresh prompt caching flags", exc_info=True)
-    # region agent log
-    _dbg98(
-        "H3",
-        "agent/token_governance_runtime.py:apply_per_turn_tier_model",
-        "per-turn tier applied",
-        {
-            "tier": str(tier),
-            "deterministic_tier": str(deterministic_tier),
-            "result_model": str(mid),
-            "opm_enabled": bool(_opm_meta.get("enabled", False)),
-            "opm_source": str(_opm_meta.get("source", "")),
-        },
-    )
-    # endregion
     # Always show tier + model for this user turn (even if unchanged).
     try:
         emit = getattr(agent, "_emit_status", None)
