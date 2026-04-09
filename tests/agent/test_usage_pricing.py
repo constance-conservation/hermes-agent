@@ -1,4 +1,7 @@
+from decimal import Decimal
 from types import SimpleNamespace
+
+import pytest
 
 from agent.usage_pricing import (
     CanonicalUsage,
@@ -123,3 +126,57 @@ def test_custom_endpoint_models_api_pricing_is_supported(monkeypatch):
 
     assert float(entry.input_cost_per_million) == 0.5
     assert float(entry.output_cost_per_million) == 2.0
+
+
+def test_normalize_usage_openrouter_extracts_usage_cost():
+    usage = SimpleNamespace(
+        prompt_tokens=1000,
+        completion_tokens=500,
+        cost=0.0123,
+    )
+    normalized = normalize_usage(
+        usage,
+        provider="openrouter",
+        api_mode="chat_completions",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert normalized.billed_usd == Decimal("0.0123")
+
+
+def test_normalize_usage_openrouter_cost_detected_via_base_url():
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=50,
+        cost=0.01,
+    )
+    normalized = normalize_usage(
+        usage,
+        provider="custom",
+        api_mode="chat_completions",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert normalized.billed_usd == Decimal("0.01")
+
+
+def test_estimate_usage_cost_prefers_openrouter_billed_usd():
+    result = estimate_usage_cost(
+        "openai/gpt-4o",
+        CanonicalUsage(
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            billed_usd=Decimal("3.42"),
+        ),
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    )
+    assert result.status == "actual"
+    assert result.source == "provider_cost_api"
+    assert float(result.amount_usd) == pytest.approx(3.42)
+
+
+def test_get_pricing_entry_gpt54_native_openai():
+    entry = get_pricing_entry("gpt-5.4", provider="openai")
+    assert entry is not None
+    assert float(entry.input_cost_per_million) == 2.5
+    assert float(entry.output_cost_per_million) == 15.0
+    assert float(entry.cache_read_cost_per_million) == 0.25

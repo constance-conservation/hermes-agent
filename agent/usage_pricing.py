@@ -32,6 +32,8 @@ class CanonicalUsage:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     request_count: int = 1
+    # OpenRouter (and compatible gateways) may return actual USD on `usage.cost`.
+    billed_usd: Optional[Decimal] = None
     raw_usage: Optional[dict[str, Any]] = None
 
     @property
@@ -160,6 +162,84 @@ _OFFICIAL_DOCS_PRICING: Dict[tuple[str, str], PricingEntry] = {
         source="official_docs_snapshot",
         source_url="https://openai.com/api/pricing/",
         pricing_version="openai-pricing-2026-03-16",
+    ),
+    # GPT-5 family (api.openai.com) — snapshot aligned with published API pricing.
+    (
+        "openai",
+        "gpt-5.4",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("2.50"),
+        output_cost_per_million=Decimal("15.00"),
+        cache_read_cost_per_million=Decimal("0.25"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.4-mini",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("0.75"),
+        output_cost_per_million=Decimal("4.50"),
+        cache_read_cost_per_million=Decimal("0.075"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.4-nano",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("0.20"),
+        output_cost_per_million=Decimal("1.25"),
+        cache_read_cost_per_million=Decimal("0.02"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.2",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("1.75"),
+        output_cost_per_million=Decimal("14.00"),
+        cache_read_cost_per_million=Decimal("0.175"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.3",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("0.75"),
+        output_cost_per_million=Decimal("4.50"),
+        cache_read_cost_per_million=Decimal("0.075"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.3-codex",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("2.50"),
+        output_cost_per_million=Decimal("15.00"),
+        cache_read_cost_per_million=Decimal("0.25"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
+    ),
+    (
+        "openai",
+        "gpt-5.2-codex",
+    ): PricingEntry(
+        input_cost_per_million=Decimal("1.75"),
+        output_cost_per_million=Decimal("14.00"),
+        cache_read_cost_per_million=Decimal("0.175"),
+        source="official_docs_snapshot",
+        source_url="https://openai.com/api/pricing/",
+        pricing_version="openai-gpt5-snapshot-2026-04-09",
     ),
     (
         "openai",
@@ -303,6 +383,28 @@ def _to_int(value: Any) -> int:
         return 0
 
 
+def _is_openrouter_billing_route(
+    provider: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> bool:
+    p = (provider or "").strip().lower()
+    b = (base_url or "").strip().lower()
+    return p == "openrouter" or "openrouter.ai" in b
+
+
+def _coerce_usage_billed_usd(response_usage: Any) -> Optional[Decimal]:
+    """Read provider-reported USD from usage (OpenRouter: `usage.cost`)."""
+    if response_usage is None:
+        return None
+    raw_cost = getattr(response_usage, "cost", None)
+    if raw_cost is None and isinstance(response_usage, dict):
+        raw_cost = response_usage.get("cost")
+    cost = _to_decimal(raw_cost)
+    if cost is None or cost < 0:
+        return None
+    return cost
+
+
 def resolve_billing_route(
     model_name: str,
     provider: Optional[str] = None,
@@ -422,6 +524,7 @@ def normalize_usage(
     *,
     provider: Optional[str] = None,
     api_mode: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> CanonicalUsage:
     """Normalize raw API response usage into canonical token buckets.
 
@@ -469,12 +572,17 @@ def normalize_usage(
     if output_details:
         reasoning_tokens = _to_int(getattr(output_details, "reasoning_tokens", 0))
 
+    billed_usd: Optional[Decimal] = None
+    if _is_openrouter_billing_route(provider_name, base_url):
+        billed_usd = _coerce_usage_billed_usd(response_usage)
+
     return CanonicalUsage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
         reasoning_tokens=reasoning_tokens,
+        billed_usd=billed_usd,
     )
 
 
@@ -494,6 +602,16 @@ def estimate_usage_cost(
             source="none",
             label="included",
             pricing_version="included-route",
+        )
+
+    if usage.billed_usd is not None:
+        amt = usage.billed_usd
+        return CostResult(
+            amount_usd=amt,
+            status="actual",
+            source="provider_cost_api",
+            label=f"${float(amt):.4f}",
+            pricing_version="openrouter-usage-cost",
         )
 
     entry = get_pricing_entry(model_name, provider=provider, base_url=base_url, api_key=api_key)
@@ -543,7 +661,7 @@ def estimate_usage_cost(
         status = "included"
         label = "included"
 
-    if route.provider == "openrouter":
+    if route.provider == "openrouter" and status == "estimated":
         notes.append("OpenRouter cost is estimated from the models API until reconciled.")
 
     return CostResult(

@@ -8762,6 +8762,7 @@ class AIAgent:
                                 response.usage,
                                 provider=self.provider,
                                 api_mode=self.api_mode,
+                                base_url=self.base_url,
                             )
                             prompt_tokens = canonical_usage.prompt_tokens
                             completion_tokens = canonical_usage.output_tokens
