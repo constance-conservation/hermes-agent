@@ -146,10 +146,13 @@ def _config_token_from_env() -> str:
             "(Your App → App configuration tokens → Generate token). "
             "It is NOT your bot token (xoxb) or Socket Mode app token (xapp).\n"
             "\n"
-            "If you exported SLACK_CONFIG_TOKEN in the shell but still see this: "
-            "~/.hermes/.env (and profile .env) load with override — a line like "
-            "SLACK_CONFIG_TOKEN= with no value replaces your export. "
-            "Remove that line or put the full xoxe token in the file.",
+            "Shell: you must export the variable so the Python process inherits it:\n"
+            "  export SLACK_CONFIG_TOKEN='xoxe-…'\n"
+            "A line like `SLACK_CONFIG_TOKEN=…` alone (without export) does not pass the value to `hermes`.\n"
+            "\n"
+            "If you did export but still see this: ~/.hermes/.env (and profile .env) load with "
+            "override — a line `SLACK_CONFIG_TOKEN=` with no value clears your export. "
+            "Remove that line or put the full token in the file.",
             file=sys.stderr,
         )
         sys.exit(1)
