@@ -751,6 +751,26 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
         "advanced": True,
     },
+    "HERMES_TURN_DONE_NOTIFY_URL": {
+        "description": (
+            "Optional HTTP URL Hermes GETs (fire-and-forget) when a root agent turn finishes — "
+            "e.g. Mac Tailscale IP + scripts/macos/hermes_turn_chime_server.py for a local sound. "
+            "Set only on the runtime that should notify (e.g. droplet ~/.hermes/.env)."
+        ),
+        "prompt": "Turn-done notify URL (optional, e.g. http://100.x.y.z:8765/)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_TURN_DONE_SOUND": {
+        "description": "Used only by scripts/macos/hermes_turn_chime_server.py — path to .aiff for afplay (default Funk).",
+        "prompt": "Path to sound file for turn chime server (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
     # ── Local inference (vLLM / llama.cpp / Ollama OpenAI-compatible server) ──
     "HERMES_LOCAL_INFERENCE_BASE_URL": {
         "description": "Base URL for a local OpenAI-compatible inference server (vLLM, llama.cpp, Ollama). "

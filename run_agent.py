@@ -10590,7 +10590,18 @@ class AIAgent:
                 )
             except Exception as exc:
                 logger.warning("on_session_end hook failed: %s", exc)
-        
+
+            try:
+                from agent.turn_done_notify import maybe_notify_turn_done
+
+                maybe_notify_turn_done(
+                    agent=self,
+                    final_response=final_response,
+                    interrupted=interrupted,
+                )
+            except Exception:
+                logger.debug("turn_done_notify skipped", exc_info=True)
+
             return result
         finally:
             try:

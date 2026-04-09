@@ -39,6 +39,7 @@ hermes-agent/
 │   ├── models_dev.py         # models.dev registry integration (provider-aware context)
 │   ├── display.py            # KawaiiSpinner, tool preview formatting
 │   ├── skill_commands.py     # Skill slash commands (shared CLI/gateway)
+│   ├── turn_done_notify.py   # Optional HTTP ping when a root turn completes
 │   ├── routing_canon.py      # Layered routing_canon.yaml loader + TurnRoutingIntent
 │   ├── opm_quota_ladder.py   # OPM native OpenAI quota downgrade ladder (routing_canon)
 │   ├── opm_cross_provider_failover.py  # OPM quota cascade: native → OpenRouter → fallback chain
@@ -399,6 +400,10 @@ in config.yaml (or `HERMES_BACKGROUND_NOTIFICATIONS` env var):
 - `result` — only the final completion message
 - `error` — only the final message when exit code != 0
 - `off` — no watcher messages at all
+
+### Turn-done notify (Mac sound over Tailscale)
+
+Optional: when **`HERMES_TURN_DONE_NOTIFY_URL`** is set on the **runtime that finishes the turn** (e.g. droplet `~/.hermes/.env`), Hermes issues a fire-and-forget HTTP GET at the end of each **root** `run_conversation` (not delegate subagents). Point it at a tiny listener on your Mac — **outbound-only from the VPS**, no open ports on the server. Typical setup: **`tailscale ip -4`** on the Mac, run **`scripts/macos/hermes_turn_chime_server.py --bind <that-ip> --port 8765`**, then set **`HERMES_TURN_DONE_NOTIFY_URL=http://<mac-tailscale-ip>:8765/`** on the VPS. Default sound is **`Funk`** (`/System/Library/Sounds/Funk.aiff`); override with **`--sound`** or **`HERMES_TURN_DONE_SOUND`**.
 
 ### Gateway watchdog (production uptime)
 
