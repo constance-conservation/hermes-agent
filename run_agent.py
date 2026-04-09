@@ -46,6 +46,11 @@ from datetime import datetime
 from pathlib import Path
 
 from hermes_constants import get_hermes_home
+from agent.budget_ledger import (
+    HARD_BUDGET_APPROVE_CHOICE,
+    HARD_BUDGET_DENY_CHOICE,
+    HardBudgetBlockedError,
+)
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
@@ -1448,13 +1453,18 @@ class AIAgent:
         self._ledger_baseline_session_cost = 0.0
         self._turn_bar_start_usd = 0.0
         self._last_completed_turn_cost_usd = 0.0
+        self._hard_budget_operator_approval_required = False
+        self._hard_budget_operator_decision = None
+        self._hard_budget_operator_session_id = None
         try:
+            from agent.budget_ledger import BudgetLedger
             from agent.routing_canon import load_hard_budget_config
 
             _hb = load_hard_budget_config()
+            self._hard_budget_operator_approval_required = bool(
+                _hb.get("operator_approval_when_daily_cap_exceeded")
+            )
             if _hb.get("enabled"):
-                from agent.budget_ledger import BudgetLedger
-
                 self._budget_ledger = BudgetLedger(
                     daily_budget_aud=_hb["daily_budget_aud"],
                     aud_to_usd=_hb["aud_to_usd"],
@@ -1547,6 +1557,7 @@ class AIAgent:
         self._ledger_baseline_session_cost = 0.0
         self._turn_bar_start_usd = 0.0
         self._last_completed_turn_cost_usd = 0.0
+        self._hard_budget_operator_decision = None
 
         # Context compressor internal counters (if present)
         if hasattr(self, "context_compressor") and self.context_compressor:
@@ -1670,6 +1681,58 @@ class AIAgent:
         if phase == "native":
             # Returned without a hop (e.g. OR begin failed before phase advanced) — no more cascade steps.
             self._session_suppress_quota_user_notices = True
+
+    def _hard_budget_check_before_llm_call(self) -> None:
+        """Block paid LLM traffic when daily cap is exceeded unless operator approved this session.
+
+        Uses ``clarify_callback`` once per ``session_id`` when
+        ``operator_approval_when_daily_cap_exceeded`` is enabled. Raises
+        :class:`HardBudgetBlockedError` when calls must not proceed.
+        """
+        if not getattr(self, "_hard_budget_operator_approval_required", False):
+            return
+        _bl = getattr(self, "_budget_ledger", None)
+        if _bl is None or not _bl.is_daily_exhausted():
+            return
+        d = getattr(self, "_hard_budget_operator_decision", None)
+        if d == HARD_BUDGET_APPROVE_CHOICE:
+            return
+        if d == HARD_BUDGET_DENY_CHOICE:
+            raise HardBudgetBlockedError(
+                "Daily API budget cap reached — you chose not to continue paid model use "
+                "for this session. Start a new session (/new) or wait for the calendar-day "
+                "reset to call models again."
+            )
+        cb = getattr(self, "clarify_callback", None)
+        _q = (
+            "Daily API budget cap (routing_canon hard_budget) is reached for today.\n\n"
+            "Allow paid model calls for the rest of this Hermes session? "
+            "Costs will keep accruing until the next calendar-day reset.\n\n"
+            f"Reply with a choice: {HARD_BUDGET_APPROVE_CHOICE!r} or {HARD_BUDGET_DENY_CHOICE!r}."
+        )
+        _choices = [HARD_BUDGET_APPROVE_CHOICE, HARD_BUDGET_DENY_CHOICE]
+        if cb is None:
+            raise HardBudgetBlockedError(
+                "Daily API budget cap reached — configure clarify_callback (interactive CLI) "
+                "or disable operator_approval_when_daily_cap_exceeded to auto-fallback; "
+                "blocking paid LLM calls until the cap resets."
+            )
+        try:
+            raw = (cb(_q, _choices) or "").strip().lower()
+        except Exception as exc:
+            logger.warning("hard_budget clarify_callback failed: %s", exc)
+            raw = ""
+        # Prefer explicit approve; timeout / ambiguous → deny (do not overspend).
+        if HARD_BUDGET_APPROVE_CHOICE in raw:
+            self._hard_budget_operator_decision = HARD_BUDGET_APPROVE_CHOICE
+        elif HARD_BUDGET_DENY_CHOICE in raw:
+            self._hard_budget_operator_decision = HARD_BUDGET_DENY_CHOICE
+        else:
+            self._hard_budget_operator_decision = HARD_BUDGET_DENY_CHOICE
+        if self._hard_budget_operator_decision == HARD_BUDGET_DENY_CHOICE:
+            raise HardBudgetBlockedError(
+                "Daily API budget cap reached — continuing paid model use was declined for this session."
+            )
 
     def _is_direct_openai_url(self, base_url: str = None) -> bool:
         """Return True when a base URL targets OpenAI's native API."""
@@ -4518,6 +4581,7 @@ class AIAgent:
         close that worker-local client, so retries and other requests never
         inherit a closed transport.
         """
+        self._hard_budget_check_before_llm_call()
         result = {"response": None, "error": None}
         request_client_holder = {"client": None}
 
@@ -4649,6 +4713,7 @@ class AIAgent:
             finally:
                 self._codex_on_first_delta = None
 
+        self._hard_budget_check_before_llm_call()
         result = {"response": None, "error": None}
         request_client_holder = {"client": None}
         first_delta_fired = {"done": False}
@@ -6798,6 +6863,7 @@ class AIAgent:
         messages.append(flush_msg)
 
         try:
+            self._hard_budget_check_before_llm_call()
             self._opm_reconcile_primary_if_disallowed()
             # Build API messages for the flush call
             _is_strict_api = "api.mistral.ai" in self._base_url_lower
@@ -7670,6 +7736,7 @@ class AIAgent:
         messages.append({"role": "user", "content": summary_request})
 
         try:
+            self._hard_budget_check_before_llm_call()
             self._opm_reconcile_primary_if_disallowed()
             # Build API messages, stripping internal-only fields
             # (finish_reason, reasoning) that strict APIs like Mistral reject with 422
@@ -7804,6 +7871,9 @@ class AIAgent:
                 else:
                     final_response = "I reached the iteration limit and couldn't generate a summary."
 
+        except HardBudgetBlockedError as e:
+            logging.warning("Iteration-limit summary blocked by hard budget: %s", e)
+            final_response = str(e)
         except Exception as e:
             logging.warning(f"Failed to get summary response: {e}")
             final_response = f"I reached the maximum iterations ({self.max_iterations}) but couldn't summarize. Error: {str(e)}"
@@ -7856,6 +7926,10 @@ class AIAgent:
             if _prev_q is not None and _prev_q != _q_sid:
                 self._session_suppress_quota_user_notices = False
             self._quota_notice_session_id = _q_sid
+            _prev_hb = getattr(self, "_hard_budget_operator_session_id", None)
+            if _prev_hb is not None and _prev_hb != _q_sid:
+                self._hard_budget_operator_decision = None
+            self._hard_budget_operator_session_id = _q_sid
             self._turn_bar_start_usd = float(self.session_estimated_cost_usd or 0.0)
             # If the previous turn activated fallback, restore the primary
             # runtime so this turn gets a fresh attempt with the preferred model.
@@ -8876,11 +8950,17 @@ class AIAgent:
                             if _bl is not None and _delta_led > 0:
                                 _bl.add_spend_usd(_delta_led)
                                 if _bl.is_daily_exhausted():
-                                    self._emit_status(
-                                        "⚠️ Daily budget cap (routing_canon hard_budget) reached "
-                                        "— switching to fallback model",
-                                    )
-                                    self._try_activate_fallback(triggered_by_rate_limit=True)
+                                    if getattr(self, "_hard_budget_operator_approval_required", False):
+                                        self._emit_status(
+                                            "⚠️ Daily budget cap reached — paid API calls will pause "
+                                            "until you approve or deny on the next model request.",
+                                        )
+                                    else:
+                                        self._emit_status(
+                                            "⚠️ Daily budget cap (routing_canon hard_budget) reached "
+                                            "— switching to fallback model",
+                                        )
+                                        self._try_activate_fallback(triggered_by_rate_limit=True)
         
                             # Persist token counts to session DB for /insights.
                             # Do this for every platform with a session_id so non-CLI
@@ -8936,6 +9016,17 @@ class AIAgent:
                         if ph:
                             ph.record_success(self.provider)
                         break  # Success, exit retry loop
+        
+                    except HardBudgetBlockedError as _hb_exc:
+                        if thinking_spinner:
+                            thinking_spinner.stop("")
+                            thinking_spinner = None
+                        if self.thinking_callback:
+                            self.thinking_callback("")
+                        self._emit_status(str(_hb_exc), "lifecycle")
+                        self._persist_session(messages, conversation_history)
+                        final_response = str(_hb_exc)
+                        break
         
                     except InterruptedError:
                         if thinking_spinner:

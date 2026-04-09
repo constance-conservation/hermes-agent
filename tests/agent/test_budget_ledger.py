@@ -45,6 +45,8 @@ def test_load_hard_budget_defaults(home):
     assert cfg["daily_budget_aud"] == 10.0
     assert cfg["enabled"] is True
     assert "Australia" in str(cfg.get("reset_timezone") or "")
+    assert "operator_approval_when_daily_cap_exceeded" in cfg
+    assert isinstance(cfg["operator_approval_when_daily_cap_exceeded"], bool)
 
 
 def test_hours_until_timezone_midnight_reasonable():

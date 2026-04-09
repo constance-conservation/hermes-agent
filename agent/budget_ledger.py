@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 STATE_NAME = "daily_budget_state.json"
 
 
+class HardBudgetBlockedError(RuntimeError):
+    """Raised when the daily hard budget blocks an LLM call (denied or no approval)."""
+
+
+# Clarify choice labels (operator picks one substring match).
+HARD_BUDGET_APPROVE_CHOICE = "approve"
+HARD_BUDGET_DENY_CHOICE = "deny"
+
+
 def hours_until_local_midnight() -> float:
     """Hours from now until next midnight in the process local timezone (0–24)."""
     now = datetime.now().astimezone()

@@ -168,6 +168,10 @@ def load_hard_budget_config() -> Dict[str, Any]:
         or hb.get("daily_reset_timezone")
         or "Australia/Sydney"
     ).strip() or "Australia/Sydney"
+    operator_approval = is_truthy_value(
+        hb.get("operator_approval_when_daily_cap_exceeded"),
+        default=False,
+    )
     return {
         "enabled": enabled,
         "daily_budget_aud": daily_aud,
@@ -177,4 +181,5 @@ def load_hard_budget_config() -> Dict[str, Any]:
         "spike_threshold_usd_per_min": max(0.01, spike),
         "show_tui_bar": show_tui,
         "reset_timezone": reset_tz,
+        "operator_approval_when_daily_cap_exceeded": operator_approval,
     }
