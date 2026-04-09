@@ -692,8 +692,15 @@ DEFAULT_CONFIG = {
         "wrap_response": True,
     },
 
+    # Optional paths to cloned third-party repos for /paperclip and /autoresearch helpers.
+    # Override per-machine with HERMES_PAPERCLIP_REPO / HERMES_AUTORESEARCH_REPO.
+    "integrations": {
+        "paperclip": {"repo": ""},
+        "autoresearch": {"repo": ""},
+    },
+
     # Config schema version - bump this when adding new required fields
-    "_config_version": 28,
+    "_config_version": 29,
 }
 
 # =============================================================================
@@ -703,6 +710,10 @@ DEFAULT_CONFIG = {
 # Track which env vars were introduced in each config version.
 # Migration only mentions vars new since the user's previous version.
 ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
+    29: [
+        "HERMES_PAPERCLIP_REPO",
+        "HERMES_AUTORESEARCH_REPO",
+    ],
     28: [
         "HERMES_MANUAL_PIPELINE_BYPASS_OPM",
         "HERMES_MANUAL_PIPELINE_NO_PROVIDER_FALLBACK",
@@ -724,6 +735,22 @@ REQUIRED_ENV_VARS = {}
 
 # Optional environment variables that enhance functionality
 OPTIONAL_ENV_VARS = {
+    "HERMES_PAPERCLIP_REPO": {
+        "description": "Absolute path to a cloned cc-org-au/paperclip repo (shown in /paperclip hints).",
+        "prompt": "Path to paperclip clone (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_AUTORESEARCH_REPO": {
+        "description": "Absolute path to a cloned cc-org-au/autoresearch repo (shown in /autoresearch hints).",
+        "prompt": "Path to autoresearch clone (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
     # ── Local inference (vLLM / llama.cpp / Ollama OpenAI-compatible server) ──
     "HERMES_LOCAL_INFERENCE_BASE_URL": {
         "description": "Base URL for a local OpenAI-compatible inference server (vLLM, llama.cpp, Ollama). "
@@ -2472,6 +2499,29 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v28 OPM manual-pipeline migration skipped: {e}")
             results["warnings"].append(f"v28 migration: {e}")
             merge_user_config_yaml({"_config_version": 28})
+
+    # ── Version 28 → 29: optional integrations.*.repo for /paperclip and /autoresearch ──
+    if current_ver < 29:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 29,
+                    "integrations": {
+                        "paperclip": {"repo": ""},
+                        "autoresearch": {"repo": ""},
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v29: integrations.paperclip / integrations.autoresearch "
+                    "(optional repo paths; env HERMES_PAPERCLIP_REPO / HERMES_AUTORESEARCH_REPO)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v29 integrations migration skipped: {e}")
+            results["warnings"].append(f"v29 migration: {e}")
+            merge_user_config_yaml({"_config_version": 29})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

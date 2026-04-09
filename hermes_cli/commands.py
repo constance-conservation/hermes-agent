@@ -139,6 +139,20 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("connect", "disconnect", "status")),
     CommandDef("plugins", "List installed plugins and their status",
                "Tools & Skills", cli_only=True),
+    CommandDef(
+        "paperclip",
+        "Paperclip (cc-org-au/paperclip): org orchestration — onboard, configure, dev",
+        "Tools & Skills",
+        args_hint="[help|onboard|configure|dev]",
+        subcommands=("help", "onboard", "configure", "dev"),
+    ),
+    CommandDef(
+        "autoresearch",
+        "Autoresearch (cc-org-au/autoresearch): nanochat experiments — prepare, train, files",
+        "Tools & Skills",
+        args_hint="[help|prepare|train|files]",
+        subcommands=("help", "prepare", "train", "files"),
+    ),
 
     # Info
     CommandDef("commands", "Browse all commands and skills (paginated)", "Info",

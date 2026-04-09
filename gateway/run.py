@@ -2143,6 +2143,12 @@ class GatewayRunner:
         if canonical == "voice":
             return await self._handle_voice_command(event)
 
+        if canonical == "paperclip":
+            return await self._handle_paperclip_command(event)
+
+        if canonical == "autoresearch":
+            return await self._handle_autoresearch_command(event)
+
         # User-defined quick commands (bypass agent loop, no LLM call)
         if command:
             if isinstance(self.config, dict):
@@ -3884,6 +3890,20 @@ class GatewayRunner:
                 if adapter:
                     self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=True)
                 return "Voice mode disabled."
+
+    async def _handle_paperclip_command(self, event: MessageEvent) -> str:
+        """Handle /paperclip — cc-org-au/paperclip quickstart hints."""
+        from hermes_cli.integration_repos import format_paperclip_message
+
+        cfg = _load_gateway_config()
+        return format_paperclip_message((event.text or "").strip(), cfg)
+
+    async def _handle_autoresearch_command(self, event: MessageEvent) -> str:
+        """Handle /autoresearch — cc-org-au/autoresearch workflow hints."""
+        from hermes_cli.integration_repos import format_autoresearch_message
+
+        cfg = _load_gateway_config()
+        return format_autoresearch_message((event.text or "").strip(), cfg)
 
     async def _handle_voice_channel_join(self, event: MessageEvent) -> str:
         """Join the user's current Discord voice channel."""

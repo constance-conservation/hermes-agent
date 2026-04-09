@@ -4847,6 +4847,18 @@ class HermesCLI:
             self._handle_models_command(cmd_original)
         elif canonical == "voice":
             self._handle_voice_command(cmd_original)
+        elif canonical == "paperclip":
+            from hermes_cli.integration_repos import format_paperclip_message
+            from hermes_cli.config import load_cli_config
+            from rich.markdown import Markdown
+
+            self.console.print(Markdown(format_paperclip_message(cmd_original, load_cli_config())))
+        elif canonical == "autoresearch":
+            from hermes_cli.integration_repos import format_autoresearch_message
+            from hermes_cli.config import load_cli_config
+            from rich.markdown import Markdown
+
+            self.console.print(Markdown(format_autoresearch_message(cmd_original, load_cli_config())))
         else:
             # Check for user-defined quick commands (bypass agent loop, no LLM call)
             base_cmd = cmd_lower.split()[0]
