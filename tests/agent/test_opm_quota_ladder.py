@@ -31,6 +31,13 @@ def test_merged_canon_includes_opm_quota_ladder(hermes_home):
     assert "codex_models" in oq
 
 
+def test_normalize_ladder_maps_legacy_gpt53_to_official_mini():
+    cfg = load_opm_native_quota_downgrade_config()
+    chat = cfg.get("chat_models") or []
+    assert "gpt-5.3" not in chat
+    assert "gpt-5.4-mini" in chat
+
+
 def test_next_quota_downgrade_model_chat():
     cfg = load_opm_native_quota_downgrade_config()
     assert (
@@ -39,13 +46,27 @@ def test_next_quota_downgrade_model_chat():
             api_mode="chat_completions",
             cfg=cfg,
         )
-        == "gpt-5.3"
+        == "gpt-5.4-mini"
     )
+    assert (
+        next_quota_downgrade_model(
+            current_model="gpt-5.4-mini",
+            api_mode="chat_completions",
+            cfg=cfg,
+        )
+        == "gpt-5.4-nano"
+    )
+    assert next_quota_downgrade_model(
+        current_model="openai/gpt-5.4-nano",
+        api_mode="chat_completions",
+        cfg=cfg,
+    ) == "gpt-5.2"
+    # Legacy mistaken id in session — alias matches ladder position of gpt-5.4-mini
     assert next_quota_downgrade_model(
         current_model="openai/gpt-5.3",
         api_mode="chat_completions",
         cfg=cfg,
-    ) == "gpt-5.2"
+    ) == "gpt-5.4-nano"
     assert (
         next_quota_downgrade_model(
             current_model="gpt-5.2",
@@ -65,7 +86,7 @@ def test_next_quota_downgrade_gpt54_on_codex_api_stack():
             api_mode="codex_responses",
             cfg=cfg,
         )
-        == "gpt-5.3"
+        == "gpt-5.4-mini"
     )
 
 

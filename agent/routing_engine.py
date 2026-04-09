@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from agent.openai_primary_mode import resolve_openai_primary_mode
+from agent.provider_model_routing_catalog import format_routing_catalog_digest
 from agent.routing_trace import emit_routing_decision_trace
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,13 @@ def route_prompt(
 
     profiles_desc = _profiles_description(available_profiles)
     system_prompt = _ROUTING_SYSTEM_PROMPT.format(profiles_desc=profiles_desc)
+    _cat = format_routing_catalog_digest()
+    if _cat:
+        system_prompt += (
+            "\n\nMULTI-PROVIDER MODEL CATALOG (official snapshot; use to judge task difficulty, "
+            "modality needs, and latency/cost vs tier letters A–G):\n"
+            + _cat
+        )
 
     # When openai_primary_mode is on, bias the router toward E/F
     if opm:

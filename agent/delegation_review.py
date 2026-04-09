@@ -16,6 +16,8 @@ import logging
 import time
 from typing import Any, Dict, Optional, Tuple
 
+from agent.provider_model_routing_catalog import format_routing_catalog_digest
+
 logger = logging.getLogger(__name__)
 _DEBUG_LOG_PATH = "/Users/agent-os/hermes-agent/.cursor/debug-98bb66.log"
 
@@ -175,6 +177,14 @@ def review_delegation_context(
     if context:
         ctx_snippet = context[:150] + ("..." if len(context) > 150 else "")
 
+    _cat = format_routing_catalog_digest()
+    _cat_block = (
+        "\n\nMODEL CATALOG (judge whether the proposed sub-agent model fits goal complexity; "
+        "delegates must not use consultant-class models unless policy allows):\n"
+        + _cat
+        if _cat
+        else ""
+    )
     prompt = (
         "You are a delegation reviewer. Evaluate if the context below is "
         "sufficient for a sub-agent to complete the goal. Respond ONLY with "
@@ -185,6 +195,7 @@ def review_delegation_context(
     if ctx_snippet:
         prompt += f"Context: {ctx_snippet}\n"
     prompt += f"Model: {proposed_model}\n"
+    prompt += _cat_block
 
     try:
         from agent.auxiliary_client import call_llm

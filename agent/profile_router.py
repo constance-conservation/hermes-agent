@@ -485,6 +485,15 @@ def classify_profile_for_prompt(
         _set_router_telemetry("keyword_heuristic", "keyword")
         return kw[0], kw[1], kw[2]
 
+    from agent.provider_model_routing_catalog import format_routing_catalog_digest
+
+    _pr_cat = format_routing_catalog_digest()
+    _pr_suffix = (
+        "\n\nMODEL CATALOG (optional context — match specialist profile to domain/heavy reasoning needs):\n"
+        + _pr_cat
+        if _pr_cat
+        else ""
+    )
     system = (
         "You route user turns to Hermes profile slugs (each profile is an isolated agent runtime). "
         "Reply with ONLY valid JSON, no markdown.\n"
@@ -494,6 +503,7 @@ def classify_profile_for_prompt(
         "with confidence 0.7–1.0.\n"
         "Use profile null with confidence below 0.5 when the orchestrator should answer or no slug fits.\n"
         "Never invent slugs; profile must be exactly one of the listed names or null."
+        + _pr_suffix
     )
     user = (
         f"Current session profile: {current_profile!r}\n"

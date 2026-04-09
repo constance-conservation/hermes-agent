@@ -349,7 +349,7 @@ def test_opm_subprocess_allowlist_unions_routing_canon_quota_ladder(tmp_path, mo
         monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
 
         parent = SimpleNamespace(base_url="https://api.openai.com/v1", provider="custom")
-        assert sg._is_openai_primary_mode_allowed("gpt-5.3", parent) is True
+        assert sg._is_openai_primary_mode_allowed("gpt-5.4-mini", parent) is True
         assert sg._is_openai_primary_mode_allowed("gpt-5.2", parent) is True
         assert sg._is_openai_primary_mode_allowed("gpt-5.3-codex", parent) is True
 
@@ -359,7 +359,8 @@ def test_opm_subprocess_allowlist_unions_routing_canon_quota_ladder(tmp_path, mo
                 "allowed_subprocess_models": ["gpt-5.4"],
             }
         )
-        assert "gpt-5.3" in cores
+        # Overlay still lists mistaken gpt-5.3 — normalized to official id in ladder
+        assert "gpt-5.4-mini" in cores
         assert "gpt-5.2-codex" in cores
     finally:
         invalidate_routing_canon_cache()

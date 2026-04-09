@@ -24,12 +24,24 @@ def _bare_slug(model_id: str) -> str:
     return m
 
 
+# Legacy / mistaken canon overlays used bare ``gpt-5.3``; OpenAI returns 400 model_not_found.
+# Map to a real Chat Completions id (same tier intent: cheaper than gpt-5.4 flagship).
+_OPM_NATIVE_LADDER_MODEL_ALIASES = {
+    "gpt-5.3": "gpt-5.4-mini",
+}
+
+
+def _canonical_ladder_id(bare: str) -> str:
+    key = (bare or "").strip().lower()
+    return _OPM_NATIVE_LADDER_MODEL_ALIASES.get(key, bare)
+
+
 def _normalize_ladder(entries: Any) -> List[str]:
     if not isinstance(entries, list):
         return []
     out: List[str] = []
     for x in entries:
-        s = _bare_slug(str(x).strip())
+        s = _canonical_ladder_id(_bare_slug(str(x).strip()))
         if s and s not in out:
             out.append(s)
     return out
@@ -105,11 +117,12 @@ def next_quota_downgrade_model(
     del api_mode  # kept for API stability / callers; resolution is model-driven
     chat = list(cfg.get("chat_models") or [])
     codex = list(cfg.get("codex_models") or [])
-    cur = _bare_slug(current_model).lower()
+    cur = _canonical_ladder_id(_bare_slug(current_model)).lower()
 
     def _idx_in(seq: List[str]) -> int:
         for i, m in enumerate(seq):
-            if _bare_slug(m).lower() == cur:
+            slug = _canonical_ladder_id(_bare_slug(m)).lower()
+            if slug == cur:
                 return i
         return -1
 
@@ -122,11 +135,11 @@ def next_quota_downgrade_model(
 
     # Top chat slug on a codex HTTP stack (gpt-5.4 not listed under codex_models).
     if "codex" not in cur and chat:
-        top = _bare_slug(chat[0]).lower()
+        top = _canonical_ladder_id(_bare_slug(chat[0])).lower()
         if top == cur and len(chat) > 1:
             return chat[1]
     if "codex" in cur and codex:
-        top = _bare_slug(codex[0]).lower()
+        top = _canonical_ladder_id(_bare_slug(codex[0])).lower()
         if top == cur and len(codex) > 1:
             return codex[1]
     return None

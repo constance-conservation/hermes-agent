@@ -109,6 +109,7 @@ include = ["agent", "tools", "tools.*", "hermes_cli", "gateway", "gateway.*", "c
 
 [tool.setuptools.package-data]
 hermes_cli = ["scripts/core/agent-droplet", "scripts/core/ssh_droplet.sh", "scripts/core/droplet_remote_venv.sh"]
+agent = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -24,6 +24,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent.provider_model_routing_catalog import format_routing_catalog_digest
 from utils import is_truthy_value
 
 logger = logging.getLogger(__name__)
@@ -470,6 +471,12 @@ def resolve_consultant_tier(
             "IMPORTANT: Set request_consultant_escalation=true whenever you recommend E, F, or G. "
             "For coding/engineering tasks that warrant consultant escalation, prefer F over E."
         )
+        _rcat = format_routing_catalog_digest()
+        if _rcat:
+            sys_router += (
+                "\n\nMULTI-PROVIDER MODEL CATALOG (use to calibrate tier vs task shape; output JSON tiers only):\n"
+                + _rcat
+            )
         hint = ""
         if gov_sig:
             hint = (
@@ -621,6 +628,12 @@ def resolve_consultant_tier(
             "You challenge routing decisions to prevent unnecessary spend. "
             "Be concise. Reply JSON only."
         )
+        _dcat = format_routing_catalog_digest()
+        if _dcat:
+            sys_ch += (
+                "\n\nMODEL CATALOG (reasoning bands, modalities, latency — judge if the router over-shot tier):\n"
+                + _dcat
+            )
         user_ch = (
             f"Router recommended tier {merged} for this request. Rationale: "
             f"{audit['router'].get('rationale', '')}\n\n"
@@ -642,11 +655,16 @@ def resolve_consultant_tier(
             "You are the Chief Orchestrator. You approve use of premium consultant tiers "
             "(E/F/G) after internal challenge. If you deny, the operator may still be asked "
             "(via clarify_callback) to accept the cheaper tier or force consultant for this turn "
-            "— unless the user manually pinned a model for the turn. "
+            "— unless the user manually pinned a model for this turn. "
             "Approve consultant-class tiers only when the request truly requires them. "
             "Tier G (Claude Opus 4.6) is the most expensive — approve ONLY for extraordinary "
             "tasks and only for a single turn. Reply JSON only."
         )
+        if _dcat:
+            sys_chef += (
+                "\n\nMODEL CATALOG (frontier vs efficient SKUs — approve expensive tiers only when warranted):\n"
+                + _dcat
+            )
         user_chef = (
             f"Deterministic baseline: {deterministic_tier}. Router tier: {merged}. "
             f"Router rationale: {audit['router'].get('rationale', '')}\n"
