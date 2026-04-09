@@ -1,4 +1,4 @@
-"""Gateway cache signature reflects OPM (fallback cleared in AIAgent / resolve_fallback_providers)."""
+"""Gateway cache signature reflects OPM (AIAgent uses emergency Gemini when suppressing free chain)."""
 
 from unittest.mock import patch
 

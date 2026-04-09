@@ -364,6 +364,59 @@ class TestFallbackInit:
         assert agent._fallback_model is None
 
 
+class TestOpmEmergencyQuotaFallback:
+    """OPM suppresses the free-model chain but must still fail over on quota/rate-limit."""
+
+    def test_opm_suppress_injects_only_rate_limit_gemini(self):
+        with (
+            patch("run_agent.get_tool_definitions", return_value=_make_tool_defs("web_search")),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+            patch(
+                "agent.openai_primary_mode.opm_suppresses_free_model_fallback",
+                return_value=True,
+            ),
+            patch("agent.openai_primary_mode.opm_manual_override_active", return_value=False),
+            patch(
+                "agent.openai_primary_mode.opm_auxiliary_model",
+                return_value="gemini-2.5-flash",
+            ),
+        ):
+            agent = AIAgent(
+                api_key="test-key",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+                fallback_model=None,
+            )
+        assert len(agent._fallback_chain) == 1
+        fb0 = agent._fallback_chain[0]
+        assert fb0["provider"] == "gemini"
+        assert fb0["model"] == "gemini-2.5-flash"
+        assert fb0["only_rate_limit"] is True
+        assert agent._fallback_only_rate_limit is True
+
+    def test_opm_suppress_explicit_empty_fallback_stays_empty(self):
+        with (
+            patch("run_agent.get_tool_definitions", return_value=_make_tool_defs("web_search")),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+            patch(
+                "agent.openai_primary_mode.opm_suppresses_free_model_fallback",
+                return_value=True,
+            ),
+            patch("agent.openai_primary_mode.opm_manual_override_active", return_value=False),
+        ):
+            agent = AIAgent(
+                api_key="test-key",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+                fallback_model=[],
+            )
+        assert agent._fallback_chain == []
+
+
 # =============================================================================
 # Provider credential resolution
 # =============================================================================

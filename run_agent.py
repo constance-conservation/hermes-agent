@@ -979,10 +979,33 @@ class AIAgent:
             except Exception:
                 pass
         try:
-            from agent.openai_primary_mode import opm_manual_override_active, opm_suppresses_free_model_fallback
+            from agent.openai_primary_mode import (
+                opm_auxiliary_model,
+                opm_manual_override_active,
+                opm_suppresses_free_model_fallback,
+            )
 
             if not opm_manual_override_active(self) and opm_suppresses_free_model_fallback(self):
+                # OPM clears the synthesized free-model chain so transient OpenAI
+                # errors do not hop to flash-family. OpenAI account quota / billing
+                # exhaustion still needs a cross-provider escape hatch (direct
+                # Gemini via opm_auxiliary_model), gated by only_rate_limit so
+                # arbitrary 5xxs keep failing on the primary stack.
+                _explicit_empty_fallback = isinstance(fallback_model, list) and len(fallback_model) == 0
                 self._fallback_chain = []
+                if not _explicit_empty_fallback:
+                    try:
+                        _aux = opm_auxiliary_model(self)
+                        if _aux:
+                            self._fallback_chain = [
+                                {
+                                    "provider": "gemini",
+                                    "model": _aux,
+                                    "only_rate_limit": True,
+                                }
+                            ]
+                    except Exception:
+                        self._fallback_chain = []
         except Exception:
             pass
         # Explicit fallback_providers from config (e.g. gateway) bypass resolve_fallback_providers;
