@@ -4410,6 +4410,10 @@ For more help on a command:
         "operator-guide",
         help="Print Slack setup: manifest/xoxe, slash commands, reinstall, @profile rules",
     )
+    slack_sub.add_parser(
+        "list-commands",
+        help="List /hermes + /hermes-* commands Hermes puts in the manifest (no API; compare locally)",
+    )
     slack_parser.set_defaults(func=cmd_slack)
 
     # =========================================================================

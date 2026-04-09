@@ -3346,6 +3346,38 @@ class GatewayRunner:
                 "Restart the gateway (or next process start) so new sessions pick this up."
             )
 
+        if sub in ("", "help", "menu"):
+            profiles = list_profiles()
+            active = get_active_profile_name()
+            lines = [
+                "**Profiles** — separate Hermes homes (config, memory; each may run its own gateway).",
+                f"Sticky default for new sessions: `{active}`",
+                "",
+            ]
+            for p in profiles[:30]:
+                mark = "◆ " if (p.name == active or (active == "default" and p.is_default)) else "• "
+                lines.append(
+                    f"{mark}`{p.name}` — gateway {'up' if p.gateway_running else 'down'}"
+                )
+            if len(profiles) > 30:
+                lines.append(f"… +{len(profiles) - 30} more — `/profile list`")
+            lines.extend(
+                [
+                    "",
+                    "**One-turn @ override (this chat):** In a channel, @mention this bot, then "
+                    "`@<slug>` and your message. In a DM with this bot, start with `@<slug> ` "
+                    "(letters, digits, `-`, `_`; not `@file:` / `@folder:` / `@diff`).",
+                    "",
+                    "**Model / pipeline pick (not a Slack user):** `/models list` then `/models <n>` "
+                    "for this conversation.",
+                    "",
+                    "**Sticky profile switch:** `/profile use <slug>` then restart the gateway.",
+                    "",
+                    "Shorthand: `/profile list` — full table.",
+                ]
+            )
+            return "\n".join(lines)
+
         home = get_hermes_home()
         display = display_hermes_home()
 

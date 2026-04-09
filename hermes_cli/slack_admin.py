@@ -491,12 +491,36 @@ def slack_join_public_channels(*, dry_run: bool = False) -> None:
         sys.exit(1)
 
 
+def slack_list_local_commands() -> None:
+    """Print slash command names Hermes puts in the Socket Mode manifest (no Slack API call)."""
+    from hermes_cli.commands import slack_bolt_slash_command_paths
+
+    primary = ["/hermes"]
+    rest = sorted(slack_bolt_slash_command_paths())
+    all_cmds = primary + rest
+    print(f"Hermes registry → Slack manifest: {len(all_cmds)} slash commands\n")
+    for i, c in enumerate(all_cmds, 1):
+        print(f"  {i:4d}  {c}")
+    print(
+        "\nCompare with Slack: api.slack.com/apps → your app → Slash Commands, "
+        "or:  hermes slack manifest-export --app-id A0…  (needs SLACK_CONFIG_TOKEN)"
+    )
+    print(
+        "Align with:  export SLACK_CONFIG_TOKEN='xoxe-…'  "
+        "&& hermes slack manifest-update --confirm --app-id A0…"
+    )
+
+
 def slack_operator_guide() -> None:
     """Print how Slack slash commands and @profile interact with Hermes."""
     from hermes_cli.commands import slack_bolt_slash_command_paths
 
     n_short = len(slack_bolt_slash_command_paths())
     print("Hermes + Slack — slash commands and @profile\n")
+    print(
+        "SECURITY: Never paste SLACK_CONFIG_TOKEN (xoxe), xoxb, or xapp in chat or tickets — "
+        "revoke and rotate if exposed.\n"
+    )
     print("SLASH COMMANDS\n")
     print(
         "Slack only delivers slash invocations that exist on your Slack app. "
@@ -556,6 +580,8 @@ def slack_command(args) -> None:
         slack_manifest_update(app_id=getattr(args, "app_id", "") or "")
     elif sub == "operator-guide":
         slack_operator_guide()
+    elif sub == "list-commands":
+        slack_list_local_commands()
     else:
         print(f"Unknown slack subcommand: {sub!r}", file=sys.stderr)
         sys.exit(1)
