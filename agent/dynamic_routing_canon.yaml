@@ -39,6 +39,19 @@ operator_gate:
 routing_trace:
   include_canon_version_in_pre_llm_trace: true
 
+# OPM: when api.openai.com hits quota/rate limits, step through native models before
+# cross-provider fallback. Each new user turn still starts from tier/OPM top pick;
+# the ladder only applies inside the same run_conversation retry loop.
+opm_native_quota_downgrade:
+  enabled: true
+  chat_models:
+    - gpt-5.4
+    - gpt-5.3
+    - gpt-5.2
+  codex_models:
+    - gpt-5.3-codex
+    - gpt-5.2-codex
+
 # Hard budget (USD estimates from providers vs AUD display cap)
 # API costs are accumulated in USD; daily_budget_aud is converted with aud_to_usd (USD per 1 AUD).
 hard_budget:

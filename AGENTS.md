@@ -40,6 +40,7 @@ hermes-agent/
 │   ├── display.py            # KawaiiSpinner, tool preview formatting
 │   ├── skill_commands.py     # Skill slash commands (shared CLI/gateway)
 │   ├── routing_canon.py      # Layered routing_canon.yaml loader + TurnRoutingIntent
+│   ├── opm_quota_ladder.py   # OPM native OpenAI quota downgrade ladder (routing_canon)
 │   ├── budget_ledger.py      # Daily spend file + AUD display (hard_budget canon)
 │   ├── dynamic_routing_canon.yaml  # Repo defaults (overlay: HERMES_HOME/routing_canon.yaml)
 │   └── trajectory.py         # Trajectory saving helpers
@@ -375,11 +376,11 @@ Cache-breaking forces dramatically higher costs. The ONLY time we alter context 
 
 ### Routing canon (layered defaults + overlay)
 
-- **Repo defaults:** `agent/dynamic_routing_canon.yaml` — versioned policy for consultant escalation knobs, **`openrouter/auto`** deliberation tiers, **operator gate** (Chief denial → `AIAgent.clarify_callback` in the CLI TUI), and routing-trace options.
+- **Repo defaults:** `agent/dynamic_routing_canon.yaml` — versioned policy for consultant escalation knobs, **`openrouter/auto`** deliberation tiers, **operator gate** (Chief denial → `AIAgent.clarify_callback` in the CLI TUI), **`opm_native_quota_downgrade`** (ordered **`chat_models`** / **`codex_models`** on **`api.openai.com`** before cross-provider fallback), **`hard_budget`**, and routing-trace options.
 - **Operator overlay:** `${HERMES_HOME}/routing_canon.yaml` — optional; **deep-merged** over the repo file (overlay wins on conflicts).
 - **Loader:** `agent/routing_canon.py` — `load_merged_routing_canon()`, `merge_canon_into_consultant_routing()`, `build_turn_routing_intent(agent)` (per-turn snapshot on the agent as **`_turn_routing_intent`** after per-turn tier routing).
 - **Consultant routing:** `agent/consultant_routing.py` merges the canon into the nested **`consultant_routing`** block from `workspace/operations/hermes_token_governance.runtime.yaml`. Manual **`/models`** (**`_defer_opm_primary_coercion`**) skips the operator gate; without **`clarify_callback`** (e.g. headless), Chief’s cap is kept and the gate is skipped (**DEBUG** log).
-- **OPM vs rate limits:** On quota/rate-style API failures in a turn, **`AIAgent`** sets **`_opm_suppressed_for_turn`** so OPM-driven tier uplift and coercion are suppressed until the next **`run_conversation`** (see **`opm_effective_for_tier_routing_uplift`** / **`opm_coercion_effective`**).
+- **OPM vs rate limits:** With **`opm_native_quota_downgrade.enabled`** (routing canon), quota/rate-class errors on **native OpenAI** first advance **`_try_opm_native_quota_downgrade`** down the configured ladder (**`chat_models`** for **`chat_completions`**, **`codex_models`** for **`codex_responses`**) inside the same API retry loop — **without** setting **`_fallback_activated`** or changing **`_primary_runtime`**, so the **next** user turn still re-runs per-turn tier routing from the top. **`_opm_suppressed_for_turn`** is set only when no ladder step applied to that error (or the ladder is disabled) **before** cross-provider **`_try_activate_fallback`** — so OPM stays effective while stepping native models, and is suppressed for the rest of the turn once Hermes leaves native OpenAI via fallback (see **`opm_effective_for_tier_routing_uplift`** / **`opm_coercion_effective`**). Credential-pool **429** recovery still defers both ladder and fallback until the pool exhausts rotation.
 - **Hard budget (`hard_budget` in routing canon):** Default **$10 AUD/day** (`daily_budget_aud` + `aud_to_usd` to map API USD estimates). Persistent state: **`${HERMES_HOME}/workspace/operations/daily_budget_state.json`** (local calendar day, **`fcntl`** lock on POSIX when updating). Exceeding the cap triggers fallback like session budget. **CLI TUI:** bottom **`budget-bar`** shows last/live turn cost, daily spend in AUD and USD, and hours until local midnight. **`show_tui_bar: false`** hides the bar; per-turn totals still log at **DEBUG** from **`run_agent`**.
 
 ### Working Directory Behavior

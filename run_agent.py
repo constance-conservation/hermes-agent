@@ -4128,11 +4128,21 @@ class AIAgent:
             return
 
         mid = (self.model or "").strip()
-        if self._tier_targets_openai_native_consultant(mid):
+        use_native_consultant = self._tier_targets_openai_native_consultant(mid)
+        use_native_ladder = False
+        if not use_native_consultant:
+            try:
+                from agent.opm_quota_ladder import opm_native_ladder_model_uses_openai_tuple
+
+                use_native_ladder = opm_native_ladder_model_uses_openai_tuple(self, mid)
+            except Exception:
+                logger.debug("opm quota ladder reconcile check failed", exc_info=True)
+        if use_native_consultant or use_native_ladder:
             from agent.openai_native_runtime import (
                 bare_openai_api_model_id,
                 native_openai_runtime_tuple,
             )
+            from agent.opm_quota_ladder import _bare_slug
             from hermes_cli.runtime_provider import _detect_api_mode_for_url
 
             tup = native_openai_runtime_tuple()
@@ -4142,6 +4152,8 @@ class AIAgent:
             want_mode = _detect_api_mode_for_url(want_base) or "codex_responses"
             want_provider = "custom"
             bare = bare_openai_api_model_id(mid)
+            if not bare and use_native_ladder:
+                bare = _bare_slug(mid) or None
             if bare:
                 self.model = bare
         else:
@@ -5525,6 +5537,100 @@ class AIAgent:
         except Exception as e:
             logging.error("Failed to activate fallback %s: %s", fb_model, e)
             return self._try_activate_fallback(triggered_by_rate_limit=triggered_by_rate_limit)  # try next in chain
+
+    def _try_opm_native_quota_downgrade(
+        self,
+        api_error: BaseException,
+        *,
+        pool_may_recover: bool,
+    ) -> bool:
+        """On quota-style errors, step to the next native OpenAI model in routing_canon ladder.
+
+        Returns True when the agent swapped model/client and the API loop should retry.
+        Does not set ``_fallback_activated`` or mutate ``_primary_runtime`` — the next
+        user turn still re-picks the tier/OPM top model via ``apply_per_turn_tier_model``.
+        """
+        try:
+            from agent.opm_quota_ladder import (
+                next_quota_downgrade_model,
+                should_attempt_opm_native_downgrade,
+            )
+            from agent.routing_trace import emit_routing_decision_trace
+
+            is_quota = self._quota_style_api_failure(api_error)
+            eligible, cfg = should_attempt_opm_native_downgrade(
+                self,
+                quota_style=is_quota,
+                pool_may_recover=pool_may_recover,
+            )
+            if not eligible:
+                return False
+            nxt = next_quota_downgrade_model(
+                current_model=self.model or "",
+                api_mode=str(getattr(self, "api_mode", "") or ""),
+                cfg=cfg,
+            )
+            if not nxt:
+                return False
+            old_model = self.model
+            self.model = nxt
+            self._reconcile_runtime_after_tier_model_change()
+            if hasattr(self, "context_compressor") and self.context_compressor:
+                try:
+                    from agent.model_metadata import get_model_context_length
+
+                    fb_context_length = get_model_context_length(
+                        self.model,
+                        base_url=self.base_url,
+                        api_key=self.api_key,
+                        provider=self.provider,
+                    )
+                    self.context_compressor.model = self.model
+                    self.context_compressor.base_url = self.base_url
+                    self.context_compressor.api_key = self.api_key
+                    self.context_compressor.provider = self.provider
+                    self.context_compressor.context_length = fb_context_length
+                    self.context_compressor.threshold_tokens = int(
+                        fb_context_length * self.context_compressor.threshold_percent
+                    )
+                except Exception:
+                    logger.debug("opm native ladder: compressor update failed", exc_info=True)
+            self._opm_reconcile_primary_if_disallowed()
+            self._emit_status(
+                f"⚠️ Rate/quota on {old_model} — trying next OPM native model: {nxt}",
+            )
+            _om = getattr(self, "_last_opm_meta", None) or {}
+            try:
+                emit_routing_decision_trace(
+                    stage="opm_native_quota_downgrade",
+                    chosen_model=str(self.model or ""),
+                    chosen_provider=str(getattr(self, "provider", "") or ""),
+                    reason_code="native_ladder_step",
+                    opm_enabled=bool(_om.get("enabled", False)),
+                    opm_source=str(_om.get("source", "")),
+                    tier_source="quota_retry",
+                    skip_flags={
+                        "from_model": str(old_model or ""),
+                        "to_model": str(nxt or ""),
+                        "pool_may_recover": bool(pool_may_recover),
+                    },
+                    fallback_activated=bool(getattr(self, "_fallback_activated", False)),
+                    explicit_user_model=not bool(getattr(self, "_model_is_tier_routed", True)),
+                    profile=str(getattr(self, "profile", "") or ""),
+                    session_id=str(getattr(self, "session_id", "") or ""),
+                )
+            except Exception:
+                logger.debug("opm_native_quota_downgrade trace failed", exc_info=True)
+            logging.info(
+                "OPM native quota ladder: %s -> %s (error=%s)",
+                old_model,
+                nxt,
+                type(api_error).__name__,
+            )
+            return True
+        except Exception:
+            logger.debug("_try_opm_native_quota_downgrade failed", exc_info=True)
+            return False
 
     # ── Per-turn primary restoration ─────────────────────────────────────
 
@@ -8616,7 +8722,25 @@ class AIAgent:
         
                         # Eager fallback for rate limits, quota, or billing/credits errors.
                         is_rate_limited = self._quota_style_api_failure(api_error)
-                        if is_rate_limited:
+                        pool = self._credential_pool
+                        pool_may_recover = (
+                            pool is not None
+                            and pool.has_available()
+                            and getattr(api_error, "status_code", None) == 429
+                        )
+                        # OPM native ladder (routing_canon): step down api.openai.com models
+                        # before cross-provider fallback. Skip OPM suppression for the turn
+                        # until the ladder cannot advance (then fall back as before).
+                        ladder_stepped = False
+                        if is_rate_limited and not pool_may_recover:
+                            ladder_stepped = self._try_opm_native_quota_downgrade(
+                                api_error,
+                                pool_may_recover=pool_may_recover,
+                            )
+                            if ladder_stepped:
+                                retry_count = 0
+                                continue
+                        if is_rate_limited and not ladder_stepped:
                             setattr(self, "_opm_suppressed_for_turn", True)
                         if is_rate_limited and self._fallback_index < len(self._fallback_chain):
                             # Don't eagerly fallback if credential pool rotation may
@@ -8627,12 +8751,6 @@ class AIAgent:
                             # caps (e.g. OpenRouter "Key limit exceeded") are account-wide
                             # — another pooled key will not help, but ``only_rate_limit``
                             # fallback (e.g. direct Gemini) must run.
-                            pool = self._credential_pool
-                            pool_may_recover = (
-                                pool is not None
-                                and pool.has_available()
-                                and getattr(api_error, "status_code", None) == 429
-                            )
                             if not pool_may_recover:
                                 self._emit_status(
                                     "⚠️ Quota, billing, or rate limit — switching to fallback provider...",
@@ -8823,6 +8941,14 @@ class AIAgent:
                         ])) and not is_context_length_error
         
                         if is_client_error:
+                            # Quota-class client errors on native OpenAI: try OPM ladder before cross-provider fallback.
+                            if is_rate_limited and not pool_may_recover:
+                                if self._try_opm_native_quota_downgrade(
+                                    api_error,
+                                    pool_may_recover=pool_may_recover,
+                                ):
+                                    retry_count = 0
+                                    continue
                             # Try fallback before aborting — a different provider
                             # may not have the same issue (rate limit, auth, etc.)
                             self._emit_status(f"⚠️ Non-retryable error (HTTP {status_code}) — trying fallback...")
@@ -8881,6 +9007,13 @@ class AIAgent:
                                 primary_recovery_attempted = True
                                 retry_count = 0
                                 continue
+                            if is_rate_limited and not pool_may_recover:
+                                if self._try_opm_native_quota_downgrade(
+                                    api_error,
+                                    pool_may_recover=pool_may_recover,
+                                ):
+                                    retry_count = 0
+                                    continue
                             # Try fallback before giving up entirely
                             self._emit_status(f"⚠️ Max retries ({max_retries}) exhausted — trying fallback...")
                             if self._try_activate_fallback(
