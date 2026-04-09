@@ -141,10 +141,15 @@ def _config_token_from_env() -> str:
     ).strip()
     if not raw:
         print(
-            "Error: SLACK_CONFIG_TOKEN is not set.\n"
+            "Error: SLACK_CONFIG_TOKEN is not set (or empty after loading env files).\n"
             "Generate an app configuration token at https://api.slack.com/apps "
-            "(Your App Configuration Tokens → Generate Token). "
-            "It starts with xoxe. This is NOT your bot token (xoxb) or app token (xapp).",
+            "(Your App → App configuration tokens → Generate token). "
+            "It is NOT your bot token (xoxb) or Socket Mode app token (xapp).\n"
+            "\n"
+            "If you exported SLACK_CONFIG_TOKEN in the shell but still see this: "
+            "~/.hermes/.env (and profile .env) load with override — a line like "
+            "SLACK_CONFIG_TOKEN= with no value replaces your export. "
+            "Remove that line or put the full xoxe token in the file.",
             file=sys.stderr,
         )
         sys.exit(1)
