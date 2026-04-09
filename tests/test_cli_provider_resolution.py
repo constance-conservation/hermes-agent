@@ -1,5 +1,6 @@
 import importlib
 import sys
+import threading
 import types
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -287,6 +288,207 @@ def test_models_primary_gpt_forces_native_openai_runtime(monkeypatch):
     assert out["runtime"]["base_url"] == "https://api.openai.com/v1"
     assert out["runtime"]["api_key"] == "openai-key"
     assert out["skip_per_turn_tier_routing"] is True
+
+
+def test_models_primary_vendor_slug_routes_openrouter_not_profile(monkeypatch):
+    """provider_kind primary + openai/gpt-5.4 must not reuse native OpenAI profile runtime."""
+    cli = _import_cli()
+    shell = cli.HermesCLI(model="gpt-5.4", compact=True, max_turns=1)
+    shell.provider = "custom"
+    shell.api_mode = "codex_responses"
+    shell.base_url = "https://api.openai.com/v1"
+    shell.api_key = "native-key"
+    shell._pipeline_model_once = {
+        "model": "openai/gpt-5.4",
+        "source": "primary (config model.default)",
+        "provider_kind": "primary",
+    }
+
+    def _runtime_resolve(**kwargs):
+        assert kwargs.get("requested") == "openrouter"
+        return {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "or-key",
+            "source": "test",
+        }
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+
+    base = {
+        "model": shell.model,
+        "runtime": {
+            "api_key": shell.api_key,
+            "base_url": shell.base_url,
+            "provider": shell.provider,
+            "api_mode": shell.api_mode,
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        },
+        "label": None,
+        "skip_per_turn_tier_routing": False,
+        "signature": (),
+    }
+
+    out = shell._route_for_pipeline_model_once(base, shell._pipeline_model_once)
+    assert out["model"] == "openai/gpt-5.4"
+    assert "openrouter.ai" in (out["runtime"].get("base_url") or "").lower()
+    assert out["runtime"]["api_key"] == "or-key"
+    assert out["skip_per_turn_tier_routing"] is True
+
+
+def test_models_sticky_pick_persists_across_resolve_turns(monkeypatch):
+    cli = _import_cli()
+
+    def _runtime_resolve(**kwargs):
+        assert kwargs["requested"] == "openrouter"
+        return {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "or-key",
+            "source": "env/config",
+        }
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+
+    shell = cli.HermesCLI(model="anthropic/claude-sonnet-4", compact=True, max_turns=1)
+    shell.provider = "openrouter"
+    shell.api_mode = "chat_completions"
+    shell.base_url = "https://openrouter.ai/api/v1"
+    shell.api_key = "primary-key"
+    shell._smart_model_routing = {
+        "enabled": True,
+        "cheap_model": {"provider": "zai", "model": "glm-5-air"},
+        "max_simple_chars": 160,
+        "max_simple_words": 28,
+    }
+
+    shell._models_sticky_pick = {
+        "model": "openai/gpt-5.4",
+        "source": "sticky-test",
+        "provider_kind": "openrouter",
+    }
+    shell._pipeline_model_once = None
+
+    r1 = shell._resolve_turn_agent_config("what time is it in tokyo?")
+    r2 = shell._resolve_turn_agent_config("what time is it in tokyo?")
+
+    assert r1["model"] == "openai/gpt-5.4"
+    assert r2["model"] == "openai/gpt-5.4"
+    assert shell._models_sticky_pick is not None
+    assert r1["skip_per_turn_tier_routing"] is True
+    assert r2["skip_per_turn_tier_routing"] is True
+
+
+def test_models_pipeline_once_consumed_after_one_resolve(monkeypatch):
+    cli = _import_cli()
+
+    def _runtime_resolve(**kwargs):
+        req = kwargs["requested"]
+        if req == "openrouter":
+            return {
+                "provider": "openrouter",
+                "api_mode": "chat_completions",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": "or-key",
+                "source": "env/config",
+            }
+        if req == "zai":
+            return {
+                "provider": "zai",
+                "api_mode": "chat_completions",
+                "base_url": "https://open.z.ai/api/v1",
+                "api_key": "cheap-key",
+                "source": "env/config",
+            }
+        raise AssertionError(f"unexpected requested={req!r}")
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+
+    shell = cli.HermesCLI(model="anthropic/claude-sonnet-4", compact=True, max_turns=1)
+    shell.provider = "openrouter"
+    shell.api_mode = "chat_completions"
+    shell.base_url = "https://openrouter.ai/api/v1"
+    shell.api_key = "primary-key"
+    shell._smart_model_routing = {
+        "enabled": True,
+        "cheap_model": {"provider": "zai", "model": "glm-5-air"},
+        "max_simple_chars": 160,
+        "max_simple_words": 28,
+    }
+
+    shell._models_sticky_pick = None
+    shell._pipeline_model_once = {
+        "model": "openai/gpt-5.4",
+        "source": "once-test",
+        "provider_kind": "openrouter",
+    }
+
+    r1 = shell._resolve_turn_agent_config("hi")
+    r2 = shell._resolve_turn_agent_config("hi")
+
+    assert r1["model"] == "openai/gpt-5.4"
+    assert r2["model"] == "glm-5-air"
+    assert shell._pipeline_model_once is None
+
+
+def test_cli_agent_matches_turn_route_normalizes_base_url():
+    cli = _import_cli()
+    shell = cli.HermesCLI(model="x", compact=True, max_turns=1)
+    agent = SimpleNamespace(
+        model="openai/gpt-5.4",
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1/",
+        api_mode="chat_completions",
+    )
+    turn_route = {
+        "model": "openai/gpt-5.4",
+        "runtime": {
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_mode": "chat_completions",
+        },
+    }
+    assert shell._cli_agent_matches_turn_route(agent, turn_route) is True
+    # OpenRouter: ignore codex vs chat drift from stale YAML (rebind fixes the client).
+    agent_codex = SimpleNamespace(
+        model="openai/gpt-5.4",
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        api_mode="codex_responses",
+    )
+    assert shell._cli_agent_matches_turn_route(agent_codex, turn_route) is True
+    wrong = SimpleNamespace(
+        model="gpt-5.4",
+        provider="custom",
+        base_url="https://api.openai.com/v1",
+        api_mode="codex_responses",
+    )
+    assert shell._cli_agent_matches_turn_route(wrong, turn_route) is False
+
+
+def test_route_openrouter_pipeline_forces_chat_completions_not_codex(monkeypatch):
+    cli = _import_cli()
+    shell = cli.HermesCLI(model="x", compact=True, max_turns=1)
+
+    def _fake_resolve(**kwargs):
+        return {
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or",
+            "api_mode": "codex_responses",
+        }
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _fake_resolve)
+
+    base = {"skip_per_turn_tier_routing": False}
+    choice = {"model": "openai/gpt-5.4", "provider_kind": "openrouter", "source": "t"}
+    out = shell._route_for_pipeline_model_once(base, choice, consume=True)
+    assert out["runtime"]["api_mode"] == "chat_completions"
+    assert out["signature"][3] == "chat_completions"
 
 
 def test_cli_prefers_config_provider_over_stale_env_override(monkeypatch):
@@ -678,3 +880,78 @@ def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
         "ca_bundle": "/tmp/local-ca.pem",
         "insecure": True,
     }
+
+
+def test_ensure_runtime_credentials_uses_openrouter_when_models_sticky_openrouter(monkeypatch):
+    """Sticky /models OpenRouter must refresh OR creds, not the profile primary."""
+    cli = _import_cli()
+    calls: list[str] = []
+
+    def _runtime_resolve(**kwargs):
+        calls.append(str(kwargs.get("requested") or ""))
+        return {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "or-key",
+            "source": "env/config",
+        }
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+    monkeypatch.setattr("hermes_cli.runtime_provider.format_runtime_provider_error", lambda exc: str(exc))
+
+    shell = cli.HermesCLI(model="gemini-2.0-flash", compact=True, max_turns=1)
+    shell.requested_provider = "gemini"
+    shell._models_sticky_pick = {
+        "model": "openai/gpt-5.4",
+        "source": "t",
+        "provider_kind": "openrouter",
+    }
+    assert shell._ensure_runtime_credentials() is True
+    assert calls == ["openrouter"]
+    assert "openrouter.ai" in (shell.base_url or "")
+
+
+def test_background_and_btw_agents_inherit_skip_per_turn_tier_routing(monkeypatch):
+    """Regression: auxiliary agents must not run tier/OPM over a sticky /models route."""
+    cli = _import_cli()
+    captured: dict = {}
+
+    class _DummyAgent:
+        def __init__(self, **kwargs):
+            captured.clear()
+            captured.update(kwargs)
+
+        def run_conversation(self, **kwargs):
+            return {"final_response": "ok"}
+
+    class _SyncThread(threading.Thread):
+        def start(self):
+            self.run()
+
+    def _or_runtime(**kwargs):
+        return {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "k",
+            "source": "t",
+        }
+
+    monkeypatch.setattr("cli.threading.Thread", _SyncThread)
+    monkeypatch.setattr(cli, "AIAgent", _DummyAgent)
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _or_runtime)
+    monkeypatch.setattr("hermes_cli.runtime_provider.format_runtime_provider_error", lambda exc: str(exc))
+
+    shell = cli.HermesCLI(model="m", compact=True, max_turns=1)
+    shell._models_sticky_pick = {
+        "model": "openai/gpt-5.4",
+        "provider_kind": "openrouter",
+        "source": "t",
+    }
+
+    shell._handle_background_command("/background hello")
+    assert captured.get("skip_per_turn_tier_routing") is True
+
+    shell._handle_btw_command("/btw what?")
+    assert captured.get("skip_per_turn_tier_routing") is True

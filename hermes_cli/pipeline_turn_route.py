@@ -88,6 +88,32 @@ def merge_pipeline_models_choice_into_turn_route(
                         },
                     )
                 # gpt-* but no native tuple — fall through to profile primary like CLI.
+            # vendor/model slugs (e.g. openai/gpt-5.4) are OpenRouter IDs. Binding them to
+            # profile primary under OPM incorrectly uses api.openai.com + bare-id coercion.
+            if "/" in model and not _m.startswith("gpt-"):
+                rt = resolve_runtime_provider(requested="openrouter")
+                _rbu = (rt.get("base_url") or "").lower()
+                _ram = rt.get("api_mode") or "chat_completions"
+                if "openrouter.ai" in _rbu and _ram == "codex_responses":
+                    _ram = "chat_completions"
+                _rt_out = _rt_from_resolved(rt)
+                _rt_out["api_mode"] = _ram
+                return PipelineTurnRouteMerge(
+                    route={
+                        "model": model,
+                        "runtime": _rt_out,
+                        "label": f"/models → {model} (OpenRouter)",
+                        "skip_per_turn_tier_routing": True,
+                        "signature": (
+                            model,
+                            rt.get("provider"),
+                            rt.get("base_url"),
+                            _ram,
+                            rt.get("command"),
+                            tuple(rt.get("args") or ()),
+                        ),
+                    },
+                )
             return PipelineTurnRouteMerge(
                 route={
                     "model": model,

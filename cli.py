@@ -1338,8 +1338,10 @@ class HermesCLI:
         # Optional cheap-vs-strong routing for simple turns
         self._smart_model_routing = CLI_CONFIG.get("smart_model_routing", {}) or {}
         self._active_agent_route_signature = None
-        # One-shot model from /models (next user turn only).
+        # Legacy one-shot from tests or callers that set only this (consumed after one resolve).
         self._pipeline_model_once: Optional[Dict[str, Any]] = None
+        # /models manual pick — used every turn until /models clear (or new session / config reload).
+        self._models_sticky_pick: Optional[Dict[str, Any]] = None
         # /models → Choose-Router: consultant stack uses this OpenRouter slug for the CLI session.
         self._session_router_override: Optional[Dict[str, str]] = None
 
@@ -2125,9 +2127,48 @@ class HermesCLI:
             format_runtime_provider_error,
         )
 
+        # When /models (sticky or one-shot) pins a pipeline runtime, refresh credentials
+        # for that stack — not the profile primary. Otherwise the shell drifts to e.g.
+        # Gemini before turn_route/rebind, which can spuriously nuke the live agent or
+        # confuse tier/OPM paths in auxiliary agents (/background, /btw).
+        sticky = getattr(self, "_models_sticky_pick", None)
+        once = getattr(self, "_pipeline_model_once", None)
+        choice = sticky if sticky is not None else once
+        requested = self.requested_provider
+        pipeline_runtime: Optional[dict] = None
+        if isinstance(choice, dict):
+            pk = str(choice.get("provider_kind") or "primary").strip().lower()
+            if pk == "openrouter":
+                requested = "openrouter"
+            elif pk == "gemini":
+                requested = "gemini"
+            elif pk == "huggingface":
+                requested = "huggingface"
+            elif pk == "openai_native":
+                from agent.openai_native_runtime import native_openai_runtime_tuple
+
+                tup = native_openai_runtime_tuple()
+                if not tup:
+                    print(
+                        "\n⚠️  Native OpenAI /models pick requires OPENAI_API_KEY. "
+                        "Set it or run: hermes setup"
+                    )
+                    return False
+                bu, ak = tup
+                pipeline_runtime = {
+                    "provider": "custom",
+                    "api_mode": "codex_responses",
+                    "base_url": bu,
+                    "api_key": ak,
+                    "command": None,
+                    "args": [],
+                    "credential_pool": None,
+                    "source": "openai_native_pipeline",
+                }
+
         try:
-            runtime = resolve_runtime_provider(
-                requested=self.requested_provider,
+            runtime = pipeline_runtime if pipeline_runtime is not None else resolve_runtime_provider(
+                requested=requested,
                 explicit_api_key=self._explicit_api_key,
                 explicit_base_url=self._explicit_base_url,
             )
@@ -2212,19 +2253,63 @@ class HermesCLI:
                 "credential_pool": getattr(self, "_credential_pool", None),
             },
         )
+        sticky = getattr(self, "_models_sticky_pick", None)
         once = getattr(self, "_pipeline_model_once", None)
-        if once:
-            return self._route_for_pipeline_model_once(base, once)
+        if sticky is not None:
+            return self._route_for_pipeline_model_once(base, sticky, consume=False)
+        if once is not None:
+            return self._route_for_pipeline_model_once(base, once, consume=True)
         return base
 
-    def _route_for_pipeline_model_once(self, base: dict, choice: dict) -> dict:
-        """Apply ``/models`` one-shot selection; restores the choice if routing fails."""
+    def _cli_agent_matches_turn_route(self, agent: Any, turn_route: dict) -> bool:
+        """True when the live agent client matches the resolved CLI turn_route (model + runtime)."""
+        if agent is None or not isinstance(turn_route, dict):
+            return False
+        rt = turn_route.get("runtime") or {}
+        if (getattr(agent, "model", None) or "").strip() != (turn_route.get("model") or "").strip():
+            return False
+        if (getattr(agent, "provider", None) or "").strip() != (rt.get("provider") or "").strip():
+            return False
+        _abu = (getattr(agent, "base_url", None) or "").strip().rstrip("/")
+        _rbu = (rt.get("base_url") or "").strip().rstrip("/")
+        if _abu != _rbu:
+            return False
+        _am = getattr(agent, "api_mode", None) or ""
+        _rm = rt.get("api_mode") or ""
+        # openrouter.ai must use chat-completions stack; YAML often pins codex_responses for native OpenAI.
+        if "openrouter.ai" not in _rbu.lower() and _am != _rm:
+            return False
+        return True
+
+    def _sync_agent_to_pipeline_turn_route(self, turn_route: dict) -> None:
+        """Each user turn: force client + snapshots to match ``turn_route`` when /models is sticky."""
+        if self.agent is None or not turn_route.get("skip_per_turn_tier_routing"):
+            return
+        try:
+            self.agent.rebind_from_cli_turn_route(turn_route)
+            self.model = self.agent.model
+            self.provider = self.agent.provider
+            self.base_url = self.agent.base_url
+            self.api_key = self.agent.api_key
+            self.api_mode = self.agent.api_mode
+            if hasattr(self.agent, "acp_command"):
+                self.acp_command = self.agent.acp_command
+            if hasattr(self.agent, "acp_args"):
+                self.acp_args = list(self.agent.acp_args or [])
+        except Exception:
+            logger.exception("rebind_from_cli_turn_route failed")
+
+    def _route_for_pipeline_model_once(
+        self, base: dict, choice: dict, *, consume: bool = True
+    ) -> dict:
+        """Apply ``/models`` selection. When ``consume`` is True, clear after this resolve (legacy one-shot)."""
         from hermes_cli.runtime_provider import resolve_runtime_provider
 
         model = str(choice.get("model") or "").strip()
         pk = str(choice.get("provider_kind") or "primary").strip().lower()
         if not model:
             self._pipeline_model_once = None
+            self._models_sticky_pick = None
             return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
 
         def _rt_from_resolved(rt: dict) -> dict:
@@ -2250,7 +2335,8 @@ class HermesCLI:
                     tup = native_openai_runtime_tuple()
                     if tup:
                         bu, ak = tup
-                        self._pipeline_model_once = None
+                        if consume:
+                            self._pipeline_model_once = None
                         return {
                             "model": model,
                             "runtime": {
@@ -2273,7 +2359,34 @@ class HermesCLI:
                                 (),
                             ),
                         }
-                self._pipeline_model_once = None
+                # vendor/model slugs (e.g. openai/gpt-5.4) are OpenRouter model IDs.
+                # Do not bind them to profile primary when OPM pins api.openai.com.
+                if "/" in model and not _m.startswith("gpt-"):
+                    rt = resolve_runtime_provider(requested="openrouter")
+                    _rbu = (rt.get("base_url") or "").lower()
+                    _ram = rt.get("api_mode") or "chat_completions"
+                    if "openrouter.ai" in _rbu and _ram == "codex_responses":
+                        _ram = "chat_completions"
+                    _rt_out = _rt_from_resolved(rt)
+                    _rt_out["api_mode"] = _ram
+                    if consume:
+                        self._pipeline_model_once = None
+                    return {
+                        "model": model,
+                        "runtime": _rt_out,
+                        "label": f"/models → {model} (OpenRouter)",
+                        "skip_per_turn_tier_routing": True,
+                        "signature": (
+                            model,
+                            rt.get("provider"),
+                            rt.get("base_url"),
+                            _ram,
+                            rt.get("command"),
+                            tuple(rt.get("args") or ()),
+                        ),
+                    }
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": model,
                     "runtime": {
@@ -2298,7 +2411,8 @@ class HermesCLI:
                 }
             if pk == "huggingface":
                 rt = resolve_runtime_provider(requested="huggingface")
-                self._pipeline_model_once = None
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": model,
                     "runtime": _rt_from_resolved(rt),
@@ -2315,7 +2429,8 @@ class HermesCLI:
                 }
             if pk == "gemini":
                 rt = resolve_runtime_provider(requested="gemini")
-                self._pipeline_model_once = None
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": model,
                     "runtime": _rt_from_resolved(rt),
@@ -2363,7 +2478,8 @@ class HermesCLI:
                         "and run: scripts/local_models/serve_local_models.sh\n",
                         flush=True,
                     )
-                self._pipeline_model_once = None
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": _local_model,
                     "runtime": {
@@ -2381,17 +2497,24 @@ class HermesCLI:
                 }
             if pk == "openrouter":
                 rt = resolve_runtime_provider(requested="openrouter")
-                self._pipeline_model_once = None
+                _rbu = (rt.get("base_url") or "").lower()
+                _ram = rt.get("api_mode") or "chat_completions"
+                if "openrouter.ai" in _rbu and _ram == "codex_responses":
+                    _ram = "chat_completions"
+                _rt_out = _rt_from_resolved(rt)
+                _rt_out["api_mode"] = _ram
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": model,
-                    "runtime": _rt_from_resolved(rt),
+                    "runtime": _rt_out,
                     "label": f"/models → {model} (OpenRouter)",
                     "skip_per_turn_tier_routing": True,
                     "signature": (
                         model,
                         rt.get("provider"),
                         rt.get("base_url"),
-                        rt.get("api_mode"),
+                        _ram,
                         rt.get("command"),
                         tuple(rt.get("args") or ()),
                     ),
@@ -2402,13 +2525,17 @@ class HermesCLI:
                 tup = native_openai_runtime_tuple()
                 if not tup:
                     logging.warning("/models native OpenAI: OPENAI_API_KEY not set")
-                    self._pipeline_model_once = None
+                    if consume:
+                        self._pipeline_model_once = None
+                    else:
+                        self._models_sticky_pick = None
                     return {
                         **base,
                         "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False),
                     }
                 bu, ak = tup
-                self._pipeline_model_once = None
+                if consume:
+                    self._pipeline_model_once = None
                 return {
                     "model": model,
                     "runtime": {
@@ -2431,11 +2558,15 @@ class HermesCLI:
                         (),
                     ),
                 }
-            self._pipeline_model_once = None
+            if consume:
+                self._pipeline_model_once = None
+            else:
+                self._models_sticky_pick = None
             return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
         except Exception as exc:
             logging.warning("pipeline model route failed, using base route: %s", exc)
-            self._pipeline_model_once = choice
+            if consume:
+                self._pipeline_model_once = choice
         return {**base, "skip_per_turn_tier_routing": base.get("skip_per_turn_tier_routing", False)}
 
     def _init_agent(
@@ -3551,6 +3682,7 @@ class HermesCLI:
         self._fallback_model = fb
         self._smart_model_routing = CLI_CONFIG.get("smart_model_routing", {}) or {}
         self._pipeline_model_once = None
+        self._models_sticky_pick = None
 
         self._history_file = _hermes_home / ".hermes_history"
 
@@ -3716,6 +3848,7 @@ class HermesCLI:
         self._pending_title = None
         self._resumed = False
         self._pipeline_model_once = None
+        self._models_sticky_pick = None
 
         if self.agent:
             self.agent.session_id = self.session_id
@@ -4814,6 +4947,7 @@ class HermesCLI:
                     fallback_model=self._fallback_model,
                     skip_context_files=self.skip_context_files,
                     router_session_override=getattr(self, "_session_router_override", None),
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 )
                 # Silence raw spinner; route thinking through TUI widget when no foreground agent is active.
                 bg_agent._print_fn = lambda *_a, **_kw: None
@@ -4954,6 +5088,7 @@ class HermesCLI:
                     skip_context_files=True,
                     persist_session=False,
                     router_session_override=getattr(self, "_session_router_override", None),
+                    skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 )
 
                 btw_prompt = (
@@ -5970,7 +6105,8 @@ class HermesCLI:
 
         if rest.lower() in ("clear", "none", "reset"):
             self._pipeline_model_once = None
-            _cprint("  Cleared one-shot model selection (next prompt uses normal routing).")
+            self._models_sticky_pick = None
+            _cprint("  Cleared /models selection (normal routing until you pick again).")
             return
 
         if rest.lower().replace("_", "-") in ("router clear", "router-clear", "router reset"):
@@ -6036,8 +6172,11 @@ class HermesCLI:
             if picked.get("kind") == "action":
                 _cprint("  That line opens a submenu — run /models without a number for the picker.")
                 return
-            self._pipeline_model_once = _row_to_once(picked)
-            _cprint(f"  Next prompt: {picked['model']} ({picked['source']})")
+            self._models_sticky_pick = dict(_row_to_once(picked))
+            self._pipeline_model_once = None
+            _cprint(
+                f"  Using {picked['model']} ({picked['source']}) until /models clear."
+            )
             return
 
         labels: list[str] = []
@@ -6048,7 +6187,7 @@ class HermesCLI:
                 labels.append(f"{e['model']} — {e['source']}")
 
         idx = prompt_choice_tui_safe(
-            "Select model for next prompt (↑/↓, Enter):",
+            "Select model — used until /models clear (↑/↓, Enter):",
             labels,
             0,
             pt_app=getattr(self, "_app", None),
@@ -6071,12 +6210,15 @@ class HermesCLI:
             if j >= len(or_ids):
                 _cprint("  Cancelled.")
                 return
-            self._pipeline_model_once = {
+            self._models_sticky_pick = {
                 "model": or_ids[j],
                 "source": "openrouter full picker",
                 "provider_kind": "openrouter",
             }
-            _cprint(f"  Next prompt: {or_ids[j]} (openrouter full picker)")
+            self._pipeline_model_once = None
+            _cprint(
+                f"  Using {or_ids[j]} (openrouter full picker) until /models clear."
+            )
             return
         if picked.get("kind") == "action" and picked.get("action") == MENU_ACTION_CHOOSE_ROUTER:
             rrows = collect_router_picker_model_rows()
@@ -6121,8 +6263,11 @@ class HermesCLI:
                 _cprint(f"  Session router → {mid} (OpenRouter). /models router clear to reset.")
             return
 
-        self._pipeline_model_once = _row_to_once(picked)
-        _cprint(f"  Next prompt: {picked['model']} ({picked['source']})")
+        self._models_sticky_pick = dict(_row_to_once(picked))
+        self._pipeline_model_once = None
+        _cprint(
+            f"  Using {picked['model']} ({picked['source']}) until /models clear."
+        )
 
     def _handle_voice_command(self, command: str):
         """Handle /voice [on|off|tts|status] command."""
@@ -6604,6 +6749,14 @@ class HermesCLI:
         turn_route = self._resolve_turn_agent_config(message)
         if turn_route["signature"] != self._active_agent_route_signature:
             self.agent = None
+        # Signature can match while the agent was mutated (e.g. tier reconcile, fallback).
+        # Force a clean init from ``turn_route`` when /models sticky disagrees with live state.
+        if (
+            self.agent is not None
+            and turn_route.get("skip_per_turn_tier_routing")
+            and not self._cli_agent_matches_turn_route(self.agent, turn_route)
+        ):
+            self.agent = None
 
         self._status_bar_model_override = None
         pr_cfg = (self.config.get("agent") or {}).get("profile_router") or {}
@@ -6710,9 +6863,12 @@ class HermesCLI:
             return None
 
         # Re-apply each turn: a persisted AIAgent skips _init_agent on later messages, but
-        # ``/models`` must disable tier:dynamic routing for every one-shot turn (not only the first).
+        # ``/models`` sticky picks must disable tier:dynamic routing on every turn until cleared.
         if self.agent is not None:
-            self.agent._skip_per_turn_tier_routing = bool(turn_route.get("skip_per_turn_tier_routing"))
+            _sk = bool(turn_route.get("skip_per_turn_tier_routing"))
+            self.agent._skip_per_turn_tier_routing = _sk
+            self.agent._defer_opm_primary_coercion = _sk
+        self._sync_agent_to_pipeline_turn_route(turn_route)
 
         self._status_bar_model_override = None
 
@@ -8911,6 +9067,12 @@ def main(
                 turn_route = cli._resolve_turn_agent_config(query)
                 if turn_route["signature"] != cli._active_agent_route_signature:
                     cli.agent = None
+                if (
+                    cli.agent is not None
+                    and turn_route.get("skip_per_turn_tier_routing")
+                    and not cli._cli_agent_matches_turn_route(cli.agent, turn_route)
+                ):
+                    cli.agent = None
                 if cli._init_agent(
                     model_override=turn_route["model"],
                     runtime_override=turn_route["runtime"],
@@ -8918,9 +9080,10 @@ def main(
                     skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
                 ):
                     if cli.agent is not None:
-                        cli.agent._skip_per_turn_tier_routing = bool(
-                            turn_route.get("skip_per_turn_tier_routing")
-                        )
+                        _sk = bool(turn_route.get("skip_per_turn_tier_routing"))
+                        cli.agent._skip_per_turn_tier_routing = _sk
+                        cli.agent._defer_opm_primary_coercion = _sk
+                    cli._sync_agent_to_pipeline_turn_route(turn_route)
                     cli.agent.quiet_mode = True
                     result = cli.agent.run_conversation(
                         user_message=query,
