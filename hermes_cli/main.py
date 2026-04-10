@@ -4381,7 +4381,7 @@ For more help on a command:
         description=(
             "Uses SLACK_BOT_TOKEN from your Hermes .env for join-public and whoami. "
             "Subcommands config-test / manifest-* use SLACK_CONFIG_TOKEN (xoxe app configuration token "
-            "from api.slack.com/apps) — not xoxb/xapp."
+            "from api.slack.com/apps) — alias SLACK_MANIFEST_KEY — not xoxb/xapp."
         ),
     )
     slack_sub = slack_parser.add_subparsers(dest="slack_command", required=True)
@@ -4436,6 +4436,29 @@ For more help on a command:
         "--app-id",
         required=True,
         help="Slack App ID from the app's Basic Information page",
+    )
+    slack_mc = slack_sub.add_parser(
+        "manifest-clone",
+        help=(
+            "Export an existing app's manifest (e.g. Hermes Agent), rename, create a new Slack app "
+            "(apps.manifest.create)"
+        ),
+    )
+    slack_mc.add_argument(
+        "--source-app-id",
+        required=True,
+        metavar="A…",
+        help="Slack App ID to copy (Basic Information → App ID)",
+    )
+    slack_mc.add_argument(
+        "--new-name",
+        default="hermes-operator",
+        help='App name in Slack (display_information.name), default: "hermes-operator"',
+    )
+    slack_mc.add_argument(
+        "--bot-display-name",
+        default=None,
+        help="Bot display name (features.bot_user.display_name); default: derived from --new-name",
     )
     slack_mu = slack_sub.add_parser(
         "manifest-update",

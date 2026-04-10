@@ -201,6 +201,14 @@ hermes slack manifest-export --app-id A0123456789   # export your app's current 
 hermes slack manifest-update --app-id A0123456789 --confirm   # apply Hermes manifest (reinstall app after)
 ```
 
+**Duplicate an existing app (e.g. clone “Hermes Agent” for an operator instance):** export uses the same `SLACK_CONFIG_TOKEN` (or alias `SLACK_MANIFEST_KEY` in `.env`). From Basic Information, copy the **App ID** (`A…`) of the source app, then:
+
+```bash
+hermes slack manifest-clone --source-app-id A0XXXXXXXX --new-name "hermes-operator"
+```
+
+This calls `apps.manifest.export` → `apps.manifest.validate` → `apps.manifest.create`. The new app gets a distinct **display name** and **bot display name** (override with `--bot-display-name`). Save the printed **credentials** JSON, open **oauth_authorize_url**, install to the workspace, then add **new** `SLACK_BOT_TOKEN` (xoxb) and `SLACK_APP_TOKEN` (xapp) for that app to the Hermes profile `.env` you use for the operator.
+
 Configuration tokens **expire** (about 12 hours); rotate with Slack’s refresh flow. After `manifest-update`, **reinstall** the app to the workspace and refresh `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` in Hermes.
 
 Then start the gateway:

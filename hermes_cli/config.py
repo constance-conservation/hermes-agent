@@ -1357,6 +1357,14 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "messaging",
     },
+    "SLACK_MANIFEST_KEY": {
+        "description": "Alias for SLACK_CONFIG_TOKEN (same xoxe app configuration token). "
+                       "Hermes accepts either name in .env for `hermes slack manifest-*` commands.",
+        "prompt": "Slack manifest / app configuration token (xoxe..., same as SLACK_CONFIG_TOKEN)",
+        "url": "https://api.slack.com/apps",
+        "password": True,
+        "category": "messaging",
+    },
     "SLACK_NOTIFY_WITH_USER_MENTION": {
         "description": "When true (default), prepend <@user> to Slack DM replies and to posts to "
                        "SLACK_HOME_CHANNEL so mobile/desktop treat them as @mention notifications.",

@@ -106,3 +106,78 @@ def test_slack_command_manifest_update_requires_confirm(monkeypatch):
     args = MagicMock(slack_command="manifest-update", app_id="A1", confirm=False)
     with pytest.raises(SystemExit):
         sa.slack_command(args)
+
+
+def test_config_token_accepts_slack_manifest_key(monkeypatch):
+    import hermes_cli.slack_admin as sa
+
+    monkeypatch.delenv("SLACK_CONFIG_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_APP_CONFIG_TOKEN", raising=False)
+    monkeypatch.setenv("SLACK_MANIFEST_KEY", "xoxe-test-token")
+    assert sa._config_token_from_env() == "xoxe-test-token"
+
+
+def test_manifest_clone_calls_export_validate_create(monkeypatch, capsys):
+    import hermes_cli.slack_admin as sa
+
+    src_manifest = {
+        "_metadata": {"major_version": 2},
+        "display_information": {"name": "Hermes Agent"},
+        "features": {"bot_user": {"display_name": "hermes"}},
+        "settings": {"socket_mode_enabled": True},
+    }
+    calls = []
+
+    def fake_api(method: str, **fields):
+        calls.append((method, fields))
+        if method == "apps.manifest.export":
+            return {"ok": True, "manifest": src_manifest}
+        if method == "apps.manifest.validate":
+            m = fields.get("manifest")
+            assert m and "hermes-operator" in m
+            assert "Hermes Agent" not in m
+            return {"ok": True}
+        if method == "apps.manifest.create":
+            return {
+                "ok": True,
+                "app_id": "A_NEW123",
+                "credentials": {"client_id": "cid"},
+                "oauth_authorize_url": "https://slack.com/oauth/…",
+            }
+        raise AssertionError(method)
+
+    monkeypatch.setattr(sa, "_slack_tooling_api", fake_api)
+    monkeypatch.setenv("SLACK_MANIFEST_KEY", "xoxe-fake")
+
+    sa.slack_manifest_clone_from_app(
+        source_app_id="A_OLD",
+        new_display_name="hermes-operator",
+    )
+    assert [c[0] for c in calls] == [
+        "apps.manifest.export",
+        "apps.manifest.validate",
+        "apps.manifest.create",
+    ]
+    out = capsys.readouterr().out
+    assert "new_app_id=A_NEW123" in out
+
+
+def test_slack_command_manifest_clone_dispatch(monkeypatch):
+    import hermes_cli.slack_admin as sa
+
+    called = {}
+
+    def fake_clone(**kw):
+        called.update(kw)
+
+    monkeypatch.setattr(sa, "slack_manifest_clone_from_app", fake_clone)
+    args = MagicMock(
+        slack_command="manifest-clone",
+        source_app_id="A1",
+        new_name="hermes-operator",
+        bot_display_name=None,
+    )
+    sa.slack_command(args)
+    assert called["source_app_id"] == "A1"
+    assert called["new_display_name"] == "hermes-operator"
+    assert called["bot_display_name"] is None

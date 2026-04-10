@@ -9,8 +9,10 @@ for the live gateway.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -137,11 +139,15 @@ def hermes_slack_manifest_dict() -> Dict[str, Any]:
 
 def _config_token_from_env() -> str:
     raw = (
-        os.getenv("SLACK_CONFIG_TOKEN") or os.getenv("SLACK_APP_CONFIG_TOKEN") or ""
+        os.getenv("SLACK_CONFIG_TOKEN")
+        or os.getenv("SLACK_APP_CONFIG_TOKEN")
+        or os.getenv("SLACK_MANIFEST_KEY")
+        or ""
     ).strip()
     if not raw:
         print(
             "Error: SLACK_CONFIG_TOKEN is not set (or empty after loading env files).\n"
+            "Alias: SLACK_MANIFEST_KEY (same value — Slack app configuration token xoxe…).\n"
             "Generate an app configuration token at https://api.slack.com/apps "
             "(Your App → App configuration tokens → Generate token). "
             "It is NOT your bot token (xoxb) or Socket Mode app token (xapp).\n"
@@ -240,6 +246,108 @@ def slack_manifest_export(*, app_id: str) -> None:
         print(f"export failed: {j.get('error')}", file=sys.stderr)
         sys.exit(1)
     print(json.dumps(j.get("manifest"), indent=2, sort_keys=True))
+
+
+def _manifest_from_export_response(j: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize apps.manifest.export ``manifest`` field to a dict."""
+    m = j.get("manifest")
+    if m is None:
+        return {}
+    if isinstance(m, dict):
+        return m
+    if isinstance(m, str):
+        return json.loads(m)
+    raise TypeError(f"unexpected manifest type: {type(m)}")
+
+
+def _default_bot_display_name(display_name: str) -> str:
+    """Slack bot display name: short, no spaces (Hermes uses ``hermes``)."""
+    s = display_name.strip().lower().replace(" ", "-")
+    s = re.sub(r"[^a-z0-9._-]", "", s)
+    if not s:
+        s = "hermes-bot"
+    return s[:80]
+
+
+def slack_manifest_clone_from_app(
+    *,
+    source_app_id: str,
+    new_display_name: str,
+    bot_display_name: Optional[str] = None,
+) -> None:
+    """Export an existing app's manifest, rename it, create a new Slack app (apps.manifest.create)."""
+    src = source_app_id.strip()
+    if not src:
+        print("Error: --source-app-id is required", file=sys.stderr)
+        sys.exit(1)
+    name = new_display_name.strip()
+    if not name:
+        print("Error: --new-name must be non-empty", file=sys.stderr)
+        sys.exit(1)
+
+    ex = _slack_tooling_api("apps.manifest.export", app_id=src)
+    if not ex.get("ok"):
+        print(f"export failed: {ex.get('error')}", file=sys.stderr)
+        sys.exit(1)
+    manifest = copy.deepcopy(_manifest_from_export_response(ex))
+
+    disp = manifest.get("display_information")
+    if not isinstance(disp, dict):
+        disp = {}
+        manifest["display_information"] = disp
+    disp["name"] = name
+
+    bot_dn = (bot_display_name or "").strip() or _default_bot_display_name(name)
+    feats = manifest.get("features")
+    if isinstance(feats, dict):
+        bu = feats.get("bot_user")
+        if not isinstance(bu, dict):
+            bu = {}
+            feats["bot_user"] = bu
+        bu["display_name"] = bot_dn
+
+    manifest_json = json.dumps(manifest, separators=(",", ":"))
+
+    val = _slack_tooling_api(
+        "apps.manifest.validate",
+        manifest=manifest_json,
+    )
+    if not val.get("ok"):
+        print(f"validate failed: {val.get('error')}", file=sys.stderr)
+        for err in val.get("errors") or []:
+            if isinstance(err, dict):
+                print(f"  - {err.get('pointer')}: {err.get('message')}", file=sys.stderr)
+            else:
+                print(f"  - {err}", file=sys.stderr)
+        sys.exit(1)
+
+    created = _slack_tooling_api("apps.manifest.create", manifest=manifest_json)
+    if not created.get("ok"):
+        print(f"create failed: {created.get('error')}", file=sys.stderr)
+        for err in created.get("errors") or []:
+            if isinstance(err, dict):
+                print(f"  - {err.get('pointer')}: {err.get('message')}", file=sys.stderr)
+            else:
+                print(f"  - {err}", file=sys.stderr)
+        sys.exit(1)
+
+    new_id = created.get("app_id", "")
+    creds = created.get("credentials") or {}
+    oauth_url = created.get("oauth_authorize_url", "")
+    print("ok=true")
+    print(f"new_app_id={new_id}")
+    print(f"source_app_id={src}")
+    print(f"display_name={name!r}")
+    print(f"bot_display_name={bot_dn!r}")
+    if oauth_url:
+        print(f"oauth_authorize_url={oauth_url}")
+    print(
+        "\nSave the credentials below once — treat like passwords. "
+        "Install the app to your workspace from the OAuth URL, then add "
+        "SLACK_BOT_TOKEN (xoxb) and SLACK_APP_TOKEN (xapp) to Hermes .env.\n",
+        file=sys.stderr,
+    )
+    print(json.dumps({"credentials": creds}, indent=2))
 
 
 def slack_manifest_update(*, app_id: str) -> None:
@@ -537,9 +645,14 @@ def slack_operator_guide() -> None:
     )
     print("\nIf /hermes-help (etc.) does nothing or never appears in the composer:\n")
     print("  1. Create SLACK_CONFIG_TOKEN (xoxe) at api.slack.com/apps → App configuration tokens")
+    print("     (Hermes also accepts SLACK_MANIFEST_KEY=… for the same token.)")
     print("  2. export SLACK_CONFIG_TOKEN='xoxe-…'")
     print("  3. hermes slack manifest-validate --app-id YOUR_APP_ID")
     print("  4. hermes slack manifest-update --confirm --app-id YOUR_APP_ID")
+    print(
+        "  Or duplicate an app:  hermes slack manifest-clone --source-app-id A0… "
+        "--new-name hermes-operator"
+    )
     print(
         "  5. In the Slack app site: reinstall the app to the workspace "
         "(OAuth & Permissions — this refreshes scopes and slash commands)."
@@ -577,6 +690,12 @@ def slack_command(args) -> None:
         slack_manifest_validate(app_id=getattr(args, "app_id", None) or None)
     elif sub == "manifest-export":
         slack_manifest_export(app_id=getattr(args, "app_id", "") or "")
+    elif sub == "manifest-clone":
+        slack_manifest_clone_from_app(
+            source_app_id=getattr(args, "source_app_id", "") or "",
+            new_display_name=getattr(args, "new_name", "") or "",
+            bot_display_name=getattr(args, "bot_display_name", None) or None,
+        )
     elif sub == "manifest-update":
         if not getattr(args, "confirm", False):
             print(
