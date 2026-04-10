@@ -14,7 +14,9 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
 if command -v brew >/dev/null 2>&1; then
   export HOMEBREW_NO_AUTO_UPDATE=1
   export NONINTERACTIVE=1
-  brew list python@3.12 &>/dev/null || brew install python@3.12
+  if ! brew list python@3.12 &>/dev/null; then
+    brew install python@3.12 || echo "operator_remote_install.sh: brew install python@3.12 failed (permissions? run as admin or chown Homebrew prefix). Continuing if python3.12 exists on PATH." >&2
+  fi
 fi
 export PATH="/opt/homebrew/opt/python@3.12/bin:/usr/local/opt/python@3.12/bin:$PATH"
 
