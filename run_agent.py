@@ -1177,6 +1177,7 @@ class AIAgent:
         # repeated quota/rate-limit user notices until ``session_id`` changes (e.g. /new).
         self._quota_notice_session_id: Optional[str] = None
         self._session_suppress_quota_user_notices = False
+        self._quota_notice_emitted_this_turn = False
         # After native api.openai.com quota ladder / cascade has failed once this session,
         # skip re-walking every rung on each new turn (tier still restores primary; first
         # quota error jumps to OpenRouter / fallback faster).
@@ -1581,6 +1582,7 @@ class AIAgent:
         self._hard_budget_operator_decision = None
         self._hard_budget_daily_cap_notice_emitted = False
         self._session_suppress_quota_user_notices = False
+        self._quota_notice_emitted_this_turn = False
         self._session_skip_opm_native_quota_ladder = False
         self._last_api_completion_model = None
 
@@ -1668,6 +1670,17 @@ class AIAgent:
         )
         # Budget / cost lines: print to stderr on CLI so they do not interleave with the
         # streamed Hermes response box (stdout goes through patch_stdout / stream buffer).
+        if getattr(self, "_session_suppress_quota_user_notices", False):
+            try:
+                if self._is_quota_recovery_status_message(message):
+                    logger.info(
+                        "%s(quota-class status suppressed for session) %s",
+                        self.log_prefix,
+                        (message or "")[:200],
+                    )
+                    return
+            except Exception:
+                pass
         _budget_cli_stderr = _et == "budget_notice" and getattr(self, "platform", None) == "cli"
         if _budget_cli_stderr:
             try:
@@ -1706,19 +1719,35 @@ class AIAgent:
                     return
             except Exception:
                 pass
+        self._quota_notice_emitted_this_turn = True
         self._emit_status(message, event_type=event_type)
         self._turn_had_quota_ux_for_cli_latch = True
 
     def _session_note_quota_cascade_exhausted_if_applicable(self) -> None:
-        """Mark session so further quota/rate-limit UX is muted (logging still runs).
+        """Skip re-walking the native api.openai.com ladder after cascade exhaustion this session.
 
-        Callers invoke this only when the OPM / fallback path cannot advance further for the
-        current error. Always sets suppression: previously ``or_auto`` / ``or_explicit`` with
-        cross-provider failover enabled could fall through without enabling suppression, so quota
-        UX repeated on every retry.
+        User-visible quota notice suppression for the rest of the session is handled in
+        ``run_conversation`` finally (one burst per logical session), not here — otherwise
+        mid-cascade paths could mute ladder lines in the same turn.
         """
-        self._session_suppress_quota_user_notices = True
         self._session_skip_opm_native_quota_ladder = True
+
+    def _is_quota_recovery_status_message(self, message: str) -> bool:
+        """Heuristic for gateway/CLI noise from quota recovery (blacklist, ladder, OR hop)."""
+        s = (message or "").lower()
+        if not s:
+            return False
+        needles = (
+            "rate/quota",
+            "quota / rate limit",
+            "quota, billing",
+            "blacklisted for this session",
+            "trying next opm native model",
+            "trying openrouter model",
+            "stepping up openrouter model",
+            "model requested escalation",
+        )
+        return any(n in s for n in needles)
 
     def _record_completion_model_for_status(self, response: Any) -> None:
         """Remember provider-reported model from a successful completion for status UIs.
@@ -6246,8 +6275,12 @@ class AIAgent:
         if idx < 0:
             self._opm_qf_phase = "or_explicit"
             self._opm_qf_or_idx = 0
+            from agent.openrouter_step_up import apply_cross_provider_openrouter_first_hop
+
+            _first = apply_cross_provider_openrouter_first_hop(self, models)
+            _target = _first if _first else models[0]
             return self._apply_opm_openrouter_quota_runtime(
-                models[0], reason="opm_or_realign_top"
+                _target, reason="opm_or_realign_top"
             )
         if idx + 1 < len(models):
             self._opm_qf_phase = "or_explicit"
@@ -6286,8 +6319,12 @@ class AIAgent:
             return self._maybe_try_opm_openrouter_auto(xcfg)
         self._opm_qf_phase = "or_explicit"
         self._opm_qf_or_idx = 0
+        from agent.openrouter_step_up import apply_cross_provider_openrouter_first_hop
+
+        _first = apply_cross_provider_openrouter_first_hop(self, models)
+        _target = _first if _first else models[0]
         return self._apply_opm_openrouter_quota_runtime(
-            models[0], reason="opm_or_after_native_exhausted",
+            _target, reason="opm_or_after_native_exhausted",
         )
 
     def _try_opm_advance_openrouter_explicit(self, xcfg: Dict[str, Any]) -> bool:
@@ -6300,6 +6337,16 @@ class AIAgent:
             self._opm_qf_phase = "or_done"
             return False
         models = openrouter_explicit_models_for_agent(self, xcfg)
+        ladder = getattr(self, "_or_stepup_ladder", None)
+        if ladder and len(ladder) >= 2:
+            idx = int(getattr(self, "_or_stepup_idx", 0) or 0)
+            if idx + 1 < len(ladder):
+                self._or_stepup_idx = idx + 1
+                self._opm_qf_or_idx = self._or_stepup_idx
+                return self._apply_opm_openrouter_quota_runtime(
+                    ladder[self._or_stepup_idx], reason="opm_or_explicit_next",
+                )
+            return self._maybe_try_opm_openrouter_auto(xcfg)
         idx = int(getattr(self, "_opm_qf_or_idx", 0) or 0)
         if idx + 1 < len(models):
             self._opm_qf_or_idx = idx + 1
@@ -8268,6 +8315,7 @@ class AIAgent:
             self._last_api_completion_model = None
             # CLI latches repeat quota UX after the first user turn that showed any.
             self._turn_had_quota_ux_for_cli_latch = False
+            self._quota_notice_emitted_this_turn = False
 
             # Sanitize surrogate characters from user input.  Clipboard paste from
             # rich-text editors (Google Docs, Word, etc.) can inject lone surrogates
@@ -10948,6 +10996,13 @@ class AIAgent:
                         logger.debug(
                             "quota_ux_episode_completed_callback failed", exc_info=True,
                         )
+            try:
+                if getattr(self, "_turn_had_quota_ux_for_cli_latch", False) or getattr(
+                    self, "_quota_notice_emitted_this_turn", False
+                ):
+                    self._session_suppress_quota_user_notices = True
+            except Exception:
+                pass
             detach_opm_session_agent_for_turn()
 
     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:

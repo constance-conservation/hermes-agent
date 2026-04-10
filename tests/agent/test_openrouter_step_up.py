@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from agent.openrouter_step_up import (
+    apply_cross_provider_openrouter_first_hop,
     build_ladder_to_ceiling,
     compute_openrouter_step_up_plan,
     content_requests_escalation,
@@ -111,6 +112,18 @@ def test_prepare_swaps_start_model(monkeypatch):
     AIAgent._prepare_openrouter_step_up_for_turn(agent)
     assert called["mid"] == "openai/gpt-5.4-nano"
     assert agent._or_stepup_ladder[0] == "openai/gpt-5.4-nano"
+
+
+def test_apply_cross_provider_first_hop_starts_at_cheapest():
+    class _A:
+        model = "openai/gpt-5.3-codex"
+        api_mode = "codex_responses"
+
+    a = _A()
+    explicit = ["openai/gpt-5.3-codex", "openai/gpt-5.2-codex"]
+    first = apply_cross_provider_openrouter_first_hop(a, explicit)
+    assert first == "openai/gpt-5.2-codex"
+    assert a._or_stepup_ladder[0] == "openai/gpt-5.2-codex"
 
 
 def test_quota_escalation_advances_rung(monkeypatch):

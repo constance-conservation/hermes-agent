@@ -46,13 +46,31 @@ def test_emit_quota_user_notice_suppressed_after_flag(agent, caplog):
     assert any("quota user notice suppressed" in r.getMessage() for r in caplog.records)
 
 
-def test_session_note_quota_exhausted_sets_flag(agent):
+def test_session_note_quota_exhausted_sets_skip_native_only(agent):
     agent._opm_qf_phase = "or_explicit"
     agent._session_suppress_quota_user_notices = False
     agent._session_skip_opm_native_quota_ladder = False
     agent._session_note_quota_cascade_exhausted_if_applicable()
-    assert agent._session_suppress_quota_user_notices is True
+    assert agent._session_suppress_quota_user_notices is False
     assert agent._session_skip_opm_native_quota_ladder is True
+
+
+def test_emit_status_suppresses_quota_class_when_session_muted(agent, caplog):
+    import logging
+
+    agent._session_suppress_quota_user_notices = True
+    emitted = []
+
+    def _cb(et, msg):
+        emitted.append(msg)
+
+    agent.status_callback = _cb
+    with caplog.at_level(logging.INFO, logger="run_agent"):
+        agent._emit_status(
+            "⚠️ Provider custom blacklisted for this session — quota exceeded",
+        )
+    assert emitted == []
+    assert any("quota-class status suppressed" in r.getMessage() for r in caplog.records)
 
 
 def test_emit_quota_user_notice_suppresses_repeats_even_when_verbose(agent):

@@ -99,6 +99,41 @@ def _non_openai_hub_ceiling(ceiling: str) -> bool:
     return False
 
 
+def apply_cross_provider_openrouter_first_hop(
+    agent: Any,
+    explicit_models_top_first: List[str],
+) -> Optional[str]:
+    """Pick cheapest hub id toward *explicit_models_top_first[0]*; init ``_or_stepup_*`` on *agent*.
+
+    Used when OPM hops from native OpenAI (or unknown OR slug) onto OpenRouter so the first
+    attempt matches step-up (nano→…) instead of the failover list's flagship-first entry.
+
+    Returns the hub id to pass to ``_apply_opm_openrouter_quota_runtime``, or ``None`` to
+    fall back to *explicit_models_top_first[0]*.
+    """
+    cfg = load_openrouter_step_up_config()
+    if not cfg.get("enabled"):
+        return None
+    if not explicit_models_top_first:
+        return None
+    ceiling = str(explicit_models_top_first[0]).strip()
+    if not ceiling or _non_openai_hub_ceiling(ceiling):
+        return None
+    ordered = _hub_models_for_agent(agent, cfg)
+    ladder = build_ladder_to_ceiling(ordered, ceiling)
+    if len(ladder) < 2:
+        return None
+    agent._or_stepup_ladder = ladder
+    agent._or_stepup_idx = 0
+    agent._or_stepup_ceiling = ceiling
+    agent._or_stepup_escalations = 0
+    agent._or_stepup_max_escalations = int(cfg.get("max_escalations_per_turn") or 12)
+    agent._or_stepup_escalate_on_quota = bool(cfg.get("escalate_on_quota_errors"))
+    agent._or_stepup_escalate_on_marker = bool(cfg.get("escalate_on_escalate_marker"))
+    agent._or_stepup_marker = str(cfg.get("escalate_marker") or _DEFAULT_MARKER)
+    return ladder[0]
+
+
 def compute_openrouter_step_up_plan(agent: Any) -> Optional[Dict[str, Any]]:
     """Return step-up plan dict or None when step-up should not run this turn."""
     cfg = load_openrouter_step_up_config()
