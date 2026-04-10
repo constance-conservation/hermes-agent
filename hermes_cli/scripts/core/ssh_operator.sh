@@ -11,6 +11,12 @@
 # HERMES_OPERATOR_WORKSTATION_CLI=1 (set by `hermes … operator`): do not use env-file SSH_PASSPHRASE /
 # ASKPASS — type the key passphrase at the prompt (same pattern as ssh_droplet.sh).
 #
+# Sudo: this script does **not** pipe a sudo password (unlike ssh_droplet). macOS sudo needs a TTY to
+# prompt. By default we always use **ssh -tt** (forced PTY) and run **sudo -k** on the remote before
+# your command so cached credentials are cleared — the next **sudo** must ask for a password (unless
+# sudoers grants NOPASSWD — fix that on the mini). Opt out: HERMES_OPERATOR_SSH_NO_TTY=1 (ssh -T),
+# HERMES_OPERATOR_SKIP_SUDO_K=1 (skip sudo -k).
+#
 # Usage:
 #   ./ssh_operator.sh
 #   ./ssh_operator.sh 'hostname'
@@ -96,9 +102,10 @@ fi
 
 unset SSH_PASSPHRASE 2>/dev/null || true
 
-_USE_TT=0
-if [[ -t 0 ]] || [[ "${HERMES_OPERATOR_INTERACTIVE:-1}" == "1" ]]; then
-  _USE_TT=1
+# Default: always force a PTY so remote sudo(8) can prompt; ssh -T breaks password prompts.
+_USE_TT=1
+if [[ "${HERMES_OPERATOR_SSH_NO_TTY:-0}" == "1" ]]; then
+  _USE_TT=0
 fi
 
 _SSH_FLAGS=(
@@ -127,6 +134,9 @@ fi
 
 _run_remote() {
   local remote_bash_cmd="$1"
+  if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
+    remote_bash_cmd="sudo -k 2>/dev/null || true; ${remote_bash_cmd}"
+  fi
   "${_SSH_ENV[@]}" "${_SSH_BASE[@]}" "bash -lc $(printf '%q' "$remote_bash_cmd")"
 }
 
