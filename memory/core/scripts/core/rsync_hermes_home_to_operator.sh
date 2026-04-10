@@ -6,9 +6,6 @@
 #   ./rsync_hermes_home_to_operator.sh
 #   ./rsync_hermes_home_to_operator.sh --dry-run
 #   ./rsync_hermes_home_to_operator.sh --remove-in-repo-copy   # rm -rf ~/hermes-agent/.hermes on mini
-# Optional env:
-#   HERMES_HOME_RSYNC_SRC=…   (default: $HOME/.hermes)
-#   RSYNC_OPERATOR_DEST_REL=… (default: .hermes; e.g. hermes-agent/.cursor)
 #
 set -euo pipefail
 
@@ -109,8 +106,6 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 
 _SRC="${HERMES_HOME_RSYNC_SRC:-${HOME}/.hermes}"
-# Remote path relative to operator home (default: ~/.hermes). Example: hermes-agent/.cursor
-_RSYNC_REMOTE_REL="${RSYNC_OPERATOR_DEST_REL:-.hermes}"
 [[ -d "$_SRC" ]] || {
   echo "rsync_hermes_home_to_operator.sh: missing source dir ${_SRC}" >&2
   exit 1
@@ -130,12 +125,12 @@ trap '_op_cleanup; rm -f "${_WRAPPER:-}"' EXIT
 } >"$_WRAPPER"
 chmod 700 "$_WRAPPER"
 
-echo "rsync: ${_SRC}/ -> ${MACMINI_USER}@${MACMINI_HOST}:${_RSYNC_REMOTE_REL}/"
+echo "rsync: ${_SRC}/ -> ${MACMINI_USER}@${MACMINI_HOST}:.hermes/"
 # Bash 3.2 + set -u: "${empty[@]}" can error — branch on dry-run
 if [[ ${#DRY_RUN[@]} -gt 0 ]]; then
-  rsync -avz "${DRY_RUN[@]}" -e "$_WRAPPER" "${_SRC}/" "${MACMINI_USER}@${MACMINI_HOST}:${_RSYNC_REMOTE_REL}/"
+  rsync -avz "${DRY_RUN[@]}" -e "$_WRAPPER" "${_SRC}/" "${MACMINI_USER}@${MACMINI_HOST}:.hermes/"
 else
-  rsync -avz -e "$_WRAPPER" "${_SRC}/" "${MACMINI_USER}@${MACMINI_HOST}:${_RSYNC_REMOTE_REL}/"
+  rsync -avz -e "$_WRAPPER" "${_SRC}/" "${MACMINI_USER}@${MACMINI_HOST}:.hermes/"
 fi
 
 if [[ "$REMOVE_REPO" == "1" && ${#DRY_RUN[@]} -eq 0 ]]; then
