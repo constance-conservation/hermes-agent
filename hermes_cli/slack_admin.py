@@ -23,6 +23,17 @@ from typing import Any, Dict, List, Optional
 from hermes_constants import display_hermes_home
 
 
+def _config_token_raw() -> str:
+    """Resolve Slack app configuration token (xoxe) from env or Hermes ``~/.hermes/.env``."""
+    from hermes_cli.config import get_env_value
+
+    for key in ("SLACK_CONFIG_TOKEN", "SLACK_APP_CONFIG_TOKEN", "SLACK_MANIFEST_KEY"):
+        v = (get_env_value(key) or "").strip()
+        if v:
+            return v
+    return ""
+
+
 def _slack_manifest_slash_command_features() -> List[Dict[str, Any]]:
     """Build ``features.slash_commands`` for the Slack app manifest (Socket Mode).
 
@@ -138,16 +149,12 @@ def hermes_slack_manifest_dict() -> Dict[str, Any]:
 
 
 def _config_token_from_env() -> str:
-    raw = (
-        os.getenv("SLACK_CONFIG_TOKEN")
-        or os.getenv("SLACK_APP_CONFIG_TOKEN")
-        or os.getenv("SLACK_MANIFEST_KEY")
-        or ""
-    ).strip()
+    raw = _config_token_raw()
     if not raw:
         print(
             "Error: SLACK_CONFIG_TOKEN is not set (or empty after loading env files).\n"
             "Alias: SLACK_MANIFEST_KEY (same value — Slack app configuration token xoxe…).\n"
+            f"Values are read from the environment and from {display_hermes_home()}/.env (HERMES_HOME).\n"
             "Generate an app configuration token at https://api.slack.com/apps "
             "(Your App → App configuration tokens → Generate token). "
             "It is NOT your bot token (xoxb) or Socket Mode app token (xapp).\n"

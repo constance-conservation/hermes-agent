@@ -117,6 +117,20 @@ def test_config_token_accepts_slack_manifest_key(monkeypatch):
     assert sa._config_token_from_env() == "xoxe-test-token"
 
 
+def test_config_token_from_get_env_value(monkeypatch):
+    import hermes_cli.slack_admin as sa
+
+    monkeypatch.delenv("SLACK_CONFIG_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_APP_CONFIG_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_MANIFEST_KEY", raising=False)
+
+    def fake_get_env(key: str):
+        return "xoxe-from-file" if key == "SLACK_MANIFEST_KEY" else None
+
+    monkeypatch.setattr("hermes_cli.config.get_env_value", fake_get_env)
+    assert sa._config_token_from_env() == "xoxe-from-file"
+
+
 def test_manifest_clone_calls_export_validate_create(monkeypatch, capsys):
     import hermes_cli.slack_admin as sa
 
