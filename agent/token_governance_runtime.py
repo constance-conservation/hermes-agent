@@ -28,6 +28,7 @@ from agent.openai_primary_mode import (
     resolve_openai_primary_mode,
 )
 from agent.routing_trace import emit_routing_decision_trace
+from agent.trivial_prompt import trivial_message_skips_opm_tier_uplift
 
 logger = logging.getLogger(__name__)
 
@@ -367,9 +368,22 @@ def _opm_clamp_tier_resolved_model(
                 "deploy",
             )
         )
-        repl = str(
-            (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
-        ).strip()
+        trivial = trivial_message_skips_opm_tier_uplift(user_message)
+        if trivial and not coding:
+            from agent.opm_quota_ladder import (
+                cheapest_opm_native_chat_slug,
+                format_opm_native_slug_for_agent,
+            )
+
+            cheap = cheapest_opm_native_chat_slug()
+            if cheap:
+                repl = format_opm_native_slug_for_agent(agent, cheap)
+            else:
+                repl = ""
+        else:
+            repl = str(
+                (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
+            ).strip()
         if not repl or model_id_contains_disallowed_family(repl):
             repl = opm_auxiliary_model(agent)
         if repl and not model_id_contains_disallowed_family(repl):
@@ -445,9 +459,21 @@ def enforce_opm_runtime_after_per_turn_routing(agent: Any, user_message: str) ->
                 "deploy",
             )
         )
-        new_mid = str(
-            (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
-        ).strip()
+        trivial = trivial_message_skips_opm_tier_uplift(user_message)
+        if trivial and not coding:
+            from agent.opm_quota_ladder import (
+                cheapest_opm_native_chat_slug,
+                format_opm_native_slug_for_agent,
+            )
+
+            cheap = cheapest_opm_native_chat_slug()
+            new_mid = (
+                format_opm_native_slug_for_agent(agent, cheap) if cheap else ""
+            ).strip()
+        else:
+            new_mid = str(
+                (opm_cfg.get("codex_model") if coding else opm_cfg.get("default_model")) or ""
+            ).strip()
         if (not new_mid or model_id_contains_disallowed_family(new_mid)) and disallowed_only:
             new_mid = opm_auxiliary_model(agent)
         elif not new_mid:
@@ -519,7 +545,12 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # openai_primary_mode: override low-cost deterministic tier with E/F
     _opm_meta = getattr(agent, "_last_opm_meta", None) or {}
-    if opm_effective_for_tier_routing_uplift(agent) and tier in ("A", "B", "C"):
+    _trivial_skip_opm_uplift = trivial_message_skips_opm_tier_uplift(user_message)
+    if (
+        opm_effective_for_tier_routing_uplift(agent)
+        and tier in ("A", "B", "C")
+        and not _trivial_skip_opm_uplift
+    ):
         _is_coding = any(
             kw in (user_message or "").lower()
             for kw in ("code", "implement", "debug", "refactor", "function",
@@ -560,7 +591,11 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
 
     # Enforce OpenAI-primary mode after consultant routing too, so no later
     # router step can drop back to low-cost tiers when the flag is on.
-    if opm_effective_for_tier_routing_uplift(agent) and tier in ("A", "B", "C", "D"):
+    if (
+        opm_effective_for_tier_routing_uplift(agent)
+        and tier in ("A", "B", "C", "D")
+        and not _trivial_skip_opm_uplift
+    ):
         _router_rec2 = audit.get("router") if isinstance(audit, dict) else {}
         _coding_hint = bool(
             isinstance(_router_rec2, dict) and _router_rec2.get("coding_task", False)

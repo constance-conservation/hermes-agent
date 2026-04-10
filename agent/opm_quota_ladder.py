@@ -101,6 +101,42 @@ def ladder_model_set_non_empty(cfg: Dict[str, Any]) -> bool:
     return bool(cfg.get("ladder_model_set"))
 
 
+def cheapest_opm_native_chat_slug() -> Optional[str]:
+    """Smallest chat rung from ``opm_native_quota_downgrade.chat_models`` (for trivial OPM clamps).
+
+    Picks the first match in cost-preference order (nano → mini → 5.2), else the last
+    ladder entry (canon lists are typically flagship-first).
+    """
+    cfg = load_opm_native_quota_downgrade_config()
+    if not cfg.get("enabled") or not ladder_model_set_non_empty(cfg):
+        return None
+    chat = list(cfg.get("chat_models") or [])
+    if not chat:
+        return None
+    bare_list = [_canonical_ladder_id(_bare_slug(str(x))) for x in chat]
+    lower_map = {m.lower(): m for m in bare_list if m}
+    for pref in ("gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.2"):
+        pl = pref.lower()
+        if pl in lower_map:
+            return lower_map[pl]
+    return bare_list[-1]
+
+
+def format_opm_native_slug_for_agent(agent: Any, bare_slug: str) -> str:
+    """Bare api.openai.com id vs ``openai/…`` on OpenRouter — match tier routing conventions."""
+    s = _canonical_ladder_id(_bare_slug(bare_slug))
+    if not s:
+        return bare_slug
+    try:
+        if getattr(agent, "_is_openrouter_url", lambda: False)():
+            low = s.lower()
+            if not low.startswith("openai/"):
+                return f"openai/{_bare_slug(s)}"
+    except Exception:
+        logger.debug("format_opm_native_slug_for_agent openrouter check failed", exc_info=True)
+    return s
+
+
 def session_budget_next_cheaper_model(
     *,
     current_model: str,

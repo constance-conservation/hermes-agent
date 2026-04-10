@@ -5987,8 +5987,18 @@ class AIAgent:
             logger.debug("_try_opm_native_quota_downgrade failed", exc_info=True)
             return False
 
-    def _apply_opm_openrouter_quota_runtime(self, model_id: str, *, reason: str) -> bool:
-        """Swap runtime to OpenRouter for OPM quota cascade (does not set ``_fallback_activated``)."""
+    def _swap_to_openrouter_hub_model(
+        self,
+        model_id: str,
+        *,
+        reason: str,
+        trace_stage: str = "opm_cross_provider_failover",
+        reason_code: Optional[str] = None,
+        quota_notice: Optional[str] = None,
+        set_opm_suppressed_for_turn: bool = True,
+        session_skip_native_quota_ladder: bool = True,
+    ) -> bool:
+        """Point the agent at an OpenRouter hub id (``openai/…``). Shared by OPM cascade and step-up."""
         try:
             from agent.auxiliary_client import resolve_provider_client
             from agent.routing_trace import emit_routing_decision_trace
@@ -5996,7 +6006,8 @@ class AIAgent:
             mid = str(model_id or "").strip()
             if not mid:
                 return False
-            self._opm_suppressed_for_turn = True
+            if set_opm_suppressed_for_turn:
+                self._opm_suppressed_for_turn = True
             old_model = self.model
             or_client, _ = resolve_provider_client(
                 "openrouter",
@@ -6006,7 +6017,9 @@ class AIAgent:
                 explicit_base_url=None,
             )
             if or_client is None:
-                logging.warning("OPM OpenRouter hop: resolve_provider_client returned None for %s", mid)
+                logging.warning(
+                    "OpenRouter hub swap: resolve_provider_client returned None for %s", mid
+                )
                 return False
             fb_base_url = str(or_client.base_url)
             self.model = mid
@@ -6039,17 +6052,21 @@ class AIAgent:
                         fb_context_length * self.context_compressor.threshold_percent
                     )
                 except Exception:
-                    logger.debug("opm openrouter hop: compressor update failed", exc_info=True)
-            self._emit_quota_user_notice(
-                f"⚠️ Quota / rate limit — trying OpenRouter model: {mid} …",
-            )
+                    logger.debug("OpenRouter hub swap: compressor update failed", exc_info=True)
+            if quota_notice is None:
+                self._emit_quota_user_notice(
+                    f"⚠️ Quota / rate limit — trying OpenRouter model: {mid} …",
+                )
+            elif quota_notice:
+                self._emit_quota_user_notice(quota_notice)
             _om = getattr(self, "_last_opm_meta", None) or {}
+            _rc = reason_code if reason_code is not None else str(reason or "opm_or_hop")
             try:
                 emit_routing_decision_trace(
-                    stage="opm_cross_provider_failover",
+                    stage=trace_stage,
                     chosen_model=str(self.model or ""),
                     chosen_provider="openrouter",
-                    reason_code=str(reason or "opm_or_hop"),
+                    reason_code=_rc,
                     opm_enabled=bool(_om.get("enabled", False)),
                     opm_source=str(_om.get("source", "")),
                     tier_source="quota_retry",
@@ -6060,19 +6077,135 @@ class AIAgent:
                     session_id=str(getattr(self, "session_id", "") or ""),
                 )
             except Exception:
-                logger.debug("opm_cross_provider_failover trace failed", exc_info=True)
+                logger.debug("openrouter hub swap trace failed", exc_info=True)
             logging.info(
-                "OPM cross-provider OpenRouter hop: %s -> %s (%s)",
+                "OpenRouter hub swap: %s -> %s (%s)",
                 old_model,
                 mid,
                 reason,
             )
-            # Next user message can skip re-walking native api.openai.com rungs for quota.
-            self._session_skip_opm_native_quota_ladder = True
+            if session_skip_native_quota_ladder:
+                self._session_skip_opm_native_quota_ladder = True
+            self._opm_reconcile_primary_if_disallowed()
             return True
         except Exception:
-            logger.debug("_apply_opm_openrouter_quota_runtime failed", exc_info=True)
+            logger.debug("_swap_to_openrouter_hub_model failed", exc_info=True)
             return False
+
+    def _apply_opm_openrouter_quota_runtime(self, model_id: str, *, reason: str) -> bool:
+        """Swap runtime to OpenRouter for OPM quota cascade (does not set ``_fallback_activated``)."""
+        return self._swap_to_openrouter_hub_model(
+            model_id,
+            reason=reason,
+            trace_stage="opm_cross_provider_failover",
+            reason_code=str(reason or "opm_or_hop"),
+            quota_notice=None,
+            set_opm_suppressed_for_turn=True,
+            session_skip_native_quota_ladder=True,
+        )
+
+    def _prepare_openrouter_step_up_for_turn(self) -> None:
+        """Cheap→capable first hop on OpenRouter (routing_canon ``openrouter_step_up_escalation``)."""
+        from agent.openrouter_step_up import compute_openrouter_step_up_plan
+
+        plan = compute_openrouter_step_up_plan(self)
+        if not plan:
+            return
+        ladder = plan["ladder"]
+        self._or_stepup_ladder = ladder
+        self._or_stepup_idx = 0
+        self._or_stepup_ceiling = plan.get("ceiling")
+        self._or_stepup_escalations = 0
+        self._or_stepup_system_suffix = plan.get("system_suffix") or ""
+        self._or_stepup_marker = plan.get("marker") or "[HERMES_ESCALATE]"
+        self._or_stepup_max_escalations = int(plan.get("max_escalations") or 12)
+        self._or_stepup_escalate_on_quota = bool(plan.get("escalate_on_quota_errors"))
+        self._or_stepup_escalate_on_marker = bool(plan.get("escalate_on_escalate_marker"))
+        start = str(plan.get("start_model") or "").strip()
+        if start and start != str(self.model or "").strip():
+            ok = self._swap_to_openrouter_hub_model(
+                start,
+                reason="openrouter_step_up_start",
+                trace_stage="openrouter_step_up",
+                reason_code="step_up_start",
+                quota_notice=False,
+                set_opm_suppressed_for_turn=False,
+                session_skip_native_quota_ladder=False,
+            )
+            if not ok:
+                self._or_stepup_ladder = None
+
+    def _try_openrouter_step_up_on_quota(
+        self,
+        api_error: BaseException,
+        *,
+        pool_may_recover: bool,
+    ) -> bool:
+        """Advance one rung toward the tier ceiling on quota-class failures."""
+        if pool_may_recover:
+            return False
+        if not self._quota_style_api_failure(api_error):
+            return False
+        if not getattr(self, "_or_stepup_escalate_on_quota", False):
+            return False
+        ladder = getattr(self, "_or_stepup_ladder", None)
+        if not ladder or len(ladder) < 2:
+            return False
+        if int(getattr(self, "_or_stepup_escalations", 0) or 0) >= int(
+            getattr(self, "_or_stepup_max_escalations", 0) or 12
+        ):
+            return False
+        idx = int(getattr(self, "_or_stepup_idx", 0) or 0)
+        if idx + 1 >= len(ladder):
+            return False
+        self._or_stepup_idx = idx + 1
+        self._or_stepup_escalations = int(getattr(self, "_or_stepup_escalations", 0) or 0) + 1
+        nxt = ladder[self._or_stepup_idx]
+        old = self.model
+        notice = f"⚠️ Rate/quota on {old} — stepping up OpenRouter model: {nxt} …"
+        return self._swap_to_openrouter_hub_model(
+            nxt,
+            reason="openrouter_step_up_quota",
+            trace_stage="openrouter_step_up",
+            reason_code="step_up_quota",
+            quota_notice=notice,
+            set_opm_suppressed_for_turn=False,
+            session_skip_native_quota_ladder=False,
+        )
+
+    def _try_openrouter_step_up_on_escalate_marker(self, stripped_content: str) -> bool:
+        """Model returned only the escalate marker — advance one rung and retry."""
+        if not getattr(self, "_or_stepup_escalate_on_marker", False):
+            return False
+        from agent.openrouter_step_up import content_requests_escalation
+
+        ladder = getattr(self, "_or_stepup_ladder", None)
+        marker = getattr(self, "_or_stepup_marker", None) or "[HERMES_ESCALATE]"
+        if not ladder or len(ladder) < 2:
+            return False
+        if not content_requests_escalation(stripped_content, marker):
+            return False
+        if int(getattr(self, "_or_stepup_escalations", 0) or 0) >= int(
+            getattr(self, "_or_stepup_max_escalations", 0) or 12
+        ):
+            return False
+        idx = int(getattr(self, "_or_stepup_idx", 0) or 0)
+        if idx + 1 >= len(ladder):
+            return False
+        self._or_stepup_idx = idx + 1
+        self._or_stepup_escalations = int(getattr(self, "_or_stepup_escalations", 0) or 0) + 1
+        nxt = ladder[self._or_stepup_idx]
+        old = self.model
+        notice = f"⚠️ Model requested escalation — stepping up: {old} → {nxt} …"
+        return self._swap_to_openrouter_hub_model(
+            nxt,
+            reason="openrouter_step_up_marker",
+            trace_stage="openrouter_step_up",
+            reason_code="step_up_marker",
+            quota_notice=notice,
+            set_opm_suppressed_for_turn=False,
+            session_skip_native_quota_ladder=False,
+        )
 
     def _maybe_try_opm_openrouter_auto(self, xcfg: Dict[str, Any]) -> bool:
         from agent.opm_cross_provider_failover import openrouter_api_key_available
@@ -6184,6 +6317,10 @@ class AIAgent:
         """Native OpenAI ladder, then OpenRouter explicit + auto, before ``_fallback_chain``."""
         if not self._quota_style_api_failure(api_error) or pool_may_recover:
             return False
+        if self._try_openrouter_step_up_on_quota(
+            api_error, pool_may_recover=pool_may_recover,
+        ):
+            return True
         try:
             from agent.opm_cross_provider_failover import (
                 load_opm_cross_provider_quota_failover_config,
@@ -8099,6 +8236,16 @@ class AIAgent:
             self._opm_suppressed_for_turn = False
             self._opm_qf_phase = None
             self._opm_qf_or_idx = 0
+            # OpenRouter step-up (cheap → capable); see agent/openrouter_step_up.py
+            self._or_stepup_ladder = None
+            self._or_stepup_idx = 0
+            self._or_stepup_ceiling = None
+            self._or_stepup_escalations = 0
+            self._or_stepup_system_suffix = None
+            self._or_stepup_marker = None
+            self._or_stepup_max_escalations = 0
+            self._or_stepup_escalate_on_quota = False
+            self._or_stepup_escalate_on_marker = False
             # Reset quota UX suppression when the logical session changes (/new, /resume).
             _q_sid = str(getattr(self, "session_id", "") or "")
             _prev_q = getattr(self, "_quota_notice_session_id", None)
@@ -8212,6 +8359,14 @@ class AIAgent:
                 self._turn_routing_intent = build_turn_routing_intent(self)
             except Exception:
                 self._turn_routing_intent = None
+
+            try:
+                self._prepare_openrouter_step_up_for_turn()
+                _suf = getattr(self, "_or_stepup_system_suffix", None)
+                if _suf:
+                    system_message = (system_message or "") + _suf
+            except Exception:
+                logger.debug("_prepare_openrouter_step_up_for_turn failed", exc_info=True)
 
             # Gated one-line stack trace before the first LLM call this turn (debug).
             try:
@@ -10314,7 +10469,13 @@ class AIAgent:
                     else:
                         # No tool calls - this is the final response
                         final_response = assistant_message.content or ""
-        
+                        _step_up_probe = self._strip_think_blocks(final_response).strip()
+                        if self._try_openrouter_step_up_on_escalate_marker(_step_up_probe):
+                            api_call_count -= 1
+                            self.iteration_budget.refund()
+                            retry_count += 1
+                            continue
+
                         # Check if response only has think block with no actual content after it
                         if not self._has_content_after_think_block(final_response):
                             # If the previous turn already delivered real content alongside

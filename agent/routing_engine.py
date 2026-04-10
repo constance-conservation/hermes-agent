@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from agent.openai_primary_mode import resolve_openai_primary_mode
 from agent.provider_model_routing_catalog import format_routing_catalog_digest
 from agent.routing_trace import emit_routing_decision_trace
+from agent.trivial_prompt import trivial_message_skips_opm_tier_uplift
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,9 @@ def route_prompt(
         system_prompt += (
             "\n\nOPENAI PRIMARY MODE ACTIVE: Default to tier E (gpt-5.4) for most tasks. "
             "Route coding/engineering tasks to tier F (gpt-5.3-codex). "
-            "Use A/B/C ONLY for genuinely trivial tasks (greetings, simple lookups). "
+            "Use A/B/C ONLY for genuinely trivial tasks (greetings, simple lookups, "
+            "single-word pings/ok/thanks). For those, prefer tier A and the lowest-cost "
+            "model class in the catalog digest. "
             "GPT-5.4 and gpt-5.3-codex are permitted for subprocesses in this mode."
         )
 
@@ -340,6 +343,15 @@ def route_prompt(
 
         tier = parsed["tier"]
         coding_task = parsed.get("coding_task", False)
+
+        if opm and trivial_message_skips_opm_tier_uplift(user_message) and tier in (
+            "D",
+            "E",
+            "F",
+            "G",
+        ):
+            tier = "A"
+            coding_task = False
 
         # openai_primary_mode: uplift tiers unless router explicitly chose low-cost
         if opm and tier in ("D",):

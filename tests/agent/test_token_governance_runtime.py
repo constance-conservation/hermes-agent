@@ -577,6 +577,83 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
     assert out == "gpt-5.4"
 
 
+def test_opm_clamp_trivial_message_prefers_cheapest_native_ladder_rung():
+    """Ping-class prompts should map to nano/mini ladder rung, not the OPM default flagship."""
+    from agent import token_governance_runtime as tgr
+
+    agent = object()
+    with (
+        patch(
+            "agent.token_governance_runtime.opm_enabled",
+            return_value=True,
+        ),
+        patch(
+            "agent.token_governance_runtime.resolve_openai_primary_mode",
+            return_value=(
+                {"default_model": "gpt-5.4", "codex_model": "gpt-5.3-codex"},
+                {"enabled": True},
+            ),
+        ),
+    ):
+        out = tgr._opm_clamp_tier_resolved_model(
+            agent, "google/gemini-2.5-flash", "ping", {"enabled": True}
+        )
+    assert out == "gpt-5.4-nano"
+
+
+def test_trivial_ping_skips_opm_uplift_and_clamps_gemini_to_cheapest(gov_env, monkeypatch):
+    """Consultant tier A + trivial message must not be uplifted to E; clamp uses ladder nano."""
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "enabled": True,
+                "dynamic_tier_routing": True,
+                "default_routing_tier": "D",
+                "tier_models": {"A": "google/gemini-2.5-flash"},
+                "openai_primary_mode": {
+                    "enabled": True,
+                    "default_model": "gpt-5.4",
+                    "codex_model": "gpt-5.3-codex",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "agent.consultant_routing.consultant_routing_enabled",
+        lambda _cfg: True,
+    )
+    monkeypatch.setattr(
+        "agent.consultant_routing.resolve_consultant_tier",
+        lambda *args, **kwargs: ("A", {"router": {"coding_task": False}}),
+    )
+    monkeypatch.setattr(
+        "agent.consultant_routing.is_pushback_message",
+        lambda _msg: False,
+    )
+    monkeypatch.setattr(
+        "agent.consultant_routing.format_status_line",
+        lambda *_args, **_kwargs: "",
+    )
+
+    class _A:
+        def __init__(self):
+            self.model = "tier:dynamic"
+            self.api_mode = "chat_completions"
+            self._base_url_lower = "https://api.openai.com/v1"
+
+        def _is_openrouter_url(self):
+            return False
+
+    a = _A()
+    a._token_governance_cfg = load_runtime_config()
+    a._model_is_tier_routed = True
+    apply_per_turn_tier_model(a, "ping")
+    assert a.model == "gpt-5.4-nano"
+
+
 def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
     """Even when apply_per_turn exited early, run_conversation enforcement can fix disallowed ids."""
 
