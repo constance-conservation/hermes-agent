@@ -11,12 +11,11 @@
 # HERMES_OPERATOR_WORKSTATION_CLI=1 (set by `hermes … operator`): do not use env-file SSH_PASSPHRASE /
 # ASKPASS — type the key passphrase at the prompt (same pattern as ssh_droplet.sh).
 #
-# Sudo: no **sudo -S** / env password (unlike ssh_droplet). Remote **bash -lc** often has stdin on a
-# pipe — sudo cannot read a password. We **reattach to /dev/tty** (same pattern as ssh_droplet after
-# sudo -S), then **sudo -k** and **sudo -v** so this session must authenticate (unless sudoers has
-# NOPASSWD — fix on the mini). **sudo -v** runs only when stdin is a TTY or **HERMES_OPERATOR_INTERACTIVE=1**
-# (e.g. **hermes … operator**); set **HERMES_OPERATOR_SKIP_SUDO_VERIFY=1** for unattended automation.
-# Opt out: **HERMES_OPERATOR_SSH_NO_TTY=1**, **HERMES_OPERATOR_SKIP_SUDO_K=1**, **HERMES_OPERATOR_REQUIRE_SUDO_VERIFY=0**.
+# Sudo: no **sudo -S** / env password (unlike ssh_droplet). We use **ssh -tt** + **RequestTTY=force**
+# and **sudo -k** (clears cached credentials) so the next **sudo** is more likely to prompt. Do **not**
+# run **sudo -v** by default — it can exit non‑zero (no sudoers / no TTY) and **drop the SSH session**
+# immediately. Optional: **HERMES_OPERATOR_SUDO_VERIFY_SOFT=1** runs **sudo -v || true** after **sudo -k**
+# (best-effort; never disconnects). Opt out: **HERMES_OPERATOR_SSH_NO_TTY=1**, **HERMES_OPERATOR_SKIP_SUDO_K=1**.
 #
 # Usage:
 #   ./ssh_operator.sh
@@ -137,17 +136,13 @@ fi
 _run_remote() {
   local remote_bash_cmd="$1"
   local pre=""
-  # Reattach fds to the SSH PTY so sudo can prompt (bash -lc alone often leaves stdin non-tty).
-  if [[ "$_USE_TT" == "1" ]]; then
-    pre="exec >/dev/tty 2>&1; exec </dev/tty 2>/dev/null || true; "
-  fi
   if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
-    pre+="sudo -k 2>/dev/null || true; "
+    pre="sudo -k 2>/dev/null || true; "
   fi
-  # Force an authentication check (prompts for password when needed). Skip for unattended runs.
-  if [[ "${HERMES_OPERATOR_REQUIRE_SUDO_VERIFY:-1}" != "0" ]] && [[ "${HERMES_OPERATOR_SKIP_SUDO_VERIFY:-0}" != "1" ]]; then
+  # Optional: refresh sudo timestamp / prompt once; never fail the session (unlike sudo -v || exit).
+  if [[ "${HERMES_OPERATOR_SUDO_VERIFY_SOFT:-0}" == "1" ]] && [[ "${HERMES_OPERATOR_SKIP_SUDO_VERIFY:-0}" != "1" ]]; then
     if [[ -t 0 ]] || [[ "${HERMES_OPERATOR_INTERACTIVE:-0}" == "1" ]]; then
-      pre+="sudo -v || exit 1; "
+      pre+="sudo -v 2>/dev/null || true; "
     fi
   fi
   remote_bash_cmd="${pre}${remote_bash_cmd}"
