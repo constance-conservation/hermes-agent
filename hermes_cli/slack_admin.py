@@ -13,6 +13,7 @@ import copy
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
@@ -21,6 +22,40 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 from hermes_constants import display_hermes_home
+
+# OAuth needs at least one redirect URL. Hermes is Socket Mode–only (no OAuth callback server);
+# this URL satisfies Slack’s authorize URL. Prefer **Install to Workspace** on api.slack.com/apps
+# OAuth & Permissions, or append matching **redirect_uri** to the authorize link.
+_DEFAULT_SLACK_OAUTH_REDIRECT_URLS: List[str] = ["https://localhost/slack/oauth_redirect"]
+
+
+def _slack_urlopen(req: urllib.request.Request, *, timeout: float = 90):
+    """HTTPS to Slack with certifi CA bundle when available (avoids macOS Python SSL errors)."""
+    try:
+        import certifi  # type: ignore[import-untyped]
+
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except ImportError:
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _merge_oauth_redirect_urls(manifest: Dict[str, Any], urls: List[str]) -> None:
+    """Ensure oauth_config.redirect_urls includes each URL (order-preserving, no duplicates)."""
+    oc = manifest.get("oauth_config")
+    if not isinstance(oc, dict):
+        oc = {}
+        manifest["oauth_config"] = oc
+    existing = oc.get("redirect_urls")
+    if not isinstance(existing, list):
+        existing = []
+    seen = {str(u).strip() for u in existing if str(u).strip()}
+    for u in urls:
+        u = u.strip()
+        if u and u not in seen:
+            existing.append(u)
+            seen.add(u)
+    oc["redirect_urls"] = existing
 
 
 def _config_token_raw() -> str:
@@ -104,6 +139,7 @@ def hermes_slack_manifest_dict() -> Dict[str, Any]:
             "slash_commands": _slack_manifest_slash_command_features(),
         },
         "oauth_config": {
+            "redirect_urls": list(_DEFAULT_SLACK_OAUTH_REDIRECT_URLS),
             "scopes": {
                 "bot": [
                     "app_mentions:read",
@@ -187,8 +223,16 @@ def _slack_tooling_api(method: str, **fields: Optional[str]) -> Dict[str, Any]:
         headers={"Content-Type": "application/x-www-form-urlencoded; charset=utf-8"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
+        with _slack_urlopen(req, timeout=90) as resp:
             return json.loads(resp.read().decode())
+    except urllib.error.URLError as e:
+        print(
+            f"Slack API request failed: {e.reason}\n"
+            "If you see SSL certificate errors on macOS, install certificates for your Python "
+            "or ensure the `certifi` package is installed (Hermes uses certifi for HTTPS when available).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         try:
@@ -313,6 +357,8 @@ def slack_manifest_clone_from_app(
             feats["bot_user"] = bu
         bu["display_name"] = bot_dn
 
+    _merge_oauth_redirect_urls(manifest, _DEFAULT_SLACK_OAUTH_REDIRECT_URLS)
+
     manifest_json = json.dumps(manifest, separators=(",", ":"))
 
     val = _slack_tooling_api(
@@ -355,6 +401,78 @@ def slack_manifest_clone_from_app(
         file=sys.stderr,
     )
     print(json.dumps({"credentials": creds}, indent=2))
+
+
+def slack_manifest_patch_oauth_install(
+    *,
+    app_id: str,
+    bot_display_name: Optional[str] = None,
+    extra_redirect_urls: Optional[List[str]] = None,
+) -> None:
+    """Export an app manifest, add OAuth redirect URL(s), optionally rename bot user; apps.manifest.update."""
+    aid = app_id.strip()
+    if not aid:
+        print("Error: --app-id is required", file=sys.stderr)
+        sys.exit(1)
+
+    ex = _slack_tooling_api("apps.manifest.export", app_id=aid)
+    if not ex.get("ok"):
+        print(f"export failed: {ex.get('error')}", file=sys.stderr)
+        sys.exit(1)
+    manifest = copy.deepcopy(_manifest_from_export_response(ex))
+
+    urls = list(_DEFAULT_SLACK_OAUTH_REDIRECT_URLS)
+    if extra_redirect_urls:
+        urls.extend(u.strip() for u in extra_redirect_urls if u and str(u).strip())
+    _merge_oauth_redirect_urls(manifest, urls)
+
+    bdn = (bot_display_name or "").strip()
+    if bdn:
+        feats = manifest.get("features")
+        if not isinstance(feats, dict):
+            feats = {}
+            manifest["features"] = feats
+        bu = feats.get("bot_user")
+        if not isinstance(bu, dict):
+            bu = {}
+            feats["bot_user"] = bu
+        bu["display_name"] = bdn
+
+    manifest_json = json.dumps(manifest, separators=(",", ":"))
+    val = _slack_tooling_api(
+        "apps.manifest.validate",
+        app_id=aid,
+        manifest=manifest_json,
+    )
+    if not val.get("ok"):
+        print(f"validate failed: {val.get('error')}", file=sys.stderr)
+        for err in val.get("errors") or []:
+            if isinstance(err, dict):
+                print(f"  - {err.get('pointer')}: {err.get('message')}", file=sys.stderr)
+            else:
+                print(f"  - {err}", file=sys.stderr)
+        sys.exit(1)
+
+    j = _slack_tooling_api(
+        "apps.manifest.update",
+        app_id=aid,
+        manifest=manifest_json,
+    )
+    if not j.get("ok"):
+        print(f"update failed: {j.get('error')}", file=sys.stderr)
+        for err in j.get("errors") or []:
+            if isinstance(err, dict):
+                print(f"  - {err.get('pointer')}: {err.get('message')}", file=sys.stderr)
+            else:
+                print(f"  - {err}", file=sys.stderr)
+        sys.exit(1)
+    print(f"ok=true app_id={j.get('app_id')} permissions_updated={j.get('permissions_updated')}")
+    print(
+        "OAuth: add **redirect_uri** to your install link so it matches a configured URL, e.g.\n"
+        "  redirect_uri=https%3A%2F%2Flocalhost%2Fslack%2Foauth_redirect\n"
+        "Or use **Install to Workspace** on the app’s OAuth & Permissions page (no custom link)."
+    )
+    print("Reinstall the app if Slack prompts, then refresh SLACK_BOT_TOKEN / SLACK_APP_TOKEN in Hermes.")
 
 
 def slack_manifest_update(*, app_id: str) -> None:
@@ -702,6 +820,20 @@ def slack_command(args) -> None:
             source_app_id=getattr(args, "source_app_id", "") or "",
             new_display_name=getattr(args, "new_name", "") or "",
             bot_display_name=getattr(args, "bot_display_name", None) or None,
+        )
+    elif sub == "manifest-patch-oauth":
+        if not getattr(args, "confirm", False):
+            print(
+                "Refusing to patch the Slack app manifest without --confirm.\n"
+                "This updates OAuth redirect URLs (and optional bot display name) via apps.manifest.update.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        extra_ru = getattr(args, "redirect_url", None) or []
+        slack_manifest_patch_oauth_install(
+            app_id=getattr(args, "app_id", "") or "",
+            bot_display_name=getattr(args, "bot_display_name", None) or None,
+            extra_redirect_urls=list(extra_ru) if extra_ru else None,
         )
     elif sub == "manifest-update":
         if not getattr(args, "confirm", False):

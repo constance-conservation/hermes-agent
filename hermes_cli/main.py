@@ -4460,6 +4460,38 @@ For more help on a command:
         default=None,
         help="Bot display name (features.bot_user.display_name); default: derived from --new-name",
     )
+    slack_mpo = slack_sub.add_parser(
+        "manifest-patch-oauth",
+        help=(
+            "Export app manifest, add default OAuth redirect URL(s), optional bot rename; "
+            "apps.manifest.update (fixes redirect_uri mismatch on install links)"
+        ),
+    )
+    slack_mpo.add_argument(
+        "--app-id",
+        required=True,
+        help="Slack App ID (A…) to patch",
+    )
+    slack_mpo.add_argument(
+        "--bot-display-name",
+        default=None,
+        help="Set features.bot_user.display_name (e.g. hermes)",
+    )
+    slack_mpo.add_argument(
+        "--redirect-url",
+        action="append",
+        default=[],
+        metavar="URL",
+        help=(
+            "Extra OAuth redirect URL to register (repeatable). "
+            "Default includes https://localhost/slack/oauth_redirect"
+        ),
+    )
+    slack_mpo.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Required — performs apps.manifest.update",
+    )
     slack_mu = slack_sub.add_parser(
         "manifest-update",
         help="Replace app config with the built-in Hermes manifest (dangerous — reinstall after)",

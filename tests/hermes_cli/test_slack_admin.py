@@ -83,6 +83,9 @@ def test_hermes_slack_manifest_dict_shape():
     bot_scopes = set(m["oauth_config"]["scopes"]["bot"])
     assert "channels:manage" in bot_scopes
     assert "groups:write" in bot_scopes
+    assert m["oauth_config"].get("redirect_urls") == [
+        "https://localhost/slack/oauth_redirect"
+    ]
 
 
 def test_slack_command_manifest_validate_dispatch(monkeypatch):
@@ -150,6 +153,7 @@ def test_manifest_clone_calls_export_validate_create(monkeypatch, capsys):
             m = fields.get("manifest")
             assert m and "hermes-operator" in m
             assert "Hermes Agent" not in m
+            assert "localhost/slack/oauth_redirect" in m
             return {"ok": True}
         if method == "apps.manifest.create":
             return {
@@ -174,6 +178,43 @@ def test_manifest_clone_calls_export_validate_create(monkeypatch, capsys):
     ]
     out = capsys.readouterr().out
     assert "new_app_id=A_NEW123" in out
+
+
+def test_slack_command_manifest_patch_oauth_requires_confirm(monkeypatch):
+    import hermes_cli.slack_admin as sa
+
+    monkeypatch.setattr(sa, "slack_manifest_patch_oauth_install", lambda **kw: None)
+    args = MagicMock(
+        slack_command="manifest-patch-oauth",
+        app_id="A1",
+        confirm=False,
+        bot_display_name=None,
+        redirect_url=[],
+    )
+    with pytest.raises(SystemExit):
+        sa.slack_command(args)
+
+
+def test_slack_command_manifest_patch_oauth_dispatch(monkeypatch):
+    import hermes_cli.slack_admin as sa
+
+    called = {}
+
+    def fake_patch(**kw):
+        called.update(kw)
+
+    monkeypatch.setattr(sa, "slack_manifest_patch_oauth_install", fake_patch)
+    args = MagicMock(
+        slack_command="manifest-patch-oauth",
+        app_id="A1",
+        confirm=True,
+        bot_display_name="hermes",
+        redirect_url=["https://example.com/cb"],
+    )
+    sa.slack_command(args)
+    assert called["app_id"] == "A1"
+    assert called["bot_display_name"] == "hermes"
+    assert called["extra_redirect_urls"] == ["https://example.com/cb"]
 
 
 def test_slack_command_manifest_clone_dispatch(monkeypatch):
