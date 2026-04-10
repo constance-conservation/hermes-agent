@@ -34,7 +34,8 @@ else
     exit 1
   }
   rm -rf venv
-  uv venv venv --python 3.12
+  # uv's default venv has no pip unless seeded — Hermes install uses pip -e .
+  uv venv venv --python 3.12 --seed pip
   ./venv/bin/python -m pip install -U pip
 fi
 
