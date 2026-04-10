@@ -11,11 +11,11 @@
 # HERMES_OPERATOR_WORKSTATION_CLI=1 (set by `hermes … operator`): do not use env-file SSH_PASSPHRASE /
 # ASKPASS — type the key passphrase at the prompt (same pattern as ssh_droplet.sh).
 #
-# Sudo: no **sudo -S** / env password (unlike ssh_droplet). We use **ssh -tt** + **RequestTTY=force**
-# and **sudo -k** (clears cached credentials) so the next **sudo** is more likely to prompt. Do **not**
-# run **sudo -v** by default — it can exit non‑zero (no sudoers / no TTY) and **drop the SSH session**
-# immediately. Optional: **HERMES_OPERATOR_SUDO_VERIFY_SOFT=1** runs **sudo -v || true** after **sudo -k**
-# (best-effort; never disconnects). Opt out: **HERMES_OPERATOR_SSH_NO_TTY=1**, **HERMES_OPERATOR_SKIP_SUDO_K=1**.
+# Sudo: no **sudo -S** / env password (unlike ssh_droplet). Default **HERMES_OPERATOR_REQUIRE_SUDO_SESSION=1**:
+# reattach **/dev/tty**, **sudo -k**, **sudo -v** — session continues only after sudo authenticates (password,
+# **NOPASSWD**, or Touch ID). Set **HERMES_OPERATOR_REQUIRE_SUDO_SESSION=0** for unattended SSH (e.g. git pull).
+# With REQUIRE=0: optional **HERMES_OPERATOR_SUDO_VERIFY_SOFT=1** adds **sudo -v || true** after **sudo -k**.
+# **HERMES_OPERATOR_SKIP_SUDO_K=1** skips only the **sudo -k** line.
 #
 # Usage:
 #   ./ssh_operator.sh
@@ -136,12 +136,22 @@ fi
 _run_remote() {
   local remote_bash_cmd="$1"
   local pre=""
-  if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
-    pre="sudo -k 2>/dev/null || true; "
-  fi
-  # Optional: refresh sudo timestamp / prompt once; never fail the session (unlike sudo -v || exit).
-  if [[ "${HERMES_OPERATOR_SUDO_VERIFY_SOFT:-0}" == "1" ]] && [[ "${HERMES_OPERATOR_SKIP_SUDO_VERIFY:-0}" != "1" ]]; then
-    if [[ -t 0 ]] || [[ "${HERMES_OPERATOR_INTERACTIVE:-0}" == "1" ]]; then
+  if [[ "${HERMES_OPERATOR_REQUIRE_SUDO_SESSION:-1}" != "0" ]]; then
+    if [[ "$_USE_TT" != "1" ]]; then
+      echo "ssh_operator.sh: HERMES_OPERATOR_REQUIRE_SUDO_SESSION needs a PTY — unset HERMES_OPERATOR_SSH_NO_TTY or set HERMES_OPERATOR_REQUIRE_SUDO_SESSION=0" >&2
+      exit 1
+    fi
+    # Reattach to the SSH pseudo-tty (bash -lc often leaves sudo without a real tty; same idea as ssh_droplet).
+    pre='exec >/dev/tty 2>&1; exec </dev/tty 2>/dev/null || true; '
+    if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
+      pre+='sudo -k 2>/dev/null || true; '
+    fi
+    pre+='sudo -v || { echo "ssh_operator.sh: sudo -v failed (need account in sudoers and a password unless NOPASSWD/Touch ID)." >&2; exit 1; }; '
+  else
+    if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
+      pre="sudo -k 2>/dev/null || true; "
+    fi
+    if [[ "${HERMES_OPERATOR_SUDO_VERIFY_SOFT:-0}" == "1" ]]; then
       pre+="sudo -v 2>/dev/null || true; "
     fi
   fi
