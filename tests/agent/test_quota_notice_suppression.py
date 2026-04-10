@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from run_agent import AIAgent
+from run_agent import (
+    AIAgent,
+    _quota_ux_registry_key,
+    persist_quota_suppress_to_registry,
+    sync_quota_suppress_from_registry,
+    _quota_ux_suppress_by_session,
+    _quota_ux_suppress_lock,
+)
 
 
 @pytest.fixture
@@ -12,6 +21,15 @@ def agent():
     a = AIAgent(quiet_mode=True, skip_context_files=True, skip_memory=True)
     a.session_id = "test_sess_quota"
     return a
+
+
+@pytest.fixture
+def profile_env(tmp_path, monkeypatch):
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    return home
 
 
 def test_quota_notice_resets_when_session_id_changes(agent):
@@ -71,6 +89,34 @@ def test_emit_status_suppresses_quota_class_when_session_muted(agent, caplog):
         )
     assert emitted == []
     assert any("quota-class status suppressed" in r.getMessage() for r in caplog.records)
+
+
+def test_quota_suppress_registry_survives_new_agent_same_session(profile_env):
+    """Gateway may recreate AIAgent when config signature changes; mute must persist."""
+    with _quota_ux_suppress_lock:
+        _quota_ux_suppress_by_session.clear()
+    a1 = AIAgent(quiet_mode=True, skip_context_files=True, skip_memory=True)
+    a1.session_id = "stable_gateway_sess"
+    a1._turn_had_quota_ux_for_cli_latch = True
+    persist_quota_suppress_to_registry(a1)
+    a2 = AIAgent(quiet_mode=True, skip_context_files=True, skip_memory=True)
+    a2.session_id = "stable_gateway_sess"
+    assert a2._session_suppress_quota_user_notices is False
+    sync_quota_suppress_from_registry(a2)
+    assert a2._session_suppress_quota_user_notices is True
+
+
+def test_reset_session_state_clears_quota_suppress_registry(profile_env):
+    with _quota_ux_suppress_lock:
+        _quota_ux_suppress_by_session.clear()
+    a = AIAgent(quiet_mode=True, skip_context_files=True, skip_memory=True)
+    a.session_id = "reset_sess"
+    a._turn_had_quota_ux_for_cli_latch = True
+    persist_quota_suppress_to_registry(a)
+    key = _quota_ux_registry_key(a)
+    assert _quota_ux_suppress_by_session.get(key) is True
+    a.reset_session_state()
+    assert _quota_ux_suppress_by_session.get(key) is None
 
 
 def test_emit_quota_user_notice_suppresses_repeats_even_when_verbose(agent):

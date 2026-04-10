@@ -65,6 +65,55 @@ if _loaded_env_paths:
 else:
     logger.info("No .env file found. Using system environment variables.")
 
+# Process-wide quota UX mute keyed by (HERMES_HOME, session_id). The gateway may
+# construct a fresh AIAgent when the cached config signature changes (model/tools),
+# which resets per-instance flags and would otherwise re-spam messaging with quota
+# lines on every user message for the same chat session.
+_quota_ux_suppress_lock = threading.RLock()
+_quota_ux_suppress_by_session: dict[str, bool] = {}
+
+
+def _quota_ux_registry_key(agent: Any) -> str:
+    try:
+        home = str(get_hermes_home().resolve())
+    except Exception:
+        home = ""
+    sid = str(getattr(agent, "session_id", "") or "")
+    return f"{home}\x00{sid}"
+
+
+def sync_quota_suppress_from_registry(agent: Any) -> None:
+    sid = str(getattr(agent, "session_id", "") or "")
+    if not sid:
+        return
+    key = _quota_ux_registry_key(agent)
+    with _quota_ux_suppress_lock:
+        if _quota_ux_suppress_by_session.get(key):
+            agent._session_suppress_quota_user_notices = True
+
+
+def persist_quota_suppress_to_registry(agent: Any) -> None:
+    sid = str(getattr(agent, "session_id", "") or "")
+    if not sid:
+        return
+    if not (
+        getattr(agent, "_turn_had_quota_ux_for_cli_latch", False)
+        or getattr(agent, "_quota_notice_emitted_this_turn", False)
+    ):
+        return
+    key = _quota_ux_registry_key(agent)
+    with _quota_ux_suppress_lock:
+        _quota_ux_suppress_by_session[key] = True
+
+
+def clear_quota_suppress_registry_entry(agent: Any) -> None:
+    sid = str(getattr(agent, "session_id", "") or "")
+    if not sid:
+        return
+    key = _quota_ux_registry_key(agent)
+    with _quota_ux_suppress_lock:
+        _quota_ux_suppress_by_session.pop(key, None)
+
 
 # Import our tool system
 from model_tools import (
@@ -1173,8 +1222,8 @@ class AIAgent:
             short_uuid = uuid.uuid4().hex[:6]
             self.session_id = f"{timestamp_str}_{short_uuid}"
 
-        # Session-scoped UX: after the first full OPM quota cascade exhaustion, mute
-        # repeated quota/rate-limit user notices until ``session_id`` changes (e.g. /new).
+        # Session-scoped UX: after the first quota-recovery burst in a turn, mute further
+        # quota-class status until ``session_id`` changes (e.g. /new). See ``run_conversation`` finally.
         self._quota_notice_session_id: Optional[str] = None
         self._session_suppress_quota_user_notices = False
         self._quota_notice_emitted_this_turn = False
@@ -1582,6 +1631,7 @@ class AIAgent:
         self._hard_budget_operator_decision = None
         self._hard_budget_daily_cap_notice_emitted = False
         self._session_suppress_quota_user_notices = False
+        clear_quota_suppress_registry_entry(self)
         self._quota_notice_emitted_this_turn = False
         self._session_skip_opm_native_quota_ladder = False
         self._last_api_completion_model = None
@@ -8300,6 +8350,7 @@ class AIAgent:
                 self._session_suppress_quota_user_notices = False
                 self._session_skip_opm_native_quota_ladder = False
             self._quota_notice_session_id = _q_sid
+            sync_quota_suppress_from_registry(self)
             _prev_hb = getattr(self, "_hard_budget_operator_session_id", None)
             if _prev_hb is not None and _prev_hb != _q_sid:
                 self._hard_budget_operator_decision = None
@@ -11001,6 +11052,7 @@ class AIAgent:
                     self, "_quota_notice_emitted_this_turn", False
                 ):
                     self._session_suppress_quota_user_notices = True
+                    persist_quota_suppress_to_registry(self)
             except Exception:
                 pass
             detach_opm_session_agent_for_turn()

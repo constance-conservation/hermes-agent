@@ -6925,6 +6925,21 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                  Useful for systemd services to avoid restart-loop deadlocks
                  when the previous process hasn't fully exited yet.
     """
+    # Best-effort: terminate stray duplicate daemons for this HERMES_HOME before
+    # we consult gateway.pid (watchdog-check also dedupes when enforcing singleton).
+    try:
+        from gateway.status import dedupe_gateway_processes_for_current_home
+
+        _n_dup, _dup_detail = dedupe_gateway_processes_for_current_home()
+        if _n_dup:
+            logger.warning(
+                "gateway start: terminated %s duplicate process(es) for this HERMES_HOME (%s)",
+                _n_dup,
+                _dup_detail,
+            )
+    except Exception:
+        logger.debug("gateway start dedupe skipped", exc_info=True)
+
     # ── Duplicate-instance guard ──────────────────────────────────────
     # Prevent two gateways from running under the same HERMES_HOME.
     # The PID file is scoped to HERMES_HOME, so future multi-profile
