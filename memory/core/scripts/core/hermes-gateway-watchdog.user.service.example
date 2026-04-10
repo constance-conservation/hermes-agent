@@ -1,0 +1,31 @@
+# User systemd unit — external shell watchdog (watchdog-check loop + recovery).
+# Does NOT replace hermes-gateway-<profile>.service; it complements it with health
+# checks. Singleton dedupe runs inside ``hermes gateway watchdog-check`` (Python).
+#
+# Install (as the gateway user, e.g. hermesuser):
+#   mkdir -p ~/.hermes/bin
+#   cp /path/to/hermes-agent/scripts/core/gateway-watchdog.sh ~/.hermes/bin/
+#   chmod +x ~/.hermes/bin/gateway-watchdog.sh
+#   cp /path/to/hermes-agent/scripts/core/hermes-gateway-watchdog.user.service.example \
+#      ~/.config/systemd/user/hermes-gateway-watchdog.service
+#   # Adjust Environment= lines for your profile and repo path.
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hermes-gateway-watchdog.service
+#
+# Or use: ./scripts/core/install_and_restart_gateway_watchdog.sh (copies script + nohup).
+
+[Unit]
+Description=Hermes external gateway watchdog (watchdog-check + recovery)
+After=network-online.target hermes-gateway-chief-orchestrator.service
+
+[Service]
+Type=simple
+Environment=HERMES_PROFILE_BASE=%h/.hermes
+Environment=HERMES_HOME=%h/.hermes/profiles/chief-orchestrator
+Environment=HERMES_AGENT_DIR=%h/hermes-agent
+ExecStart=%h/.hermes/bin/gateway-watchdog.sh
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

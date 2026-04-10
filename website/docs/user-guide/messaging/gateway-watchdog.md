@@ -36,6 +36,12 @@ hermes gateway watchdog-check && echo OK
 # hermes -p chief-orchestrator gateway watchdog-check && echo OK
 ```
 
+## Coordination (no fighting with gateway control)
+
+- **Singleton dedupe** (removing duplicate `gateway run` PIDs for this `HERMES_HOME`) runs **only** inside **`hermes gateway watchdog-check`**. Do not add a second shell loop that `pkill`s gateway processes — you would race systemd and duplicate `SIGTERM`s.
+- **This shell watchdog** only calls Hermes CLI: `watchdog-check`, optional `systemctl --user restart hermes-gateway-*.service`, `gateway run --replace`, and `doctor --fix`. It never signals the gateway by PID itself.
+- **systemd** may run **`hermes-gateway-<profile>.service`** (gateway process) and optionally **`hermes-gateway-watchdog.service`** (this loop). They are complementary: the gateway unit starts the daemon; the watchdog unit only **observes** health and **restarts** through supported commands when checks fail.
+
 ## Official shell watchdog
 
 The repo ships `scripts/core/gateway-watchdog.sh`: a loop that:
@@ -49,7 +55,9 @@ The repo ships `scripts/core/gateway-watchdog.sh`: a loop that:
 
 Copy it to `$HERMES_HOME/bin/gateway-watchdog.sh`, `chmod +x`, and run it under **systemd**, **tmux**, or a **cron** `@reboot` job as the **same user** that owns the gateway (so `HERMES_HOME` and `gateway.pid` match).
 
-**SSH / automation:** Prefer `scripts/core/install_and_restart_gateway_watchdog.sh` (run as the gateway user from the repo checkout). It copies the watchdog into `$HERMES_HOME/bin`, stops prior instances by matching that path **and** (when different) the legacy **`$HERMES_PROFILE_BASE/bin/gateway-watchdog.sh`** copy, then starts one `nohup` process. Inlining `pkill -f gateway-watchdog` in a remote `bash -c '…'` often matches the supervisor’s own command line and drops the session before `nohup` runs.
+**SSH / automation:** Prefer `scripts/core/install_and_restart_gateway_watchdog.sh` (run as the gateway user from the repo checkout). It copies the watchdog into `$HERMES_HOME/bin`, stops prior **watchdog** processes whose argv contains that destination path (not a broad `pkill` of `gateway`), then starts one `nohup` process. Inlining `pkill -f gateway-watchdog` in a remote `bash -c '…'` often matches the supervisor’s own command line and drops the session before `nohup` runs — use the installer or match the full path.
+
+**systemd user unit example:** `scripts/core/hermes-gateway-watchdog.user.service.example` — run **one** watchdog per `HERMES_HOME`; `flock` inside `gateway-watchdog.sh` prevents duplicate shell loops for the same profile.
 
 ### Environment variables
 
