@@ -44,5 +44,5 @@ if ! ./venv/bin/pip install -q -e ".[messaging]"; then
 fi
 
 echo "--- hermes doctor (first lines) ---"
-./venv/bin/python -m hermes_cli.main doctor -q 2>&1 | head -50 || true
+./venv/bin/python -m hermes_cli.main doctor 2>&1 | head -50 || true
 echo "--- done ---"
