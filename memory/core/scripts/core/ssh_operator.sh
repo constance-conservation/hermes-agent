@@ -11,11 +11,8 @@
 # HERMES_OPERATOR_WORKSTATION_CLI=1 (set by `hermes … operator`): do not use env-file SSH_PASSPHRASE /
 # ASKPASS — type the key passphrase at the prompt (same pattern as ssh_droplet.sh).
 #
-# Sudo: no **sudo -S** / env password (unlike ssh_droplet). Default **HERMES_OPERATOR_REQUIRE_SUDO_SESSION=0**
-# so SSH always reaches the shell (many minis: **operator** is not in **sudoers**, so **sudo -v** would drop
-# the session). **Strict gate (opt-in):** set **HERMES_OPERATOR_REQUIRE_SUDO_SESSION=1** — **/dev/tty** reattach,
-# **sudo -k**, **sudo -v** or disconnect. Optional when REQUIRE=0: **HERMES_OPERATOR_SUDO_VERIFY_SOFT=1**,
-# **HERMES_OPERATOR_SKIP_SUDO_K=1**.
+# Sudo: this script does **not** run **sudo** (no **sudo -S** / env password, unlike ssh_droplet). Optional
+# **HERMES_OPERATOR_SSH_NO_TTY=1** uses **ssh -T** for automation that must not allocate a PTY.
 #
 # Usage:
 #   ./ssh_operator.sh
@@ -102,7 +99,7 @@ fi
 
 unset SSH_PASSPHRASE 2>/dev/null || true
 
-# Default: always force a PTY so remote sudo(8) can prompt; ssh -T breaks password prompts.
+# Default: force a PTY (**ssh -tt**) for interactive shells; use **HERMES_OPERATOR_SSH_NO_TTY=1** for plain **ssh -T**.
 _USE_TT=1
 if [[ "${HERMES_OPERATOR_SSH_NO_TTY:-0}" == "1" ]]; then
   _USE_TT=0
@@ -135,27 +132,6 @@ fi
 
 _run_remote() {
   local remote_bash_cmd="$1"
-  local pre=""
-  if [[ "${HERMES_OPERATOR_REQUIRE_SUDO_SESSION:-0}" == "1" ]]; then
-    if [[ "$_USE_TT" != "1" ]]; then
-      echo "ssh_operator.sh: HERMES_OPERATOR_REQUIRE_SUDO_SESSION needs a PTY — unset HERMES_OPERATOR_SSH_NO_TTY or set HERMES_OPERATOR_REQUIRE_SUDO_SESSION=0" >&2
-      exit 1
-    fi
-    # Reattach to the SSH pseudo-tty (bash -lc often leaves sudo without a real tty; same idea as ssh_droplet).
-    pre='exec >/dev/tty 2>&1; exec </dev/tty 2>/dev/null || true; '
-    if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
-      pre+='sudo -k 2>/dev/null || true; '
-    fi
-    pre+='sudo -v || { echo "ssh_operator.sh: sudo -v failed (need account in sudoers and a password unless NOPASSWD/Touch ID)." >&2; exit 1; }; '
-  else
-    if [[ "${HERMES_OPERATOR_SKIP_SUDO_K:-0}" != "1" ]]; then
-      pre="sudo -k 2>/dev/null || true; "
-    fi
-    if [[ "${HERMES_OPERATOR_SUDO_VERIFY_SOFT:-0}" == "1" ]]; then
-      pre+="sudo -v 2>/dev/null || true; "
-    fi
-  fi
-  remote_bash_cmd="${pre}${remote_bash_cmd}"
   "${_SSH_ENV[@]}" "${_SSH_BASE[@]}" "bash -lc $(printf '%q' "$remote_bash_cmd")"
 }
 

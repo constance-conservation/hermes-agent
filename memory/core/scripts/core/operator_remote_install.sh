@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Run on the Mac mini (e.g. over SSH): git pull, Homebrew **python@3.12** if **brew** exists,
+# **operator_bootstrap_venv.sh**, then **pip install -e ".[messaging]"** (fallback: **-e .**).
+#
+#   ./scripts/core/operator_remote_install.sh
+#
+set -euo pipefail
+REPO="${HERMES_OPERATOR_REPO:-$HOME/hermes-agent}"
+cd "$REPO"
+
+git pull --ff-only origin main || true
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+if command -v brew >/dev/null 2>&1; then
+  export HOMEBREW_NO_AUTO_UPDATE=1
+  export NONINTERACTIVE=1
+  brew list python@3.12 &>/dev/null || brew install python@3.12
+fi
+export PATH="/opt/homebrew/opt/python@3.12/bin:/usr/local/opt/python@3.12/bin:$PATH"
+
+./scripts/core/operator_bootstrap_venv.sh
+
+if ! ./venv/bin/pip install -q -e ".[messaging]"; then
+  ./venv/bin/pip install -q -e "."
+fi
+
+echo "--- hermes doctor (first lines) ---"
+./venv/bin/python -m hermes_cli.main doctor -q 2>&1 | head -50 || true
+echo "--- done ---"
