@@ -294,6 +294,22 @@ def _expand_whatsapp_auth_aliases(identifier: str) -> set:
     return resolved
 
 
+def _pairing_approve_cli_line(platform_name: str, code: str) -> str:
+    """Operator shell command for DM pairing; includes ``-p <profile>`` when HERMES_HOME is under profiles/."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        parts = get_hermes_home().parts
+        for i, p in enumerate(parts):
+            if p == "profiles" and i + 1 < len(parts):
+                slug = str(parts[i + 1])
+                if slug:
+                    return f"hermes -p {slug} pairing approve {platform_name} {code}"
+    except Exception:
+        pass
+    return f"hermes pairing approve {platform_name} {code}"
+
+
 def _parse_csv_env_allowlist(env_name: str) -> set[str]:
     raw = os.getenv(env_name, "").strip()
     if not raw:
@@ -1896,7 +1912,7 @@ class GatewayRunner:
                             f"Hi~ I don't recognize you yet!\n\n"
                             f"Here's your pairing code: `{code}`\n\n"
                             f"Ask the bot owner to run:\n"
-                            f"`hermes pairing approve {platform_name} {code}`"
+                            f"`{_pairing_approve_cli_line(platform_name, code)}`"
                         )
                 else:
                     adapter = self.adapters.get(source.platform)

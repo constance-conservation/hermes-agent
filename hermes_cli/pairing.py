@@ -7,16 +7,14 @@ Usage:
     hermes pairing revoke <platform> <user_id> # Revoke user access
     hermes pairing clear-pending     # Clear all expired/pending codes
 
-If the gateway runs under a profile (HERMES_HOME=.../profiles/<name>), use the same
-profile for pairing:  hermes -p <name> pairing approve ...
+Pairing JSON lives under HERMES_HOME (see display_hermes_home()). If the gateway runs
+with ``hermes -p chief-orchestrator gateway …``, use the same ``-p`` for pairing
+commands or codes will be "not found" (wrong directory).
 """
-
-from hermes_constants import display_hermes_home
-
 
 def pairing_command(args):
     """Handle hermes pairing subcommands."""
-    from gateway.pairing import PairingStore
+    from gateway.pairing import PAIRING_DIR, PairingStore
 
     store = PairingStore()
     action = getattr(args, "pairing_action", None)
@@ -34,18 +32,22 @@ def pairing_command(args):
         print("Run 'hermes pairing --help' for details.")
 
 
+def _pairing_dir_line():
+    from gateway.pairing import PAIRING_DIR
+
+    return f"  Pairing directory (this CLI / HERMES_HOME): {PAIRING_DIR}"
+
+
 def _cmd_list(store):
     """List all pending and approved users."""
+    print(_pairing_dir_line())
     pending = store.list_pending()
     approved = store.list_approved()
 
-    print(f"\n  Pairing data directory (HERMES_HOME): {display_hermes_home()}/")
-
     if not pending and not approved:
-        print("No pairing data found. No one has tried to pair yet~")
         print(
-            "  If your gateway uses a profile, run the same profile here, e.g.\n"
-            "    hermes -p chief-orchestrator pairing list\n"
+            "\n  No pairing data in this directory. If the gateway uses another profile, run:\n"
+            "    hermes -p <profile> pairing list\n"
         )
         return
 
@@ -86,12 +88,14 @@ def _cmd_approve(store, platform: str, code: str):
         print(f"\n  Approved! User {display} on {platform} can now use the bot~")
         print("  They'll be recognized automatically on their next message.\n")
     else:
+        from gateway.pairing import PAIRING_DIR
+
         print(f"\n  Code '{code}' not found or expired for platform '{platform}'.")
-        print(f"  Looking under HERMES_HOME: {display_hermes_home()}/")
-        print("  Run 'hermes pairing list' to see pending codes.")
+        print(f"  Pairing directory: {PAIRING_DIR}")
         print(
-            "  If the gateway uses a profile (e.g. chief-orchestrator), approve with the same profile:\n"
-            f"    hermes -p chief-orchestrator pairing approve {platform} {code}\n"
+            "  If the gateway runs under a named profile, approve with the same profile, e.g.:\n"
+            "    hermes -p chief-orchestrator pairing approve whatsapp <code>\n"
+            "  Run 'hermes pairing list' (with matching -p) to see pending codes.\n"
         )
 
 
