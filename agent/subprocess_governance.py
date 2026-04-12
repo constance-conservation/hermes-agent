@@ -1,37 +1,29 @@
 """Subprocess and subagent governance policy.
 
-Enforces that all background tasks and delegated subagents use only truly free
-(zero API cost) models. Any API-cost model requires explicit operator approval
-before a subprocess or background task can run.
+Genuinely **free** (zero API cost) models run without approval. **Budget** models
+(``config subprocess_governance.budget_auto_approve_models``, default
+``openai/gpt-5.4-nano`` / ``gpt-5.4-nano``) are cheap paid tiers that run without
+blocking gateway approval — operators accept per-call cost.
+
+Other API-cost models still require explicit operator approval when no other rule allows them.
 
 TRULY FREE models (zero API cost — local inference only):
   - Any model served via HERMES_LOCAL_INFERENCE_BASE_URL (self-hosted)
   - Slugs under ``local/`` (self-hosted naming convention)
 
 LOW-COST models (Gemini API — small but non-zero cost per call):
-  - google/gemini-2.5-flash, google/gemini-2.5-flash-lite, google/gemini-2.5-pro
-  → These are NOT free. They require operator approval for subprocess use.
-
-MID/HIGH COST (always require explicit approval for subprocess use):
-  - anthropic/claude-sonnet-4-6 (tier D)
-  - gpt-5.4 (tier E)
-  - gpt-5.3-codex (tier F)
-  - Any other OpenRouter/OpenAI model
+  - google/gemini-2.5-flash, etc. — require approval unless covered by OPM/budget rules.
 
 Under **openai_primary_mode**, native **api.openai.com** subprocesses also honor
 **routing_canon** ``opm_native_quota_downgrade`` chat/codex lists (merged into the
-effective allowlist and free-subprocess fallback candidate order).
+effective allowlist and subprocess fallback candidate order).
 
 Policy rules:
-1. Background/subprocess tasks MUST use only genuinely free local models.
-2. Gemini API models (low-cost) ALSO require approval for subprocess use.
-3. Any non-free model requires EXPLICIT real-time operator approval via callback.
-4. Subprocesses have a hard max duration of SUBPROCESS_MAX_SECONDS (default 300 / 5 min).
-5. The launching agent is responsible for monitoring and must terminate on completion or timeout.
-6. On completion the launching agent notifies the chief and operator with a concise summary.
-
-The chief orchestrator must be consulted (via the normal agentic approval flow in
-consultant_routing) before any paid model is used for a subprocess.
+1. Free local models: no approval.
+2. Configured budget auto-approve models: no blocking approval (still billed).
+3. OPM-allowed native OpenAI slugs: no blocking approval when credentials resolve.
+4. Otherwise: operator approval via callback or gateway /approve.
+5. Subprocesses have a hard max duration of SUBPROCESS_MAX_SECONDS (default 300 / 5 min).
 """
 
 from __future__ import annotations
@@ -280,13 +272,37 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
         try:
             return opm_auxiliary_model(parent_agent)
         except Exception:
-            return "gemini-2.5-flash"
-    return "gemini-2.5-flash"
+            return "openai/gpt-5.4-nano"
+    return "openai/gpt-5.4-nano"
 
 
 def requires_operator_approval(model_id: str) -> bool:
-    """True for any model that isn't genuinely free (i.e., has API costs)."""
-    return not is_free_subprocess_model(model_id)
+    """True when the model needs an explicit approval prompt (not free / not budget-auto)."""
+    if is_free_subprocess_model(model_id):
+        return False
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        raw = cfg.get("subprocess_governance") or {}
+        ids = raw.get("budget_auto_approve_models")
+        if not isinstance(ids, list) or not ids:
+            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+        want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
+        if _norm_subprocess_slug(model_id) in want:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _norm_subprocess_slug(mid: str) -> str:
+    s = (mid or "").strip().lower()
+    if s.startswith("openai/"):
+        return s
+    if s == "gpt-5.4-nano":
+        return "openai/gpt-5.4-nano"
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +572,32 @@ def enforce_subprocess_model_policy(
             session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
         )
         return True, "free_model"
+
+    # Cheapest hub tier (and native nano) — auto-approved via config (no gateway block).
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        raw = cfg.get("subprocess_governance") or {}
+        ids = raw.get("budget_auto_approve_models")
+        if not isinstance(ids, list) or not ids:
+            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+        want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
+        if _norm_subprocess_slug(model_id) in want:
+            register_subprocess(task_id, model_id, goal, approved=True)
+            emit_routing_decision_trace(
+                stage="subprocess_governance_gate",
+                chosen_model=str(model_id or ""),
+                chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+                reason_code="budget_subprocess_auto_approve",
+                opm_enabled=False,
+                opm_source="",
+                tier_source="subprocess_policy",
+                session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+            )
+            return True, "budget_auto_approve"
+    except Exception:
+        pass
 
     # openai_primary_mode: bypass paid-model block for whitelisted OpenAI models
     if _is_openai_primary_mode_allowed(model_id, parent_agent):

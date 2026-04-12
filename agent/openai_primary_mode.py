@@ -379,7 +379,7 @@ def coerce_under_opm_if_disallowed_family(model: Any, agent: Any = None) -> Any:
         try:
             return opm_auxiliary_model(agent)
         except Exception:
-            return "gemini-2.5-flash"
+            return "openai/gpt-5.4-nano"
 
 
 def _legacy_opm_auxiliary_yaml_key() -> str:
@@ -387,7 +387,7 @@ def _legacy_opm_auxiliary_yaml_key() -> str:
 
 
 def opm_auxiliary_model(agent: Any = None) -> str:
-    """Cheap model for auxiliary/review paths under OPM (direct Gemini API by default).
+    """Cheap model for auxiliary/review paths under OPM (OpenRouter gpt-5.4-nano by default).
 
     Config: ``openai_primary_mode.opm_auxiliary_model`` (legacy YAML key still read if present).
     """
@@ -400,7 +400,7 @@ def opm_auxiliary_model(agent: Any = None) -> str:
             return raw
     except Exception:
         pass
-    return "gemini-2.5-flash"
+    return "openai/gpt-5.4-nano"
 
 
 def filter_fallback_chain_disallowed(chain: Any) -> list:

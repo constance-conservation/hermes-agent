@@ -168,9 +168,13 @@ _FALLBACK_CHAIN_META_KEYS = frozenset({
     "only_rate_limit",
     "restore_health_check",
     "health_check_message",
+    "openrouter_last_resort",
     # Kimi tier router (HF hub API) — not passed to resolve_provider_client
     "hf_router",
     "hf_router_tiers",
+    "gemini_tier_router",
+    "gemini_tier_router_tiers",
+    "gemini_native_tier_models",
 })
 
 # Agent internals extracted to agent/ package for modularity

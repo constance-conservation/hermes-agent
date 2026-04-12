@@ -10,8 +10,8 @@ one authoritative GPT-5.4 decision that covers:
   - **coding_task**: hint that tier-F (gpt-5.3-codex) is preferred when escalating
 
 GPT-5.4 is used as the router because it produces genuinely dynamic, non-static
-decisions rather than falling back to the same model every turn. Gemini Flash
-is the fallback when no OpenAI key is available.
+decisions rather than falling back to the same model every turn. Cheaper OpenAI-class
+models (``gpt-5.4-nano``) or Gemini Flash are fallbacks when native GPT-5.4 is unavailable.
 
 Called by ``agent/consultant_routing.py`` → ``agent/token_governance_runtime.py``
 on every user turn when token-governance is active.
@@ -77,16 +77,16 @@ JSON routing decision that covers model tier selection, profile delegation, and 
 low-cost tiers) a condensed task brief.
 
 TIER TABLE (ascending capability/cost — ALL tiers cost money via API):
-  A = Gemini Flash       — one-liners, trivial ack/lookup, pure formatting (low-cost)
-  B = Gemini Flash-Lite  — short/simple tasks, renames, single-file edits (low-cost)
-  C = Gemini Pro         — multi-step reasoning, moderate complexity, analysis (low-cost)
+  A = gpt-5.4-nano (hub) / Gemini Flash — one-liners, trivial ack/lookup (low-cost)
+  B = gpt-5.4-mini / Gemini Flash-Lite  — short/simple tasks, renames, single-file edits
+  C = gpt-5.2 / Gemini Pro             — multi-step reasoning, moderate complexity
   D = claude-sonnet-4.6  — complex tasks, most consultations, writing, planning, debugging
   E = gpt-5.4            — hardest non-coding reasoning, ambiguous multi-domain problems
   F = gpt-5.3-codex      — deep engineering, architecture, refactors, complex codegen
 
 COST HIERARCHY (cheapest to most expensive):
-  FREE:     Gemini Flash via direct Google Gemini API, self-hosted local inference
-  LOW-COST: Gemini Flash/Pro via direct Google API (tiers A/B/C)
+  FREE:     self-hosted local inference only
+  LOW-COST: gpt-5.4-nano, Gemini Flash via direct Google API (tiers A/B/C)
   PAID:     ANY model routed via OpenRouter (even when the same id is cheaper natively)
   HIGH:     claude-sonnet-4.6, gpt-5.4, gpt-5.3-codex, claude-opus-4.6
 
@@ -109,9 +109,9 @@ ROUTING RULES:
 7. low_cost_brief must be null when tier is D, E, or F.
 8. profile: suggest the most suitable profile by EXACT name, or null for default.
 9. background_task: true if the request explicitly asks to run something in the background,
-   spawn a subprocess, or run a parallel process. Background tasks MUST use only free
-   models (Gemini Flash via direct Gemini API, local inference) — any paid model \
-requires operator approval.
+   spawn a subprocess, or run a parallel process. Prefer the cheapest feasible model
+   (gpt-5.4-nano tier or local inference). Hermes auto-approves the configured budget
+   nano tier for subprocesses — avoid escalating to flagship models for background work.
 
 PROFILES:
 {profiles_desc}
@@ -214,7 +214,7 @@ def _parse_routing_response(raw: str) -> Optional[dict]:
 
 
 def _call_routing_llm(system: str, user: str) -> str:
-    """Call GPT-5.4 via native OpenAI (preferred) or Gemini Flash (fallback)."""
+    """Call GPT-5.4 via native OpenAI, then gpt-5.4-nano, OpenRouter nano, then Gemini."""
     from agent.auxiliary_client import call_llm, extract_content_or_reasoning
     from agent.openai_native_runtime import native_openai_runtime_tuple
 
@@ -245,7 +245,44 @@ def _call_routing_llm(system: str, user: str) -> str:
         except Exception as exc:
             logger.debug("routing_engine: GPT-5.4 failed, trying fallback: %s", exc)
 
-    # Fallback: Gemini Flash (free, fast)
+    # Native gpt-5.4-nano (same key as GPT-5.4 primary)
+    if bt and ak:
+        try:
+            resp = call_llm(
+                task=None,
+                provider="custom",
+                model="gpt-5.4-nano",
+                base_url=bt,
+                api_key=ak,
+                messages=msgs,
+                temperature=0.1,
+                max_tokens=300,
+            )
+            result = extract_content_or_reasoning(resp) or ""
+            if result:
+                logger.debug("routing_engine: gpt-5.4-nano routing OK")
+                return result
+        except Exception as exc:
+            logger.debug("routing_engine: gpt-5.4-nano failed: %s", exc)
+
+    # OpenRouter hub cheapest tier
+    try:
+        resp = call_llm(
+            task=None,
+            provider="openrouter",
+            model="openai/gpt-5.4-nano",
+            messages=msgs,
+            temperature=0.1,
+            max_tokens=300,
+        )
+        result = extract_content_or_reasoning(resp) or ""
+        if result:
+            logger.debug("routing_engine: OpenRouter gpt-5.4-nano routing OK")
+            return result
+    except Exception as exc:
+        logger.debug("routing_engine: OpenRouter nano failed: %s", exc)
+
+    # Last: Gemini Flash (direct API)
     gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if gemini_key:
         try:
@@ -265,8 +302,7 @@ def _call_routing_llm(system: str, user: str) -> str:
             logger.debug("routing_engine: Gemini Flash fallback failed: %s", exc)
 
     logger.warning(
-        "routing_engine: both GPT-5.4 and Gemini Flash routers failed — "
-        "using deterministic fallback tier"
+        "routing_engine: all routing LLM options failed — using deterministic fallback tier"
     )
     return ""
 
@@ -286,7 +322,8 @@ def route_prompt(
     """Make a unified routing decision for a single user prompt.
 
     Uses GPT-5.4 (native OpenAI) as the primary router — it produces genuinely
-    dynamic decisions rather than static fallbacks. Gemini Flash is the fallback.
+    dynamic decisions rather than static fallbacks. Cheaper models (nano) and Gemini
+    are tried before giving up.
 
     When ``openai_primary_mode`` is enabled, the default tier is E (gpt-5.4)
     and coding tasks are routed to F (gpt-5.3-codex) unless the router

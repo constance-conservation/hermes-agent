@@ -75,6 +75,7 @@ def test_top_level_tiers_preferred_over_legacy_kimi_router():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "filter_free_tier_models_by_local_hub": False,
             "tiers": [{"id": "top", "models": ["org/top"]}],
             "kimi_router": {
@@ -98,6 +99,7 @@ def test_fallback_tier_when_all_hub_models_filtered(monkeypatch):
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "filter_free_tier_models_by_local_hub": True,
             "fallback_free_routed_model": "gemini-2.5-flash",
             "gemini_native_tier_models": ["gemini-2.5-flash"],
@@ -119,6 +121,7 @@ def test_build_chain_kimi_then_optional_gemini():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
@@ -150,6 +153,7 @@ def test_filtered_tiers_preserve_gemini_native_models(monkeypatch):
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "filter_free_tier_models_by_local_hub": True,
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
@@ -168,6 +172,7 @@ def test_build_chain_router_provider_gemini():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_provider": "gemini",
                 "router_model": "gemini-2.5-flash",
@@ -198,6 +203,7 @@ def test_resolve_explicit_plain_hf_dropped_for_gemini_synthesis():
         ],
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
@@ -220,6 +226,7 @@ def test_resolve_legacy_fallback_model_plain_hf_yields_to_gemini():
         },
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "g", "models": ["some/hub-a"]}],
@@ -239,6 +246,7 @@ def test_build_chain_gemini_direct():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a", "org/b"]}],
@@ -257,6 +265,7 @@ def test_openrouter_last_resort_appended_by_default():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a"]}],
@@ -269,13 +278,14 @@ def test_openrouter_last_resort_appended_by_default():
     assert ch[1]["provider"] == "openrouter"
     assert ch[1]["openrouter_last_resort"] is True
     assert ch[1]["only_rate_limit"] is True
-    assert "gemini" in ch[1]["model"].lower()
+    assert "nano" in ch[1]["model"].lower()
 
 
 def test_openrouter_last_resort_disabled():
     cfg = {
         "free_model_routing": {
             "enabled": True,
+            "budget_openrouter_fallback": {"enabled": False},
             "kimi_router": {
                 "router_model": "gemini-2.5-flash",
                 "tiers": [{"id": "t", "models": ["org/a"]}],

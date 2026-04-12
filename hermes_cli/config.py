@@ -223,17 +223,17 @@ def ensure_hermes_home():
 # =============================================================================
 
 DEFAULT_CONFIG = {
-    # Default inference model when config.yaml omits model.default (Google AI Studio
-    # free tier). Provider is left unset so ``resolve_provider(auto)`` picks from API keys.
-    "model": {"default": "gemini-2.5-flash"},
+    # Default when config.yaml omits model.default: cheapest GPT-5.4 hub tier on OpenRouter
+    # when OPENROUTER_API_KEY is set (aligns with token-governance tier A / cron-style tasks).
+    "model": {"default": "openai/gpt-5.4-nano"},
     "fallback_providers": None,
     "openai_primary_mode": {
         "enabled": False,
         "default_model": "gpt-5.4",
         "codex_model": "gpt-5.3-codex",
-        "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex"],
+        "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex", "gpt-5.4-nano"],
         "require_direct_openai": True,
-        # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty (then gemini-2.5-flash).
+        # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty (then openai/gpt-5.4-nano).
         "opm_auxiliary_model": "",
         # When true (default), a manual ``/models`` pick disables OPM model/runtime coercion for that agent.
         # Override with env HERMES_MANUAL_PIPELINE_BYPASS_OPM=0 to force OPM even on manual picks (rare).
@@ -255,8 +255,20 @@ DEFAULT_CONFIG = {
         "huggingface_max_failures": 1,
         "default_max_failures": 3,
     },
+    # Subprocess/delegation: models that may run without gateway /approve (still billed; cheapest tier).
+    "subprocess_governance": {
+        "budget_auto_approve_models": [
+            "openai/gpt-5.4-nano",
+            "gpt-5.4-nano",
+        ],
+    },
     "free_model_routing": {
         "enabled": True,
+        # First hop when primary fails: OpenRouter cheapest GPT-5.4 tier (not Gemini).
+        "budget_openrouter_fallback": {
+            "enabled": True,
+            "model": "openai/gpt-5.4-nano",
+        },
         # When local_models/hub/state.json lists downloads, tier hub ids not marked
         # downloaded are hidden from /models and omitted from the synthesized fallback chain.
         "filter_free_tier_models_by_local_hub": True,
@@ -278,20 +290,20 @@ DEFAULT_CONFIG = {
                 ],
             },
         ],
-        # Gemini-based tier router: gemini-2.5-flash picks a model from tiers via Google AI.
+        # Optional: Gemini tier router (off in defaults — use budget OpenRouter nano first).
         "kimi_router": {
             "router_provider": "gemini",
-            "router_model": "gemini-2.5-flash",
+            "router_model": "",
         },
         "optional_gemini": {
-            "enabled": True,
+            "enabled": False,
             "model": "gemini-2.5-flash",
             "only_rate_limit": True,
             "restore_health_check": True,
         },
         "openrouter_last_resort": {
             "enabled": True,
-            "model": "google/gemini-2.5-flash",
+            "model": "openai/gpt-5.4-nano",
         },
     },
     "credential_pool_strategies": {},
@@ -700,7 +712,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 29,
+    "_config_version": 30,
 }
 
 # =============================================================================
@@ -710,6 +722,7 @@ DEFAULT_CONFIG = {
 # Track which env vars were introduced in each config version.
 # Migration only mentions vars new since the user's previous version.
 ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
+    30: [],
     29: [
         "HERMES_PAPERCLIP_REPO",
         "HERMES_AUTORESEARCH_REPO",
@@ -2695,6 +2708,41 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v29 integrations migration skipped: {e}")
             results["warnings"].append(f"v29 migration: {e}")
             merge_user_config_yaml({"_config_version": 29})
+
+    # ── Version 29 → 30: budget OpenRouter nano fallback + subprocess auto-approve ──
+    if current_ver < 30:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 30,
+                    "subprocess_governance": {
+                        "budget_auto_approve_models": [
+                            "openai/gpt-5.4-nano",
+                            "gpt-5.4-nano",
+                        ],
+                    },
+                    "free_model_routing": {
+                        "budget_openrouter_fallback": {
+                            "enabled": True,
+                            "model": "openai/gpt-5.4-nano",
+                        },
+                        "openrouter_last_resort": {
+                            "enabled": True,
+                            "model": "openai/gpt-5.4-nano",
+                        },
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v30: free_model_routing.budget_openrouter_fallback (openai/gpt-5.4-nano), "
+                    "subprocess_governance.budget_auto_approve_models"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v30 budget-fallback migration skipped: {e}")
+            results["warnings"].append(f"v30 migration: {e}")
+            merge_user_config_yaml({"_config_version": 30})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

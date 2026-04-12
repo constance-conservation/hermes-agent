@@ -52,6 +52,7 @@ openai_primary_mode:
   default_model: gpt-5.4
   codex_model: gpt-5.3-codex
   allowed_subprocess_models:
+    - gpt-5.4-nano
     - gpt-5.4
     - gpt-5.3-codex
   require_direct_openai: true

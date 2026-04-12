@@ -640,11 +640,11 @@ class TestDelegationCredentialResolution(unittest.TestCase):
         self.assertIsNone(creds["base_url"])
         self.assertIsNone(creds["api_key"])
 
-    def test_disallowed_delegation_model_rewritten_to_gemini_flash_when_opm_off(self):
+    def test_disallowed_delegation_model_rewritten_to_budget_nano_when_opm_off(self):
         parent = _make_mock_parent(depth=0)
         cfg = {"model": disallowed_family_fixture_slug(), "provider": ""}
         creds = _resolve_delegation_credentials(cfg, parent)
-        self.assertEqual(creds["model"], "gemini-2.5-flash")
+        self.assertEqual(creds["model"], "openai/gpt-5.4-nano")
         self.assertIsNone(creds["provider"])
 
     @patch("hermes_cli.runtime_provider.resolve_runtime_provider")

@@ -1,12 +1,12 @@
 """Build ``fallback_providers`` from ``free_model_routing`` in config.yaml.
 
-Synthesized order:
+Synthesized order (defaults):
 
-1. **Gemini direct** — default ``gemini-2.5-flash`` via Google AI (Gemini API).
-   Tier ids that are blocklisted are excluded from routing and ``/models``.
-   When every tier target is filtered out, ``fallback_free_routed_model`` supplies
-   the sole tier target.
-2. **Optional Gemini** — last-resort if ``optional_gemini`` is enabled.
+1. **Budget OpenRouter** — ``openai/gpt-5.4-nano`` (cheapest GPT-5.4 tier on the hub)
+   when ``budget_openrouter_fallback`` is enabled.
+2. **Gemini tier router** (optional) — when ``kimi_router.router_model`` is set.
+3. **Optional Gemini** — rate-limit hop when ``optional_gemini`` is enabled.
+4. **OpenRouter last resort** — defaults to the same nano id unless overridden.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_GEMINI_NATIVE = frozenset({"gemini-2.5-flash"})
 _DEFAULT_FALLBACK_FREE_ROUTED = "gemini-2.5-flash"
+_DEFAULT_BUDGET_OPENROUTER_MODEL = "openai/gpt-5.4-nano"
 
 
 def raw_free_model_routing_tiers(fmr: Optional[Dict[str, Any]]) -> Any:
@@ -118,6 +119,19 @@ def normalize_kimi_tiers(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _effective_budget_openrouter_fallback(fmr: Dict[str, Any]) -> tuple[bool, str]:
+    """Return (enabled, model_id) for the first-hop budget fallback (OpenRouter nano by default)."""
+    bo = fmr.get("budget_openrouter_fallback")
+    if bo is None:
+        bo = {"enabled": True, "model": _DEFAULT_BUDGET_OPENROUTER_MODEL}
+    if not isinstance(bo, dict):
+        return False, ""
+    if not bo.get("enabled", True):
+        return False, ""
+    mid = canonical_native_tier_model_id(_strip(bo.get("model"))) or _DEFAULT_BUDGET_OPENROUTER_MODEL
+    return True, mid
+
+
 def _filtered_kimi_tiers(fmr: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Apply optional local-hub download filter to tier hub ids.
 
@@ -168,6 +182,16 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
 
     chain: List[Dict[str, Any]] = []
 
+    _b_en, _b_model = _effective_budget_openrouter_fallback(fmr)
+    if _b_en and _b_model:
+        chain.append(
+            {
+                "provider": "openrouter",
+                "model": _b_model,
+                "only_rate_limit": False,
+            }
+        )
+
     kr = fmr.get("kimi_router") or {}
     if isinstance(kr, dict):
         router_model = canonical_native_tier_model_id(_strip(kr.get("router_model")))
@@ -209,11 +233,11 @@ def build_free_fallback_chain(config: Optional[Dict[str, Any]]) -> List[Dict[str
             }
         )
 
-    # Last resort: OpenRouter with a small Gemini hub id when direct API failed.
+    # Last resort: OpenRouter (defaults to cheapest GPT-5.4 hub tier, not Gemini).
     or_fallback = fmr.get("openrouter_last_resort", {})
     if isinstance(or_fallback, dict) and or_fallback.get("enabled", True):
         _or_model = canonical_native_tier_model_id(
-            _strip(or_fallback.get("model")) or "google/gemini-2.5-flash"
+            _strip(or_fallback.get("model")) or _DEFAULT_BUDGET_OPENROUTER_MODEL
         )
         chain.append(
             {
@@ -252,6 +276,8 @@ def _drop_plain_hf_without_router(entries: List[Dict[str, Any]]) -> List[Dict[st
 def _opm_finalize_fallback_chain(chain: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Under OPM, drop disallowed-family entries; inject one auxiliary hop if empty."""
     try:
+        from agent.disallowed_model_family import model_id_contains_disallowed_family
+        from agent.openai_native_runtime import native_openai_runtime_tuple
         from agent.openai_primary_mode import (
             filter_fallback_chain_disallowed,
             opm_auxiliary_model,
@@ -263,6 +289,22 @@ def _opm_finalize_fallback_chain(chain: List[Dict[str, Any]]) -> List[Dict[str, 
         filtered = filter_fallback_chain_disallowed(chain)
         if filtered:
             return filtered
+        try:
+            from hermes_cli.config import load_config
+
+            cfg = load_config() or {}
+            fmr = cfg.get("free_model_routing")
+            if isinstance(fmr, dict):
+                _b_en, _b_model = _effective_budget_openrouter_fallback(fmr)
+                if _b_en and _b_model and not model_id_contains_disallowed_family(_b_model):
+                    return [{"provider": "openrouter", "model": _b_model, "only_rate_limit": False}]
+        except Exception:
+            pass
+        try:
+            if native_openai_runtime_tuple():
+                return [{"provider": "custom", "model": "gpt-5.4-nano", "only_rate_limit": False}]
+        except Exception:
+            pass
         aux = opm_auxiliary_model()
         return [{"provider": "gemini", "model": aux, "only_rate_limit": False}]
     except Exception:

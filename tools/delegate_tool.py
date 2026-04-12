@@ -619,7 +619,8 @@ def _run_single_child(
             if (os.getenv("HERMES_SESSION_KEY") or "").strip():
                 blocked_msg += (
                     " In this messaging chat, approve with `/approve` (once), `/approve session` "
-                    f"(remember `{child_model}` for this session), or `/approve always` (persisted), "
+                    f"(remember `{child_model}` for this session), `/approve always` (persisted), "
+                    "or **yes**/**approve** when a pending approval is shown; "
                     "then **retry delegation** if this attempt already finished with blocked."
                 )
             logger.warning("delegate_tool: %s", blocked_msg)
@@ -1420,7 +1421,7 @@ def _resolve_delegation_credentials(
     if configured_model and model_id_contains_disallowed_family(str(configured_model)):
         # OPM must still see the disallowed id so it can uplift to native GPT; rewrite only when OPM is off.
         if not opm_enabled_for_session_agent(parent_agent):
-            configured_model = "gemini-2.5-flash"
+            configured_model = "openai/gpt-5.4-nano"
     # region agent log
     _dbg98(
         "H1",
