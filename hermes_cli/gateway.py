@@ -1149,6 +1149,190 @@ def launchd_status(deep: bool = False):
 
 
 # =============================================================================
+# Watchdog LaunchAgent (macOS) — external shell supervisor
+# =============================================================================
+
+
+def get_watchdog_launchd_label() -> str:
+    """launchd label for ``gateway-watchdog.sh``, scoped per HERMES_HOME like the gateway."""
+    suffix = _profile_suffix()
+    return f"ai.hermes.gateway-watchdog-{suffix}" if suffix else "ai.hermes.gateway-watchdog"
+
+
+def get_watchdog_launchd_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{get_watchdog_launchd_label()}.plist"
+
+
+def copy_watchdog_script_to_hermes_home() -> Path:
+    """Copy ``scripts/core/gateway-watchdog.sh`` into ``HERMES_HOME/bin/``."""
+    dest_dir = get_hermes_home() / "bin"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "gateway-watchdog.sh"
+    src = PROJECT_ROOT / "scripts" / "core" / "gateway-watchdog.sh"
+    if not src.is_file():
+        raise FileNotFoundError(f"Missing watchdog script: {src}")
+    shutil.copy2(src, dest)
+    dest.chmod(0o755)
+    return dest
+
+
+def generate_watchdog_launchd_plist() -> str:
+    """LaunchAgent plist that runs ``HERMES_HOME/bin/gateway-watchdog.sh`` with a full PATH."""
+    detected_venv = _detect_venv_dir()
+    venv_bin = str(detected_venv / "bin") if detected_venv else str(PROJECT_ROOT / "venv" / "bin")
+    venv_dir = str(detected_venv) if detected_venv else str(PROJECT_ROOT / "venv")
+    node_bin = str(PROJECT_ROOT / "node_modules" / ".bin")
+    priority_dirs = [venv_bin, node_bin]
+    resolved_node = shutil.which("node")
+    if resolved_node:
+        resolved_node_dir = str(Path(resolved_node).resolve().parent)
+        if resolved_node_dir not in priority_dirs:
+            priority_dirs.append(resolved_node_dir)
+    sane_path = ":".join(
+        dict.fromkeys(priority_dirs + [p for p in os.environ.get("PATH", "").split(":") if p])
+    )
+
+    hermes_home = str(get_hermes_home().resolve())
+    profile_base = str((Path.home() / ".hermes").resolve())
+    script_path = str(Path(hermes_home) / "bin" / "gateway-watchdog.sh")
+    working_dir = str(PROJECT_ROOT)
+    log_dir = get_hermes_home() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    label = get_watchdog_launchd_label()
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>{script_path}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>{working_dir}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{sane_path}</string>
+        <key>VIRTUAL_ENV</key>
+        <string>{venv_dir}</string>
+        <key>HERMES_HOME</key>
+        <string>{hermes_home}</string>
+        <key>HERMES_PROFILE_BASE</key>
+        <string>{profile_base}</string>
+        <key>HERMES_AGENT_DIR</key>
+        <string>{working_dir}</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{log_dir}/gateway-watchdog.launchd.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/gateway-watchdog.launchd.stderr.log</string>
+</dict>
+</plist>
+"""
+
+
+def watchdog_launchd_plist_is_current() -> bool:
+    plist_path = get_watchdog_launchd_plist_path()
+    if not plist_path.exists():
+        return False
+    return _normalize_service_definition(plist_path.read_text(encoding="utf-8")) == _normalize_service_definition(
+        generate_watchdog_launchd_plist()
+    )
+
+
+def watchdog_launchd_install(force: bool = False) -> None:
+    """Install ``gateway-watchdog.sh`` as a LaunchAgent (macOS) or copy script only (Linux)."""
+    dest = copy_watchdog_script_to_hermes_home()
+    print(f"✓ Installed watchdog script: {dest}")
+
+    if not is_macos():
+        print()
+        print("On Linux, enable the systemd user unit (one watchdog per HERMES_HOME):")
+        print("  See: scripts/core/hermes-gateway-watchdog.user.service.example")
+        print("  and website/docs/user-guide/messaging/gateway-watchdog.md")
+        return
+
+    plist_path = get_watchdog_launchd_plist_path()
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    expected = generate_watchdog_launchd_plist()
+    if plist_path.exists() and not force:
+        if watchdog_launchd_plist_is_current():
+            print(f"Watchdog LaunchAgent already installed: {plist_path}")
+            print("Use --force to reinstall")
+            return
+        print(f"↻ Updating watchdog LaunchAgent at: {plist_path}")
+
+    plist_path.write_text(expected, encoding="utf-8")
+    subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+    subprocess.run(["launchctl", "load", str(plist_path)], check=True)
+    print()
+    print("✓ Watchdog LaunchAgent installed and loaded")
+    print()
+    print("Next steps:")
+    label = get_watchdog_launchd_label()
+    print(f"  launchctl start {label}     # if not already running")
+    print(f"  tail -f {get_hermes_home() / 'logs' / 'gateway-watchdog.log'}")
+
+
+def watchdog_launchd_uninstall() -> None:
+    if not is_macos():
+        print("watchdog-uninstall removes the macOS LaunchAgent. On Linux, disable the systemd unit manually.")
+        return
+    plist_path = get_watchdog_launchd_plist_path()
+    subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+    if plist_path.exists():
+        plist_path.unlink()
+    print(f"✓ Removed {plist_path}")
+
+
+def watchdog_launchd_start() -> None:
+    if not is_macos():
+        print("Not supported on this platform.")
+        sys.exit(1)
+    plist_path = get_watchdog_launchd_plist_path()
+    label = get_watchdog_launchd_label()
+    if not plist_path.exists():
+        print("Watchdog LaunchAgent not installed. Run: hermes gateway watchdog-install")
+        sys.exit(1)
+    if not watchdog_launchd_plist_is_current():
+        plist_path.write_text(generate_watchdog_launchd_plist(), encoding="utf-8")
+        subprocess.run(["launchctl", "unload", str(plist_path)], check=False)
+        subprocess.run(["launchctl", "load", str(plist_path)], check=True)
+    try:
+        subprocess.run(["launchctl", "start", label], check=True)
+    except subprocess.CalledProcessError as e:
+        if e.returncode != 3:
+            raise
+        subprocess.run(["launchctl", "load", str(plist_path)], check=True)
+        subprocess.run(["launchctl", "start", label], check=True)
+    print("✓ Watchdog started")
+
+
+def watchdog_launchd_stop() -> None:
+    if not is_macos():
+        print("Not supported on this platform.")
+        sys.exit(1)
+    label = get_watchdog_launchd_label()
+    subprocess.run(["launchctl", "stop", label], check=False)
+    print("✓ Watchdog stopped")
+
+
+# =============================================================================
 # Gateway Runner
 # =============================================================================
 
@@ -1980,11 +2164,48 @@ def gateway_audit_singleton() -> None:
         except Exception as exc:
             print(f"\n(systemctl is-active skipped: {exc})")
 
+    if is_macos():
+        la = Path.home() / "Library" / "LaunchAgents"
+        if la.is_dir():
+            hermes_plists = sorted(
+                p for p in la.glob("ai.hermes.gateway*.plist")
+                if p.is_file()
+            )
+            if hermes_plists:
+                print("\nLaunchAgent plists (ai.hermes.gateway*):")
+                for plist in hermes_plists:
+                    print(f"  {plist.name}")
+            else:
+                print("\nNo LaunchAgent plists matching ai.hermes.gateway*.plist")
+        label = get_launchd_label()
+        try:
+            r = subprocess.run(
+                ["launchctl", "list", label],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            detail = (r.stdout or r.stderr or "").strip()
+            print(f"\nlaunchctl list {label}: exit {r.returncode}")
+            if detail:
+                print(f"  {detail}")
+        except Exception as exc:
+            print(f"\n(launchctl list skipped: {exc})")
+        wd_plist = get_watchdog_launchd_plist_path()
+        print(
+            f"\nWatchdog supervisor: label {get_watchdog_launchd_label()} — "
+            f"plist {'present' if wd_plist.exists() else 'missing'} ({wd_plist.name})"
+        )
+
     print(
-        "\nExpect one supervised gateway per HERMES_HOME. "
-        "`hermes gateway watchdog-check` enforces singletons by default "
+        "\nExpect one supervised gateway per HERMES_HOME on each machine. "
+        "Two hosts (operator workstation + droplet VPS) must not share the same messaging bot tokens — "
+        "they will compete for Telegram/Slack/WhatsApp single-session locks. "
+        "Use separate credentials per environment, or stop one gateway. "
+        "See gateway.status HERMES_GATEWAY_LOCK_INSTANCE if you mirror HERMES_HOME between hosts. "
+        "`hermes gateway watchdog-check` dedupes extra gateway PIDs by default "
         "(disable: HERMES_GATEWAY_WATCHDOG_ENFORCE_SINGLE=0). "
-        "External gateway-watchdog loops may use the same env vars."
+        "On macOS install one external watchdog: `hermes gateway watchdog-install`."
     )
 
 
@@ -2179,6 +2400,23 @@ def gateway_command(args):
             return
         print(reason, file=sys.stderr)
         sys.exit(1)
+
+    elif subcmd == "watchdog-install":
+        force = getattr(args, "force", False)
+        watchdog_launchd_install(force=force)
+        return
+
+    elif subcmd == "watchdog-uninstall":
+        watchdog_launchd_uninstall()
+        return
+
+    elif subcmd == "watchdog-start":
+        watchdog_launchd_start()
+        return
+
+    elif subcmd == "watchdog-stop":
+        watchdog_launchd_stop()
+        return
 
     elif subcmd == "audit-singleton":
         gateway_audit_singleton()

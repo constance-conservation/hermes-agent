@@ -4318,6 +4318,23 @@ For more help on a command:
             "(expect one supervised instance per HERMES_HOME)"
         ),
     )
+
+    gw_watchdog_install = gateway_subparsers.add_parser(
+        "watchdog-install",
+        help=(
+            "Install scripts/core/gateway-watchdog.sh under HERMES_HOME/bin and register a macOS "
+            "LaunchAgent (one supervisor loop per profile; uses flock + watchdog-check). "
+            "On Linux, copies the script and prints systemd unit guidance."
+        ),
+    )
+    gw_watchdog_install.add_argument("--force", action="store_true", help="Overwrite LaunchAgent plist")
+
+    gateway_subparsers.add_parser(
+        "watchdog-uninstall",
+        help="Remove the macOS watchdog LaunchAgent (does not remove HERMES_HOME/bin/gateway-watchdog.sh)",
+    )
+    gateway_subparsers.add_parser("watchdog-start", help="Start the macOS watchdog LaunchAgent")
+    gateway_subparsers.add_parser("watchdog-stop", help="Stop the macOS watchdog LaunchAgent")
     
     # gateway install
     gateway_install = gateway_subparsers.add_parser("install", help="Install gateway as service")
