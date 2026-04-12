@@ -29,6 +29,55 @@ from hermes_constants import display_hermes_home
 # OAuth & Permissions, or append matching **redirect_uri** to the authorize link.
 _DEFAULT_SLACK_OAUTH_REDIRECT_URLS: List[str] = ["https://localhost/slack/oauth_redirect"]
 
+# Bot token scopes for the **operator** Hermes Slack app (Socket Mode). Broad set: public/private
+# channels (incl. create/rename/archive via channels:manage), DMs, MPIMs, files, reactions,
+# bookmarks, pins, user lookup (incl. email), usergroups, assistant typing, etc.
+# After changing, run ``hermes slack manifest-validate`` / ``manifest-update --confirm`` with
+# ``SLACK_CONFIG_TOKEN`` (xoxe), then reinstall the app to the workspace and refresh xoxb/xapp.
+HERMES_SLACK_BOT_TOKEN_SCOPES: tuple[str, ...] = tuple(
+    sorted(
+        {
+            "app_mentions:read",
+            "assistant:write",
+            "bookmarks:read",
+            "bookmarks:write",
+            "channels:history",
+            "channels:join",
+            "channels:manage",
+            "channels:read",
+            "chat:write",
+            "chat:write.customize",
+            "chat:write.public",
+            "commands",
+            "dnd:read",
+            "emoji:read",
+            "files:read",
+            "files:write",
+            "groups:history",
+            "groups:read",
+            "groups:write",
+            "im:history",
+            "im:read",
+            "im:write",
+            "links:read",
+            "links:write",
+            "mpim:history",
+            "mpim:read",
+            "mpim:write",
+            "pins:read",
+            "pins:write",
+            "reactions:read",
+            "reactions:write",
+            "remote_files:read",
+            "team:read",
+            "usergroups:read",
+            "usergroups:write",
+            "users:read",
+            "users:read.email",
+        }
+    )
+)
+
 
 def _slack_urlopen(req: urllib.request.Request, *, timeout: float = 90):
     """HTTPS to Slack with certifi CA bundle when available (avoids macOS Python SSL errors)."""
@@ -248,29 +297,8 @@ def hermes_slack_manifest_dict() -> Dict[str, Any]:
         "oauth_config": {
             "redirect_urls": list(_DEFAULT_SLACK_OAUTH_REDIRECT_URLS),
             "scopes": {
-                "bot": [
-                    "app_mentions:read",
-                    "channels:history",
-                    "channels:join",
-                    "channels:manage",
-                    "channels:read",
-                    "chat:write",
-                    "commands",
-                    "files:read",
-                    "files:write",
-                    "groups:history",
-                    "groups:read",
-                    "groups:write",
-                    "im:history",
-                    "im:read",
-                    "im:write",
-                    "mpim:history",
-                    "mpim:read",
-                    "reactions:read",
-                    "reactions:write",
-                    "users:read",
-                ]
-            }
+                "bot": list(HERMES_SLACK_BOT_TOKEN_SCOPES),
+            },
         },
         "settings": {
             "org_deploy_enabled": False,

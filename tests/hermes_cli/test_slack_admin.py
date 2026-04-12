@@ -81,8 +81,11 @@ def test_hermes_slack_manifest_dict_shape():
     assert any(e.get("command") == "/hermes-help" for e in slash)
     assert len(slash) >= 30
     bot_scopes = set(m["oauth_config"]["scopes"]["bot"])
+    assert len(bot_scopes) >= 35
     assert "channels:manage" in bot_scopes
     assert "groups:write" in bot_scopes
+    assert "assistant:write" in bot_scopes
+    assert "users:read.email" in bot_scopes
     assert m["oauth_config"].get("redirect_urls") == [
         "https://localhost/slack/oauth_redirect"
     ]
