@@ -159,8 +159,17 @@ def _build_child_system_prompt(goal: str, context: Optional[str] = None) -> str:
 
 
 @contextmanager
-def _hermes_profile_env(profile_name: Optional[str]):
-    """Temporarily set HERMES_HOME to profiles/<profile_name> for child construction + run."""
+def _hermes_profile_env(
+    profile_name: Optional[str],
+    *,
+    parent_hermes_home_snapshot: Optional[str] = None,
+):
+    """Temporarily set HERMES_HOME to profiles/<profile_name> for child construction + run.
+
+    Loads the target profile's ``.env`` (via :func:`hermes_cli.env_loader.load_hermes_dotenv`),
+    then optionally fills **missing** process env keys from the delegating profile's ``.env``
+    (see ``delegation.parent_env_overlay_keys``).
+    """
     name = (profile_name or "").strip()
     if not name:
         yield
@@ -178,6 +187,19 @@ def _hermes_profile_env(profile_name: Optional[str]):
         old = os.environ.get("HERMES_HOME")
         try:
             os.environ["HERMES_HOME"] = target
+            try:
+                from hermes_cli.env_loader import load_hermes_dotenv
+
+                load_hermes_dotenv(hermes_home=target)
+            except Exception:
+                logger.debug("delegation: load_hermes_dotenv for child profile failed", exc_info=True)
+            if parent_hermes_home_snapshot:
+                try:
+                    from agent.delegation_env_overlay import apply_parent_env_overlay_for_delegate
+
+                    apply_parent_env_overlay_for_delegate(parent_hermes_home_snapshot)
+                except Exception:
+                    logger.debug("delegation parent env overlay failed", exc_info=True)
             yield
         finally:
             if old is None:
@@ -194,7 +216,13 @@ def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
     return [t for t in toolsets if t not in blocked_toolset_names]
 
 
-def _build_child_progress_callback(task_index: int, parent_agent, task_count: int = 1) -> Optional[callable]:
+def _build_child_progress_callback(
+    task_index: int,
+    parent_agent,
+    task_count: int = 1,
+    *,
+    delegated_profile_slug: Optional[str] = None,
+) -> Optional[callable]:
     """Build a callback that relays child agent tool calls to the parent display.
 
     Two display paths:
@@ -216,6 +244,8 @@ def _build_child_progress_callback(task_index: int, parent_agent, task_count: in
     # Gateway: batch tool names, flush periodically
     _BATCH_SIZE = 5
     _batch: List[str] = []
+    _prof = (delegated_profile_slug or "").strip()
+    _pfx_prof = f"@{_prof} " if _prof else ""
 
     def _callback(tool_name: str, preview: str = None):
         # Special "_thinking" event: model produced text content (reasoning)
@@ -247,7 +277,7 @@ def _build_child_progress_callback(task_index: int, parent_agent, task_count: in
             if len(_batch) >= _BATCH_SIZE:
                 summary = ", ".join(_batch)
                 try:
-                    parent_cb("subagent_progress", f"🔀 {prefix}{summary}")
+                    parent_cb("subagent_progress", f"🔀 {_pfx_prof}{prefix}{summary}")
                 except Exception as e:
                     logger.debug("Parent callback failed: %s", e)
                 _batch.clear()
@@ -257,7 +287,7 @@ def _build_child_progress_callback(task_index: int, parent_agent, task_count: in
         if parent_cb and _batch:
             summary = ", ".join(_batch)
             try:
-                parent_cb("subagent_progress", f"🔀 {prefix}{summary}")
+                parent_cb("subagent_progress", f"🔀 {_pfx_prof}{prefix}{summary}")
             except Exception as e:
                 logger.debug("Parent callback flush failed: %s", e)
             _batch.clear()
@@ -309,6 +339,8 @@ def _build_child_agent(
     override_base_url: Optional[str] = None,
     override_api_key: Optional[str] = None,
     override_api_mode: Optional[str] = None,
+    *,
+    delegated_profile_slug: Optional[str] = None,
 ):
     """
     Build a child AIAgent on the main thread (thread-safe construction).
@@ -339,7 +371,11 @@ def _build_child_agent(
         parent_api_key = parent_agent._client_kwargs.get("api_key")
 
     # Build progress callback to relay tool calls to parent display
-    child_progress_cb = _build_child_progress_callback(task_index, parent_agent)
+    child_progress_cb = _build_child_progress_callback(
+        task_index,
+        parent_agent,
+        delegated_profile_slug=delegated_profile_slug,
+    )
 
     # Each subagent gets its own iteration budget capped at max_iterations
     # (configurable via delegation.max_iterations, default 50).  This means
@@ -1236,8 +1272,10 @@ def delegate_task(
             },
         )
         # endregion
+        chief_home_snapshot = os.environ.get("HERMES_HOME")
         try:
-            with _hermes_profile_env(hp):
+            setattr(parent_agent, "_status_bar_profile_override", hp)
+            with _hermes_profile_env(hp, parent_hermes_home_snapshot=chief_home_snapshot):
                 child = _build_child_agent(
                     task_index=0, goal=t["goal"], context=t.get("context"),
                     toolsets=t.get("toolsets") or toolsets, model=creds["model"],
@@ -1245,11 +1283,13 @@ def delegate_task(
                     override_provider=creds["provider"], override_base_url=creds["base_url"],
                     override_api_key=creds["api_key"],
                     override_api_mode=creds["api_mode"],
+                    delegated_profile_slug=hp,
                 )
                 child._delegate_saved_tool_names = _parent_tool_names
                 children = [(0, t, child)]
                 result = _run_single_child(0, t["goal"], child, parent_agent)
         finally:
+            setattr(parent_agent, "_status_bar_profile_override", None)
             _model_tools._last_resolved_tool_names = _parent_tool_names
         results = [result]
     else:

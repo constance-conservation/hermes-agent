@@ -1506,6 +1506,17 @@ class HermesCLI:
             ("class:status-bar-dim", " · "),
         ]
 
+    @staticmethod
+    def _status_bar_profile_fragments(snapshot: Dict[str, Any]) -> list:
+        pl = (snapshot.get("profile_label") or "").strip()
+        if not pl:
+            return []
+        short = pl if len(pl) <= 22 else f"{pl[:19]}..."
+        return [
+            ("class:status-bar-profile", short),
+            ("class:status-bar-dim", " · "),
+        ]
+
     def _build_context_bar(self, percent_used: Optional[int], width: int = 10) -> str:
         safe_percent = max(0, min(100, percent_used or 0))
         filled = round((safe_percent / 100) * width)
@@ -1533,8 +1544,22 @@ class HermesCLI:
             model_short = f"{model_short[:23]}..."
 
         elapsed_seconds = max(0.0, (datetime.now() - self.session_start).total_seconds())
+        profile_label = ""
+        if agent:
+            profile_label = (getattr(agent, "_status_bar_profile_override", None) or "").strip()
+        if not profile_label:
+            try:
+                from hermes_cli.profiles import get_active_profile_name
+
+                profile_label = (get_active_profile_name() or "").strip()
+            except Exception:
+                profile_label = ""
+        if profile_label in ("", "default"):
+            profile_label = ""
+
         snapshot = {
             "instance_label": self._status_bar_instance_label(),
+            "profile_label": profile_label,
             "model_name": model_name,
             "model_short": model_short,
             "duration": format_duration_compact(elapsed_seconds),
@@ -1632,7 +1657,9 @@ class HermesCLI:
             percent_label = f"{percent}%" if percent is not None else "--"
             duration_label = snapshot["duration"]
             _il = (snapshot.get("instance_label") or "").strip()
-            _pfx = f"⚕ {_il} · " if _il else "⚕ "
+            _pl = (snapshot.get("profile_label") or "").strip()
+            _prof_seg = f"{_pl} · " if _pl else ""
+            _pfx = f"⚕ {_il} · {_prof_seg}" if _il else f"⚕ {_prof_seg}"
 
             if width < 52:
                 text = f"{_pfx}{snapshot['model_short']} · {duration_label}"
@@ -1672,11 +1699,13 @@ class HermesCLI:
                 width = shutil.get_terminal_size((80, 24)).columns
             duration_label = snapshot["duration"]
             inst_fr = self._status_bar_instance_fragments()
+            prof_fr = self._status_bar_profile_fragments(snapshot)
 
             if width < 52:
                 frags = [
                     ("class:status-bar", " ⚕ "),
                     *inst_fr,
+                    *prof_fr,
                     ("class:status-bar-strong", snapshot["model_short"]),
                     ("class:status-bar-dim", " · "),
                     ("class:status-bar-dim", duration_label),
@@ -1689,6 +1718,7 @@ class HermesCLI:
                     frags = [
                         ("class:status-bar", " ⚕ "),
                         *inst_fr,
+                        *prof_fr,
                         ("class:status-bar-strong", snapshot["model_short"]),
                         ("class:status-bar-dim", " · "),
                         (self._status_bar_context_style(percent), percent_label),
@@ -1708,6 +1738,7 @@ class HermesCLI:
                     frags = [
                         ("class:status-bar", " ⚕ "),
                         *inst_fr,
+                        *prof_fr,
                         ("class:status-bar-strong", snapshot["model_short"]),
                         ("class:status-bar-dim", " │ "),
                         ("class:status-bar-dim", context_label),

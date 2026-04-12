@@ -629,6 +629,27 @@ DEFAULT_CONFIG = {
         "api_key": "",     # API key for delegation.base_url (falls back to OPENAI_API_KEY)
         "max_iterations": 50,  # per-subagent iteration cap (each subagent gets its own budget,
                                # independent of the parent's max_iterations)
+        # When ``delegate_task(..., hermes_profile=…)`` runs: after loading the target profile,
+        # fill missing process env vars from the *delegating* profile's ``.env`` for these keys
+        # (chief-only secrets not present in the child profile).
+        "parent_env_overlay_enabled": True,
+        "parent_env_overlay_keys": [
+            "OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY_DROPLET",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "FIRECRAWL_API_KEY",
+            "TAVILY_API_KEY",
+            "PARALLEL_API_KEY",
+            "SLACK_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN",
+            "DISCORD_BOT_TOKEN",
+            "GITHUB_TOKEN",
+            "HF_TOKEN",
+        ],
     },
 
     # Ephemeral prefill messages file — JSON list of {role, content} dicts
@@ -714,7 +735,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 30,
+    "_config_version": 31,
 }
 
 # =============================================================================
@@ -724,6 +745,7 @@ DEFAULT_CONFIG = {
 # Track which env vars were introduced in each config version.
 # Migration only mentions vars new since the user's previous version.
 ENV_VARS_BY_VERSION: Dict[int, List[str]] = {
+    31: [],
     30: [],
     29: [
         "HERMES_PAPERCLIP_REPO",
@@ -2761,6 +2783,44 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v30 budget-fallback migration skipped: {e}")
             results["warnings"].append(f"v30 migration: {e}")
             merge_user_config_yaml({"_config_version": 30})
+
+    # ── Version 30 → 31: delegation parent .env overlay for profile-scoped delegates ──
+    if current_ver < 31:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 31,
+                    "delegation": {
+                        "parent_env_overlay_enabled": True,
+                        "parent_env_overlay_keys": [
+                            "OPENROUTER_API_KEY",
+                            "OPENROUTER_API_KEY_DROPLET",
+                            "OPENAI_API_KEY",
+                            "OPENAI_BASE_URL",
+                            "ANTHROPIC_API_KEY",
+                            "GEMINI_API_KEY",
+                            "GOOGLE_API_KEY",
+                            "FIRECRAWL_API_KEY",
+                            "TAVILY_API_KEY",
+                            "PARALLEL_API_KEY",
+                            "SLACK_BOT_TOKEN",
+                            "TELEGRAM_BOT_TOKEN",
+                            "DISCORD_BOT_TOKEN",
+                            "GITHUB_TOKEN",
+                            "HF_TOKEN",
+                        ],
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v31: delegation.parent_env_overlay_* (chief → child profile env fill)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v31 delegation overlay migration skipped: {e}")
+            results["warnings"].append(f"v31 migration: {e}")
+            merge_user_config_yaml({"_config_version": 31})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

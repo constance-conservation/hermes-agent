@@ -14,7 +14,7 @@ import os
 import sys
 import threading
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from agent.disallowed_model_family import disallowed_family_fixture_slug
 from tools.delegate_tool import (
@@ -183,7 +183,10 @@ class TestDelegateTask(unittest.TestCase):
             hermes_profile="ag-sec-preflight",
             parent_agent=parent,
         ))
-        mock_profile_env.assert_called_once_with("ag-sec-preflight")
+        mock_profile_env.assert_called_once_with(
+            "ag-sec-preflight",
+            parent_hermes_home_snapshot=ANY,
+        )
 
     @patch("tools.delegate_tool._run_single_child")
     def test_single_task_mode(self, mock_run):

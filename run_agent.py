@@ -1272,6 +1272,9 @@ class AIAgent:
         # Provider-reported model from the last successful completion (OpenRouter etc.
         # often resolve openrouter/auto or hub slugs to a concrete upstream id).
         self._last_api_completion_model: Optional[str] = None
+        # CLI status bar: when delegate_task(..., hermes_profile=…) runs, parent briefly sets this
+        # to the delegate slug so the bar shows the active worker profile (not only sticky chief).
+        self._status_bar_profile_override: Optional[str] = None
 
         # Session logs go into ~/.hermes/sessions/ alongside gateway sessions
         hermes_home = get_hermes_home()
