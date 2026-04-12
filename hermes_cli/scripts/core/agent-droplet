@@ -28,6 +28,34 @@ REMOTE_CMD=${REMOTE_CMD%% }
 export HERMES_DROPLET_WORKSTATION_CLI=1
 export HERMES_DROPLET_INTERACTIVE="${HERMES_DROPLET_INTERACTIVE:-1}"
 
+if [[ "${HERMES_REMOTE_VENV_QUIET:-0}" != "1" ]] && [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  _ENV="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
+  _H="" _SU="" _DR=""
+  if [[ -f "$_ENV" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+      k="${line%%=*}"
+      v="${line#*=}"
+      if [[ "$k" == export* ]]; then
+        k="${k#export}"
+        k="${k##[[:space:]]}"
+        k="${k%%[[:space:]]}"
+      fi
+      case "$k" in
+        SSH_TAILSCALE_IP|SSH_IP) _H="$v" ;;
+        SSH_USER) _SU="$v" ;;
+        HERMES_DROPLET_REPO) _DR="$v" ;;
+      esac
+    done <"$_ENV"
+  fi
+  _SU="${_SU:-?}"
+  _H="${_H:-?}"
+  _DR="${_DR:-/home/hermesuser/hermes-agent}"
+  printf '\033[38;5;141m(venv)\033[0m \033[38;5;141m(venv)\033[0m  ssh %s@%s:%s  (local %s)\n' \
+    "$_SU" "$_H" "$_DR" "${VIRTUAL_ENV}" >&2
+  unset _ENV _H _SU _DR k v line
+fi
+
 # Do not allow env-file SSH passphrase auto-fill for operator interactive hop (AGENTS.md).
 exec env -u HERMES_DROPLET_ALLOW_ENV_PASSPHRASE \
   HERMES_DROPLET_REQUIRE_SUDO="${HERMES_DROPLET_REQUIRE_SUDO:-1}" \

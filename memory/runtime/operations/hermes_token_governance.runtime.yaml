@@ -4,7 +4,7 @@
 # Route-down requires DISTINCT tier_models (cheap → capable). A prior edit forced
 # gpt-5.4 for A–E, which disabled meaningful per-tier downshifts — restored ladder below.
 
-version: 2
+version: 3
 enabled: true
 max_agent_turns: 50
 dynamic_tier_routing: true
@@ -47,7 +47,8 @@ delegation:
   large_context_threshold_tokens: 10000
 
 openai_primary_mode:
-  enabled: true
+  # When false, Hermes does not apply OpenAI-primary routing/coercion (OPM ladder, native-first policy).
+  enabled: false
   default_model: gpt-5.4-mini
   codex_model: gpt-5.3-codex
   allowed_subprocess_models:

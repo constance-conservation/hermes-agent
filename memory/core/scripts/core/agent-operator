@@ -26,5 +26,33 @@ REMOTE_CMD=${REMOTE_CMD%% }
 export HERMES_OPERATOR_WORKSTATION_CLI=1
 export HERMES_OPERATOR_INTERACTIVE="${HERMES_OPERATOR_INTERACTIVE:-1}"
 
+if [[ "${HERMES_REMOTE_VENV_QUIET:-0}" != "1" ]] && [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  _ENV="${HERMES_OPERATOR_ENV:-${HERMES_DROPLET_ENV:-${HOME}/.env/.env}}"
+  _MH="" _MR="" _MU=""
+  if [[ -f "$_ENV" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+      k="${line%%=*}"
+      v="${line#*=}"
+      if [[ "$k" == export* ]]; then
+        k="${k#export}"
+        k="${k##[[:space:]]}"
+        k="${k%%[[:space:]]}"
+      fi
+      case "$k" in
+        MACMINI_SSH_USER) _MU="$v" ;;
+        MACMINI_SSH_HOST) _MH="$v" ;;
+        SSH_IP_OPERATOR) [[ "$v" != *"@"* ]] && _MH="$v" ;;
+        HERMES_OPERATOR_REPO) _MR="$v" ;;
+      esac
+    done <"$_ENV"
+  fi
+  _MU="${_MU:-${MACMINI_SSH_USER:-operator}}"
+  _MR="${_MR:-/Users/${_MU}/hermes-agent}"
+  printf '\033[38;5;141m(venv)\033[0m \033[38;5;141m(venv)\033[0m  ssh %s@%s:%s  (local %s)\n' \
+    "$_MU" "${_MH:-?}" "$_MR" "${VIRTUAL_ENV}" >&2
+  unset _ENV _MH _MR _MU k v line
+fi
+
 exec env -u HERMES_DROPLET_ALLOW_ENV_PASSPHRASE -u HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE \
   bash "${_HERE}/ssh_operator.sh" "$REMOTE_CMD"

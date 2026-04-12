@@ -923,6 +923,22 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
         "advanced": True,
     },
+    "HERMES_OPENAI_PRIMARY_MODE": {
+        "description": "Set to 0/false/off to disable OpenAI-primary mode (OPM) for the process regardless of config/runtime.",
+        "prompt": "HERMES_OPENAI_PRIMARY_MODE (0 to disable OPM, optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_OPM_ENABLED": {
+        "description": "Alias: set to 0/false/off to disable OPM for the process (same as HERMES_OPENAI_PRIMARY_MODE=0).",
+        "prompt": "HERMES_OPM_ENABLED (0 to disable OPM, optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
     "HERMES_MANUAL_PIPELINE_BYPASS_OPM": {
         "description": "When 1 (default unset), manual /models picks disable OPM model coercion; set to 0 to force OPM even on manual picks.",
         "prompt": "HERMES_MANUAL_PIPELINE_BYPASS_OPM (1/0, optional)",

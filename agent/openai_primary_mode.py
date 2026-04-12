@@ -44,6 +44,19 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _opm_env_forces_disable() -> bool:
+    """Process env forces OPM off (same effect as ``openai_primary_mode.enabled: false``).
+
+    ``HERMES_OPENAI_PRIMARY_MODE`` / ``HERMES_OPM_ENABLED``: ``0``, ``false``, ``no``, ``off``.
+    Checked last in merge so config/runtime cannot re-enable while these are set.
+    """
+    for key in ("HERMES_OPENAI_PRIMARY_MODE", "HERMES_OPM_ENABLED"):
+        v = (os.environ.get(key) or "").strip().lower()
+        if v in ("0", "false", "no", "off"):
+            return True
+    return False
+
+
 def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = dict(base)
     for key, value in override.items():
@@ -128,6 +141,10 @@ def _resolve_openai_primary_mode_impl(parent_agent: Any = None) -> Tuple[Dict[st
     except Exception:
         has_native_openai_runtime = False
 
+    env_force_disable = _opm_env_forces_disable()
+    if env_force_disable:
+        merged["enabled"] = False
+
     meta = {
         "enabled": is_truthy_value(merged.get("enabled"), default=False),
         "source": source,
@@ -136,6 +153,7 @@ def _resolve_openai_primary_mode_impl(parent_agent: Any = None) -> Tuple[Dict[st
         "has_parent_cached": bool(parent_opm),
         "has_native_openai_runtime": has_native_openai_runtime,
         "require_direct_openai": bool(merged.get("require_direct_openai", True)),
+        "opm_env_force_disable": env_force_disable,
     }
     return merged, meta
 

@@ -115,6 +115,7 @@ hermes_cli = [
     "scripts/core/agent-operator",
     "scripts/core/ssh_operator.sh",
     "scripts/core/operator_remote_venv.sh",
+    "scripts/core/operator_interactive.bashrc",
 ]
 agent = ["data/*.json"]
 

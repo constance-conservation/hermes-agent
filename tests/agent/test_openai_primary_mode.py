@@ -173,6 +173,22 @@ def test_opm_enabled_truthy_string_enabled(monkeypatch):
     assert opm_enabled() is True
 
 
+def test_opm_env_forces_off_despite_config_true(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"openai_primary_mode": {"enabled": True}},
+    )
+    monkeypatch.setattr("agent.token_governance_runtime.load_runtime_config", lambda: {})
+    monkeypatch.setenv("HERMES_OPENAI_PRIMARY_MODE", "0")
+    assert opm_enabled() is False
+    opm, meta = resolve_openai_primary_mode(None)
+    assert meta.get("opm_env_force_disable") is True
+    assert opm.get("enabled") is False
+    monkeypatch.delenv("HERMES_OPENAI_PRIMARY_MODE", raising=False)
+    monkeypatch.setenv("HERMES_OPM_ENABLED", "off")
+    assert opm_enabled() is False
+
+
 def test_is_opm_blocked_openrouter_auto_slug():
     assert is_opm_blocked_openrouter_auto_slug("openrouter/auto")
     assert is_opm_blocked_openrouter_auto_slug("openrouter-auto")

@@ -72,6 +72,9 @@ MACMINI_USER="${MACMINI_USER:-operator}"
   exit 1
 }
 
+_OPERATOR_REPO_DISP="${HERMES_OPERATOR_REPO_REMOTE:-/Users/${MACMINI_USER}/hermes-agent}"
+HERMES_OPERATOR_SSH_DST="${MACMINI_USER}@${MACMINI_HOST}:${_OPERATOR_REPO_DISP}"
+
 if [[ "${HERMES_OPERATOR_WORKSTATION_CLI:-0}" == "1" ]]; then
   _ALLOW_ENV_PASS_FROM_FILE=0
   _RAW_SSH_PASSPHRASE=""
@@ -140,6 +143,8 @@ if [[ -n "$HERMES_OPERATOR_REPO_REMOTE" ]]; then
   _rq=$(printf '%q' "$HERMES_OPERATOR_REPO_REMOTE")
   _REPO_EXPORT="export HERMES_OPERATOR_REPO=${_rq}; "
 fi
+_qdst=$(printf '%q' "$HERMES_OPERATOR_SSH_DST")
+_REPO_EXPORT+="export HERMES_OPERATOR_SSH_DST=${_qdst}; "
 
 if [[ $# -eq 0 ]]; then
   _INNER="${_REPO_EXPORT}$(_operator_interactive_shell_cmd)"

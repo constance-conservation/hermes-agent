@@ -1,8 +1,9 @@
 """Tests for /approve and /deny gateway commands.
 
 Verifies that dangerous command approvals use the blocking gateway approval
-mechanism — the agent thread blocks until the user responds with /approve
-or /deny, mirroring the CLI's synchronous input() flow.
+mechanism — the agent thread blocks until the user responds with /approve,
+/deny, or a short natural-language reply when a FIFO is pending, mirroring
+the CLI's synchronous input() flow.
 
 Supports multiple concurrent approvals (parallel subagents, execute_code)
 via a per-session queue.
@@ -415,29 +416,74 @@ class TestDenyCommand:
 
 
 # ------------------------------------------------------------------
-# Bare "yes" must NOT trigger approval
+# Natural language when (and only when) a blocking FIFO exists
 # ------------------------------------------------------------------
 
 
-class TestBareTextNoLongerApproves:
+class TestNaturalLanguageBlockingApproval:
 
     def setup_method(self):
         _clear_approval_state()
 
-    @pytest.mark.asyncio
-    async def test_yes_does_not_execute_pending_command(self):
-        """Saying 'yes' must not trigger approval. Only /approve works."""
+    def test_parse_nl_basic(self):
+        from tools.approval import parse_gateway_approval_natural_language as parse_nl
+
+        assert parse_nl("yes") == {"action": "approve", "choice": "once", "resolve_all": False}
+        assert parse_nl("no") == {"action": "deny", "resolve_all": False}
+        assert parse_nl("approve all") == {"action": "approve", "choice": "once", "resolve_all": True}
+        assert parse_nl("deny all") == {"action": "deny", "resolve_all": True}
+        assert parse_nl("maybe later") is None
+        assert parse_nl("yes\nno") is None
+
+    def test_apply_parsed_resolves_queue(self):
         from tools.approval import _ApprovalEntry, _gateway_queues
 
         runner = _make_runner()
         source = _make_source()
         session_key = runner._session_key_for_source(source)
-
         entry = _ApprovalEntry({"command": "test"})
         _gateway_queues[session_key] = [entry]
 
-        # "yes" is not /approve — entry should still be pending
-        assert not entry.event.is_set()
+        out = runner._apply_parsed_blocking_approval(
+            session_key, {"action": "approve", "choice": "once", "resolve_all": False}
+        )
+        assert "approved" in out.lower()
+        assert entry.event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_yes_message_resolves_via_handle_message(self):
+        """Plain 'yes' resolves the FIFO when a blocking approval is pending."""
+        from tools.approval import _ApprovalEntry, _gateway_queues
+
+        runner = _make_runner()
+        source = _make_source()
+        session_key = runner._session_key_for_source(source)
+        entry = _ApprovalEntry({"command": "test"})
+        _gateway_queues[session_key] = [entry]
+
+        event = _make_event("yes")
+        result = await runner._handle_message(event)
+        assert result and "approved" in result.lower()
+        assert entry.event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_approve_while_agent_running_does_not_interrupt(self):
+        """/approve must resolve blocking wait instead of agent.interrupt()."""
+        from tools.approval import _ApprovalEntry, _gateway_queues
+
+        runner = _make_runner()
+        source = _make_source()
+        session_key = runner._session_key_for_source(source)
+        entry = _ApprovalEntry({"command": "test"})
+        _gateway_queues[session_key] = [entry]
+
+        mock_agent = MagicMock()
+        runner._running_agents[session_key] = mock_agent
+
+        result = await runner._handle_message(_make_event("/approve"))
+        assert result and "approved" in result.lower()
+        mock_agent.interrupt.assert_not_called()
+        assert entry.event.is_set()
 
 
 # ------------------------------------------------------------------
