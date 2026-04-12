@@ -399,6 +399,14 @@ class TestSendToPlatformChunking:
 
 
 class TestSendToPlatformWhatsapp:
+    def test_normalize_whatsapp_bare_phone_to_jid(self):
+        from tools.send_message_tool import _normalize_whatsapp_chat_id_for_send
+
+        assert _normalize_whatsapp_chat_id_for_send("61483757391") == "61483757391@s.whatsapp.net"
+        assert _normalize_whatsapp_chat_id_for_send("+61483757391") == "61483757391@s.whatsapp.net"
+        assert _normalize_whatsapp_chat_id_for_send("61483757391@s.whatsapp.net") == "61483757391@s.whatsapp.net"
+        assert _normalize_whatsapp_chat_id_for_send("120363@g.us") == "120363@g.us"
+
     def test_whatsapp_routes_via_local_bridge_sender(self):
         chat_id = "test-user@lid"
         async_mock = AsyncMock(return_value={"success": True, "platform": "whatsapp", "chat_id": chat_id, "message_id": "abc123"})

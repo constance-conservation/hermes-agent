@@ -21,6 +21,22 @@ _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".3gp"}
 _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a"}
 _VOICE_EXTS = {".ogg", ".opus"}
 
+# Bare E.164 / national number strings must become @s.whatsapp.net JIDs or Baileys
+# may throw (jidDecode undefined) when sending.
+_WHATSAPP_BARE_PHONE_RE = re.compile(r"^\+?(\d{8,15})$")
+
+
+def _normalize_whatsapp_chat_id_for_send(chat_id: str) -> str:
+    if not chat_id:
+        return chat_id
+    s = str(chat_id).strip()
+    if "@" in s:
+        return s
+    m = _WHATSAPP_BARE_PHONE_RE.match(s)
+    if m:
+        return f"{m.group(1)}@s.whatsapp.net"
+    return s
+
 
 SEND_MESSAGE_SCHEMA = {
     "name": "send_message",
@@ -554,6 +570,7 @@ async def _send_whatsapp(extra, chat_id, message):
         import aiohttp
     except ImportError:
         return {"error": "aiohttp not installed. Run: pip install aiohttp"}
+    chat_id = _normalize_whatsapp_chat_id_for_send(chat_id)
     try:
         bridge_port = extra.get("bridge_port", 3000)
         async with aiohttp.ClientSession() as session:

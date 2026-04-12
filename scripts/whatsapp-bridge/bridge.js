@@ -122,7 +122,12 @@ let lidToPhone = buildLidMap();
  */
 function resolveOutboundChatJid(raw) {
   if (!raw) return raw;
-  const s = String(raw);
+  const s = String(raw).trim();
+  // Bare E.164 / digits only — Baileys needs a full JID (sendMessage may throw if jidDecode fails).
+  const bare = s.replace(/^\+/, '');
+  if (/^\d{8,15}$/.test(bare) && !s.includes('@')) {
+    return jidEncode(bare, 's.whatsapp.net');
+  }
   const cand = jidNormalizedUser(s) || s;
   const d = jidDecode(cand);
   if (!d) return cand;
