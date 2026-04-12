@@ -14,7 +14,7 @@ import re
 import sys
 import threading
 import unicodedata
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +328,175 @@ def has_blocking_approval(session_key: str) -> bool:
     """Check if a session has one or more blocking gateway approvals waiting."""
     with _lock:
         return bool(_gateway_queues.get(session_key))
+
+
+def _normalize_gateway_approval_nl(text: str) -> str:
+    """Normalize user text for natural-language approval matching."""
+    t = unicodedata.normalize("NFKC", text or "").strip().lower()
+    t = re.sub(r"[`'’]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    t = t.strip(".,!?;:：。、")
+    return t
+
+
+def parse_gateway_approval_natural_language(text: str) -> Optional[dict[str, Any]]:
+    """Parse a short natural-language reply as a gateway blocking approval.
+
+    **Only call when** :func:`has_blocking_approval` is already true for the
+    session. The parser is conservative: casual chat must not match.
+
+    Returns a dict with:
+
+    - ``action``: ``\"approve\"`` or ``\"deny\"``
+    - ``choice``: ``\"once\"`` | ``\"session\"`` | ``\"always\"`` (approve only)
+    - ``resolve_all``: whether to resolve every queued approval
+
+    Returns ``None`` if the text is not a clear standalone approval reply.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if len(lines) > 1:
+        return None
+    s = _normalize_gateway_approval_nl(lines[0])
+    if not s or len(s) > 100:
+        return None
+
+    # Multi-token phrases first (scope + "all").
+    if s in (
+        "approve all always",
+        "approve all permanently",
+        "always approve all",
+    ):
+        return {"action": "approve", "choice": "always", "resolve_all": True}
+    if s in ("approve all session", "session approve all"):
+        return {"action": "approve", "choice": "session", "resolve_all": True}
+    if s in (
+        "deny all",
+        "reject all",
+        "cancel all",
+        "disallow all",
+        "no to all",
+        "reject everything",
+        "deny everything",
+    ):
+        return {"action": "deny", "resolve_all": True}
+    if s in (
+        "approve all",
+        "yes all",
+        "ok all",
+        "confirm all",
+        "allow all",
+        "approve them all",
+        "approve both",
+    ):
+        return {"action": "approve", "choice": "once", "resolve_all": True}
+    if s in (
+        "approve always",
+        "always approve",
+        "approve permanently",
+        "permanently approve",
+        "approve forever",
+    ):
+        return {"action": "approve", "choice": "always", "resolve_all": False}
+    if s in (
+        "approve session",
+        "session approve",
+        "for this session",
+        "this session only",
+        "session only",
+        "just this session",
+    ):
+        return {"action": "approve", "choice": "session", "resolve_all": False}
+
+    _deny_once = frozenset(
+        {
+            "no",
+            "n",
+            "nope",
+            "nah",
+            "nay",
+            "deny",
+            "denied",
+            "reject",
+            "rejected",
+            "cancel",
+            "cancelled",
+            "canceled",
+            "veto",
+            "stop",
+            "negative",
+            "👎",
+            "❌",
+            "✗",
+            "✘",
+        }
+    )
+    _approve_once = frozenset(
+        {
+            "yes",
+            "y",
+            "yeah",
+            "yep",
+            "yup",
+            "ya",
+            "ok",
+            "okay",
+            "k",
+            "sure",
+            "fine",
+            "approve",
+            "approved",
+            "approval",
+            "confirm",
+            "confirmed",
+            "allow",
+            "allowing",
+            "proceed",
+            "granted",
+            "affirmative",
+            "positive",
+            "👍",
+            "👌",
+            "✅",
+            "✔",
+            "✓",
+        }
+    )
+    _approve_phrase = frozenset(
+        {
+            "go ahead",
+            "do it",
+            "do that",
+            "sounds good",
+            "looks good",
+            "lgtm",
+            "all good",
+            "please do",
+            "thats fine",
+            "thats ok",
+            "thats okay",
+            "not now",
+        }
+    )
+
+    if s == "session":
+        return {"action": "approve", "choice": "session", "resolve_all": False}
+    if s in ("always", "permanently", "forever"):
+        return {"action": "approve", "choice": "always", "resolve_all": False}
+
+    if s in _deny_once:
+        return {"action": "deny", "resolve_all": False}
+    if s in _approve_once:
+        return {"action": "approve", "choice": "once", "resolve_all": False}
+    if s in _approve_phrase:
+        # "not now" is a soft deny
+        if s == "not now":
+            return {"action": "deny", "resolve_all": False}
+        return {"action": "approve", "choice": "once", "resolve_all": False}
+
+    return None
 
 
 def pending_approval_count(session_key: str) -> int:
