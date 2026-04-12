@@ -79,7 +79,8 @@ def _urlopen(req: urllib.request.Request, *, timeout: float = 60):
 
 
 def _api(method: str, token: str, **kwargs: Any) -> dict[str, Any]:
-    body = {"token": token, **kwargs}
+    merged = {k: v for k, v in kwargs.items() if v is not None}
+    body = {"token": token, **merged}
     data = urllib.parse.urlencode(body).encode("utf-8")
     req = urllib.request.Request(
         f"https://slack.com/api/{method}",
@@ -133,13 +134,13 @@ def main() -> int:
     cursor = ""
     channel_ids: list[str] = []
     while len(channel_ids) < args.max_channels:
-        page = _api(
-            "conversations.list",
-            tok,
-            types="public_channel,private_channel",
-            limit=200,
-            cursor=cursor or None,
-        )
+        list_kw: dict[str, Any] = {
+            "types": "public_channel,private_channel",
+            "limit": 200,
+        }
+        if cursor:
+            list_kw["cursor"] = cursor
+        page = _api("conversations.list", tok, **list_kw)
         if not page.get("ok"):
             print(f"conversations.list failed: {page.get('error')}", file=sys.stderr)
             break
