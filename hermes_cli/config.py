@@ -260,6 +260,8 @@ DEFAULT_CONFIG = {
         "budget_auto_approve_models": [
             "openai/gpt-5.4-nano",
             "gpt-5.4-nano",
+            "openai/gpt-4.1-nano",
+            "gpt-4.1-nano",
         ],
     },
     "free_model_routing": {

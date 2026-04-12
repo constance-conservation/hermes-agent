@@ -1135,10 +1135,10 @@ class TestDelegationProviderIntegration(unittest.TestCase):
                 self.assertEqual(call.kwargs.get("override_api_mode"), "chat_completions")
 
     @patch("tools.delegate_tool._build_child_agent")
-    @patch("agent.subprocess_governance.is_free_subprocess_model", return_value=True)
+    @patch("agent.subprocess_governance.requires_operator_approval", return_value=False)
     @patch(
-        "agent.subprocess_governance.default_free_subprocess_model_id",
-        return_value="gemini-2.5-flash",
+        "agent.subprocess_governance.default_budget_nano_subprocess_model_id",
+        return_value="openai/gpt-5.4-nano",
     )
     @patch(
         "agent.subprocess_governance.enforce_subprocess_model_policy",
@@ -1147,8 +1147,8 @@ class TestDelegationProviderIntegration(unittest.TestCase):
     def test_opm_denied_paid_model_does_not_autofallback_to_free_tier_model(
         self,
         _mock_policy,
-        _mock_default_free,
-        _mock_is_free,
+        _mock_default_budget_nano,
+        _mock_req_approval,
         mock_build_child,
     ):
         from tools import delegate_tool as dt

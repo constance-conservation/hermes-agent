@@ -3,6 +3,23 @@ from types import SimpleNamespace
 from agent.disallowed_model_family import model_id_contains_disallowed_family
 
 
+def test_gpt_nano_family_auto_approved_without_explicit_budget_list(monkeypatch):
+    """gpt-4.1-nano and openai/gpt-*-nano must not require /approve for subprocess/delegation."""
+    from agent import subprocess_governance as sg
+
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"subprocess_governance": {}})
+    ok, reason = sg.enforce_subprocess_model_policy(
+        "openai/gpt-4.1-nano",
+        "goal",
+        "tid",
+        parent_agent=None,
+    )
+    assert ok is True
+    assert "nano" in reason
+    assert sg.requires_operator_approval("gpt-5-nano") is False
+    assert sg.requires_operator_approval("openai/gpt-5.4-nano") is False
+
+
 def test_default_free_subprocess_model_never_disallowed_family_when_opm_enabled(monkeypatch):
     from agent import subprocess_governance as sg
 

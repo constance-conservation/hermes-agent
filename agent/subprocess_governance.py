@@ -11,6 +11,10 @@ TRULY FREE models (zero API cost — local inference only):
   - Any model served via HERMES_LOCAL_INFERENCE_BASE_URL (self-hosted)
   - Slugs under ``local/`` (self-hosted naming convention)
 
+Budget **GPT nano** family (``gpt-*-nano``, e.g. ``openai/gpt-4.1-nano``, ``openai/gpt-5.4-nano``):
+  - Treated like ``subprocess_governance.budget_auto_approve_models`` — no gateway /approve block
+    (still billed via OpenRouter or native OpenAI).
+
 LOW-COST models (Gemini API — small but non-zero cost per call):
   - google/gemini-2.5-flash, etc. — require approval unless covered by OPM/budget rules.
 
@@ -20,7 +24,7 @@ effective allowlist and subprocess fallback candidate order).
 
 Policy rules:
 1. Free local models: no approval.
-2. Configured budget auto-approve models: no blocking approval (still billed).
+2. Configured budget auto-approve models + any ``gpt-*-nano`` slug: no blocking approval (still billed).
 3. OPM-allowed native OpenAI slugs: no blocking approval when credentials resolve.
 4. Otherwise: operator approval via callback or gateway /approve.
 5. Subprocesses have a hard max duration of SUBPROCESS_MAX_SECONDS (default 300 / 5 min).
@@ -30,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +54,17 @@ logger = logging.getLogger(__name__)
 # When ``allowed_subprocess_models`` is missing or empty after YAML merge, treat as
 # “use OPM primary defaults” (same ids as ``hermes_cli.config.DEFAULT_CONFIG``).
 _DEFAULT_OPM_SUBPROCESS_CORE_MODELS: tuple[str, ...] = ("gpt-5.4", "gpt-5.3-codex")
+
+# Native core id ending in ``-nano`` (gpt-4.1-nano, gpt-5.4-nano, gpt-5-nano, …).
+_GPT_NANO_CORE_RE = re.compile(r"^gpt-.+-nano$")
+
+
+def _is_budget_gpt_nano_family(model_id: str) -> bool:
+    """True for slugs whose OpenAI-style core is ``gpt-*-nano`` (budget GPT tier)."""
+    core = _opm_subprocess_core_model(str(model_id or ""))
+    if not core or "/" in core:
+        return False
+    return bool(_GPT_NANO_CORE_RE.match(core.lower()))
 
 
 def _opm_subprocess_core_model(mid: str) -> str:
@@ -276,9 +292,34 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     return "openai/gpt-5.4-nano"
 
 
+def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
+    """Preferred ``openai/gpt-*-nano`` id when rewriting a blocked delegate/subprocess.
+
+    Uses the first nano entry in ``subprocess_governance.budget_auto_approve_models`` when
+    present, else ``openai/gpt-5.4-nano``.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        raw = cfg.get("subprocess_governance") or {}
+        ids = raw.get("budget_auto_approve_models")
+        if not isinstance(ids, list) or not ids:
+            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+        for x in ids:
+            s = str(x).strip()
+            if s and _is_budget_gpt_nano_family(s):
+                return _norm_subprocess_slug(s)
+    except Exception:
+        pass
+    return "openai/gpt-5.4-nano"
+
+
 def requires_operator_approval(model_id: str) -> bool:
     """True when the model needs an explicit approval prompt (not free / not budget-auto)."""
     if is_free_subprocess_model(model_id):
+        return False
+    if _is_budget_gpt_nano_family(model_id):
         return False
     try:
         from hermes_cli.config import load_config
@@ -300,8 +341,8 @@ def _norm_subprocess_slug(mid: str) -> str:
     s = (mid or "").strip().lower()
     if s.startswith("openai/"):
         return s
-    if s == "gpt-5.4-nano":
-        return "openai/gpt-5.4-nano"
+    if _GPT_NANO_CORE_RE.match(s):
+        return f"openai/{s}"
     return s
 
 
@@ -598,6 +639,20 @@ def enforce_subprocess_model_policy(
             return True, "budget_auto_approve"
     except Exception:
         pass
+
+    if _is_budget_gpt_nano_family(model_id):
+        register_subprocess(task_id, model_id, goal, approved=True)
+        emit_routing_decision_trace(
+            stage="subprocess_governance_gate",
+            chosen_model=str(model_id or ""),
+            chosen_provider=str(getattr(parent_agent, "provider", "") or ""),
+            reason_code="budget_subprocess_auto_approve_gpt_nano_family",
+            opm_enabled=False,
+            opm_source="",
+            tier_source="subprocess_policy",
+            session_id=str(getattr(parent_agent, "session_id", "") or "") if parent_agent else "",
+        )
+        return True, "budget_auto_approve_gpt_nano_family"
 
     # openai_primary_mode: bypass paid-model block for whitelisted OpenAI models
     if _is_openai_primary_mode_allowed(model_id, parent_agent):

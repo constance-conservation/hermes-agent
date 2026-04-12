@@ -475,6 +475,44 @@ def _resolve_free_fallback_runtime(child: Any, parent_agent: Any) -> Optional[Di
     return None
 
 
+def _resolve_budget_subprocess_fallback_runtime(
+    child: Any, parent_agent: Any, fb_model: str
+) -> Optional[Dict[str, Any]]:
+    """HTTP stack for rerunning a subprocess with a budget ``openai/gpt-*-nano`` slug (OpenRouter)."""
+    _fb = (fb_model or "").strip().lower()
+    if not _fb.startswith("openai/") and "gpt-" not in _fb:
+        return None
+    try:
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        rt = resolve_runtime_provider(requested="openrouter")
+        if rt and (rt.get("api_key") or "").strip():
+            out = dict(rt)
+            out["provider"] = (out.get("provider") or "openrouter").strip().lower() or "openrouter"
+            return out
+    except Exception:
+        logger.debug("delegate_tool: resolve openrouter for budget nano fallback failed", exc_info=True)
+
+    for ag in (child, parent_agent):
+        if ag is None:
+            continue
+        prov = (getattr(ag, "provider", None) or "").strip().lower()
+        bu = (getattr(ag, "base_url", None) or "").strip().lower()
+        ak = (getattr(ag, "api_key", None) or "").strip()
+        if not ak and hasattr(ag, "_client_kwargs"):
+            ck = getattr(ag, "_client_kwargs", None) or {}
+            if isinstance(ck, dict):
+                ak = (ck.get("api_key") or "").strip()
+        if ak and (prov == "openrouter" or "openrouter" in bu):
+            return {
+                "provider": "openrouter",
+                "base_url": (getattr(ag, "base_url", None) or "").strip().rstrip("/"),
+                "api_key": ak,
+                "api_mode": getattr(ag, "api_mode", None) or "chat_completions",
+            }
+    return None
+
+
 def _run_single_child(
     task_index: int,
     goal: str,
@@ -491,7 +529,8 @@ def _run_single_child(
 
     Subprocess governance is applied here:
     - Checks model cost class before running.
-    - Requires operator approval for any non-free (paid) model.
+    - Budget GPT nano (gpt-*-nano) and configured budget_auto_approve_models run without approval;
+      other paid models may require operator approval or gateway /approve.
     - Enforces max duration (SUBPROCESS_MAX_SECONDS = 5 min).
     - Notifies parent agent on completion.
     """
@@ -503,10 +542,10 @@ def _run_single_child(
     try:
         from agent.subprocess_governance import (
             SUBPROCESS_MAX_SECONDS,
-            default_free_subprocess_model_id,
+            default_budget_nano_subprocess_model_id,
             enforce_subprocess_model_policy,
-            is_free_subprocess_model,
             notify_completion,
+            requires_operator_approval,
         )
         _gov_approved, _gov_reason = enforce_subprocess_model_policy(
             child_model,
@@ -543,20 +582,22 @@ def _run_single_child(
                 and child is not None
                 and parent_agent is not None
             ):
-                fb_model = default_free_subprocess_model_id(parent_agent)
+                fb_model = default_budget_nano_subprocess_model_id(parent_agent)
                 if (
                     fb_model
-                    and is_free_subprocess_model(fb_model)
+                    and not requires_operator_approval(fb_model)
                     and fb_model.strip().lower() != (child_model or "").strip().lower()
                 ):
                     try:
-                        rt = _resolve_free_fallback_runtime(child, parent_agent)
+                        rt = _resolve_budget_subprocess_fallback_runtime(
+                            child, parent_agent, fb_model
+                        )
                         if rt and (rt.get("api_key") or "").strip():
                             _emit_fb = getattr(parent_agent, "_emit_status", None)
                             if callable(_emit_fb):
                                 _emit_fb(
                                     f"↪ Subprocess: paid model {child_model!r} not allowed for "
-                                    f"delegation — switching to free model {fb_model!r} and continuing.",
+                                    f"delegation — switching to budget nano {fb_model!r} and continuing.",
                                     "subprocess_governance",
                                 )
                             emit_routing_decision_trace(
@@ -613,7 +654,8 @@ def _run_single_child(
             blocked_msg = (
                 f"Subprocess blocked by governance policy: model {child_model!r} "
                 f"requires operator approval for background/subprocess use. "
-                f"Only free local models (local inference or local/ slugs) are permitted without approval. "
+                f"Free local models, budget GPT nano (gpt-*-nano), and configured budget_auto_approve_models "
+                f"run without approval; other paid models need approval. "
                 f"Reason: {_gov_reason}"
             )
             if (os.getenv("HERMES_SESSION_KEY") or "").strip():
