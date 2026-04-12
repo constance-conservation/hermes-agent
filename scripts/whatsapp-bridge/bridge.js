@@ -18,7 +18,16 @@
  *   node bridge.js --port 3000 --session ~/.hermes/whatsapp/session
  */
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } from '@whiskeysockets/baileys';
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  downloadMediaMessage,
+  jidDecode,
+  jidEncode,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -102,6 +111,34 @@ function buildLidMap() {
   return map;
 }
 let lidToPhone = buildLidMap();
+
+/**
+ * sendMessage() is most reliable with @s.whatsapp.net for 1:1 chats. Session/chat keys
+ * may arrive as @lid; map LID → phone via lid-mapping-*.json so replies reach the device.
+ */
+function resolveOutboundChatJid(raw) {
+  if (!raw) return raw;
+  const s = String(raw);
+  const cand = jidNormalizedUser(s) || s;
+  const d = jidDecode(cand);
+  if (!d) return cand;
+  if (d.server === 'g.us' || d.server === 'broadcast' || s.includes('status@')) {
+    return cand;
+  }
+  if (d.server === 'lid') {
+    const phone = lidToPhone[String(d.user)];
+    if (phone) {
+      const pn = jidEncode(phone, 's.whatsapp.net');
+      if (WHATSAPP_DEBUG && pn !== s) {
+        try {
+          console.log(JSON.stringify({ event: 'send_jid_resolve', from: s, to: pn }));
+        } catch { /* ignore */ }
+      }
+      return pn;
+    }
+  }
+  return cand;
+}
 
 /** Strip :device@ and @host so PN/LID JIDs match gateway allowlist + lid-mapping files. */
 function jidNumericId(jid) {
@@ -426,7 +463,8 @@ app.post('/send', async (req, res) => {
   }
 
   try {
-    const sent = await sock.sendMessage(chatId, { text: formatOutgoingMessage(message) });
+    const jid = resolveOutboundChatJid(chatId);
+    const sent = await sock.sendMessage(jid, { text: formatOutgoingMessage(message) });
 
     // Track sent message ID to prevent echo-back loops
     if (sent?.key?.id) {
@@ -454,8 +492,9 @@ app.post('/edit', async (req, res) => {
   }
 
   try {
-    const key = { id: messageId, fromMe: true, remoteJid: chatId };
-    await sock.sendMessage(chatId, { text: formatOutgoingMessage(message), edit: key });
+    const jid = resolveOutboundChatJid(chatId);
+    const key = { id: messageId, fromMe: true, remoteJid: jid };
+    await sock.sendMessage(jid, { text: formatOutgoingMessage(message), edit: key });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -502,6 +541,8 @@ app.post('/send-media', async (req, res) => {
     const type = mediaType || inferMediaType(ext);
     let msgPayload;
 
+    const jid = resolveOutboundChatJid(chatId);
+
     switch (type) {
       case 'image':
         msgPayload = {
@@ -533,7 +574,7 @@ app.post('/send-media', async (req, res) => {
         break;
     }
 
-    const sent = await sock.sendMessage(chatId, msgPayload);
+    const sent = await sock.sendMessage(jid, msgPayload);
 
     // Track sent message ID to prevent echo-back loops
     if (sent?.key?.id) {
@@ -559,7 +600,8 @@ app.post('/typing', async (req, res) => {
   if (!chatId) return res.status(400).json({ error: 'chatId required' });
 
   try {
-    await sock.sendPresenceUpdate('composing', chatId);
+    const jid = resolveOutboundChatJid(chatId);
+    await sock.sendPresenceUpdate('composing', jid);
     res.json({ success: true });
   } catch (err) {
     res.json({ success: false });

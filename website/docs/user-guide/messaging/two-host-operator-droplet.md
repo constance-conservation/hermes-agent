@@ -51,6 +51,8 @@ Pair the bridge with the **WhatsApp Business** app for `61483757391` (`hermes wh
 
 If the gateway keeps sending **DM pairing codes** even though `WHATSAPP_ALLOWED_USERS` lists your business number, ensure `lid-mapping-*.json` under `HERMES_HOME/whatsapp/session` (or `platforms/whatsapp/session`) is present after pairing—Hermes resolves phone ↔ LID against those files—and that you are not mixing two different `HERMES_HOME` profiles for the same host.
 
+If Hermes **replies** never show on the phone but inbound works, the session may be using **LID** JIDs while **outbound** delivery expects a phone JID—the bridge resolves `@lid` → `...@s.whatsapp.net` using those same mapping files when sending.
+
 ### Operator Mac — personal inbox, business peer only
 
 On the **operator** machine, use a **separate** `HERMES_HOME` (e.g. `~/.hermes/profiles/operator` or default `~/.hermes`).
