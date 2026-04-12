@@ -6128,394 +6128,10 @@ class GatewayRunner:
                 # Pass session_key to process registry via env var so background
                 # processes can be mapped back to this gateway session
                 os.environ["HERMES_SESSION_KEY"] = session_key or ""
-                profile_router_stub_attempted = False
-    
-                # Read from env var or use default (same as CLI)
-                max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
-                
-                # Map platform enum to the platform hint key the agent understands.
-                # Platform.LOCAL ("local") maps to "cli"; others pass through as-is.
-                platform_key = "cli" if source.platform == Platform.LOCAL else source.platform.value
-                
-                # Combine platform context with user-configured ephemeral system prompt
-                combined_ephemeral = context_prompt or ""
-                if self._ephemeral_system_prompt:
-                    combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
-    
-                # Single-bot multi-persona: channel/thread → role slug → role_assignments.yaml
-                try:
-                    from hermes_constants import get_hermes_home as _gh_home
-                    from gateway.messaging_role import build_messaging_role_ephemeral
-    
-                    _msg_cfg = getattr(self.config, "messaging", None) or {}
-                    _rr = _msg_cfg.get("role_routing") if isinstance(_msg_cfg, dict) else None
-                    if isinstance(_rr, dict):
-                        _role_block = build_messaging_role_ephemeral(
-                            source, _rr, hermes_home=_gh_home()
-                        )
-                        if _role_block:
-                            combined_ephemeral = (combined_ephemeral + "\n\n" + _role_block).strip()
-                except Exception:
-                    pass
-    
-                # Re-read .env and config for fresh credentials (gateway is long-lived,
-                # keys may change without restart).
-                try:
-                    from hermes_constants import get_hermes_home as _gh_dot
-
-                    load_dotenv(_gh_dot() / ".env", override=True, encoding="utf-8")
-                except UnicodeDecodeError:
-                    from hermes_constants import get_hermes_home as _gh_dot
-
-                    load_dotenv(_gh_dot() / ".env", override=True, encoding="latin-1")
-                except Exception:
-                    pass
-    
-                pr_precomputed = None
-    
-                model = _resolve_gateway_model(user_config)
-    
-                try:
-                    runtime_kwargs = _resolve_runtime_agent_kwargs()
-                except Exception as exc:
-                    return {
-                        "final_response": f"⚠️ Provider authentication failed: {exc}",
-                        "messages": [],
-                        "api_calls": 0,
-                        "tools": [],
-                    }
-    
-                pr = self._provider_routing
-                reasoning_config = self._load_reasoning_config()
-                self._reasoning_config = reasoning_config
-                # Set up streaming consumer if enabled
-                _stream_consumer = None
-                _stream_delta_cb = None
-                _scfg = getattr(getattr(self, 'config', None), 'streaming', None)
-                if _scfg is None:
-                    from gateway.config import StreamingConfig
-                    _scfg = StreamingConfig()
-    
-                if _scfg.enabled and _scfg.transport != "off":
-                    try:
-                        from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
-                        from hermes_constants import get_hermes_home as _gh_stream_disc
-    
-                        from gateway.messaging_role import (
-                            messaging_disclosure_applies,
-                            resolve_messaging_disclosure_label,
-                        )
-    
-                        _adapter = self.adapters.get(source.platform)
-                        if _adapter:
-                            _disc_label = None
-                            try:
-                                _mctx = user_config.get("messaging") or {}
-                                if (
-                                    isinstance(_mctx, dict)
-                                    and _mctx.get("disclosure_line_append", True) is not False
-                                    and messaging_disclosure_applies(source.platform)
-                                ):
-                                    _disc_label = resolve_messaging_disclosure_label(
-                                        source, _mctx, hermes_home=_gh_stream_disc()
-                                    )
-                            except Exception:
-                                _disc_label = None
-                            _consumer_cfg = StreamConsumerConfig(
-                                edit_interval=_scfg.edit_interval,
-                                buffer_threshold=_scfg.buffer_threshold,
-                                cursor=_scfg.cursor,
-                                disclosure_label=_disc_label,
-                            )
-                            _stream_consumer = GatewayStreamConsumer(
-                                adapter=_adapter,
-                                chat_id=source.chat_id,
-                                config=_consumer_cfg,
-                                metadata={"thread_id": _progress_thread_id} if _progress_thread_id else None,
-                            )
-                            _stream_delta_cb = _stream_consumer.on_delta
-                            stream_consumer_holder[0] = _stream_consumer
-                    except Exception as _sc_err:
-                        logger.debug("Could not set up stream consumer: %s", _sc_err)
-    
-                turn_route = self._resolve_turn_agent_config(
-                    message, model, runtime_kwargs, session_key=session_key
-                )
-    
-                # Manual /models picks: skip profile_router LLM (aux Gemini, noisy on quota) and
-                # delegate routing so the sticky pipeline model is the only authority this turn.
-                # Also skip when a sticky row exists for this session even if merge failed to set
-                # skip_per_turn_tier_routing on turn_route (otherwise Gemini quota errors flood logs).
-                _pr_skip_manual = bool(turn_route.get("skip_per_turn_tier_routing"))
-                if not _pr_skip_manual and session_key:
-                    _sl_pr = getattr(self, "_gateway_models_sticky_lock", None)
-                    _sm_pr = getattr(self, "_gateway_models_sticky", None)
-                    if _sl_pr is not None and isinstance(_sm_pr, dict):
-                        try:
-                            with _sl_pr:
-                                if _sm_pr.get(session_key):
-                                    _pr_skip_manual = True
-                        except Exception:
-                            pass
-                _pr_cfg_early = (user_config.get("agent") or {}).get("profile_router") or {}
-                if (
-                    isinstance(message, str)
-                    and _pr_cfg_early.get("enabled")
-                    and not _pr_skip_manual
-                ):
-                    try:
-                        from agent.profile_router import classify_profile_for_prompt, list_routable_profile_names
-                        from hermes_cli.profiles import get_active_profile_name
-    
-                        pr_precomputed = classify_profile_for_prompt(
-                            message,
-                            candidates=list_routable_profile_names(),
-                            current_profile=get_active_profile_name(),
-                            router_cfg=_pr_cfg_early,
-                        )
-                    except Exception as _pr_early_exc:
-                        logger.debug("profile_router early classify: %s", _pr_early_exc)
-    
-                # Convert history to agent format (needed for profile-router delegate return and
-                # run_conversation; does not depend on AIAgent).
-                agent_history = []
-                for msg in history:
-                    role = msg.get("role")
-                    if not role:
-                        continue
-    
-                    if role in ("session_meta",):
-                        continue
-    
-                    if role == "system":
-                        continue
-    
-                    has_tool_calls = "tool_calls" in msg
-                    has_tool_call_id = "tool_call_id" in msg
-                    is_tool_message = role == "tool"
-    
-                    if has_tool_calls or has_tool_call_id or is_tool_message:
-                        clean_msg = {k: v for k, v in msg.items() if k != "timestamp"}
-                        agent_history.append(clean_msg)
-                    else:
-                        content = msg.get("content")
-                        if content:
-                            if msg.get("mirror"):
-                                mirror_src = msg.get("mirror_source", "another session")
-                                content = f"[Delivered from {mirror_src}] {content}"
-                            entry = {"role": role, "content": content}
-                            if role == "assistant":
-                                for _rkey in ("reasoning", "reasoning_details",
-                                              "codex_reasoning_items"):
-                                    _rval = msg.get(_rkey)
-                                    if _rval:
-                                        entry[_rkey] = _rval
-                            agent_history.append(entry)
-    
-                routed_early = None
-                _pr_cfg = (user_config.get("agent") or {}).get("profile_router") or {}
-                if (
-                    isinstance(message, str)
-                    and _pr_cfg.get("enabled")
-                    and pr_precomputed
-                    and pr_precomputed[0]
-                    and not _pr_skip_manual
-                ):
-                    profile_router_stub_attempted = True
-                    try:
-                        from agent.profile_router import (
-                            build_router_delegate_parent_stub,
-                            route_and_delegate_if_configured,
-                        )
-                        from hermes_cli.profiles import get_active_profile_name
-    
-                        _prov = self._provider_routing
-                        stub = build_router_delegate_parent_stub(
-                            enabled_toolsets=enabled_toolsets,
-                            model=turn_route["model"],
-                            runtime=turn_route["runtime"],
-                            platform=platform_key,
-                            session_db=_session_db_for_agent,
-                            reasoning_config=reasoning_config,
-                            providers_allowed=_prov.get("only"),
-                            providers_ignored=_prov.get("ignore"),
-                            providers_order=_prov.get("order"),
-                            provider_sort=_prov.get("sort"),
-                            tool_progress_callback=progress_callback if tool_progress_enabled else None,
-                            prefill_messages=self._prefill_messages or None,
-                            defer_opm_manual=_pr_skip_manual,
-                        )
-                        routed_early = route_and_delegate_if_configured(
-                            user_message=message,
-                            parent_agent=stub,
-                            agent_config=_pr_cfg,
-                            current_profile=get_active_profile_name(),
-                            precomputed=pr_precomputed,
-                        )
-                    except Exception as _stub_exc:
-                        logger.debug("profile_router gateway stub delegate: %s", _stub_exc)
-                        routed_early = None
-                    if routed_early is not None:
-                        result_holder[0] = {
-                            "final_response": routed_early,
-                            "messages": agent_history
-                            + [
-                                {"role": "user", "content": message},
-                                {"role": "assistant", "content": routed_early},
-                            ],
-                            "api_calls": 0,
-                            "completed": True,
-                            "failed": False,
-                        }
-                        if _stream_consumer is not None:
-                            _stream_consumer.finish()
-                        return result_holder[0]
-    
-                # Check agent cache — reuse the AIAgent from the previous message
-                # in this session to preserve the frozen system prompt and tool
-                # schemas for prompt cache hits.
-                _skip_ctx = _gateway_skip_context_files()
-                _sig = self._agent_config_signature(
-                    turn_route["model"],
-                    turn_route["runtime"],
-                    enabled_toolsets,
-                    combined_ephemeral,
-                    _skip_ctx,
-                    self._fallback_cache_signature_token(),
-                )
-                agent = None
-                _cache_lock = getattr(self, "_agent_cache_lock", None)
-                _cache = getattr(self, "_agent_cache", None)
-                if _cache_lock and _cache is not None:
-                    with _cache_lock:
-                        cached = _cache.get(_cache_key_eff)
-                        if cached and cached[1] == _sig:
-                            agent = cached[0]
-                            logger.debug("Reusing cached agent for session %s", session_key)
-    
-                if agent is None:
-                    # Config changed or first message — create fresh agent
-                    agent = AIAgent(
-                        model=turn_route["model"],
-                        **turn_route["runtime"],
-                        max_iterations=max_iterations,
-                        quiet_mode=True,
-                        verbose_logging=False,
-                        enabled_toolsets=enabled_toolsets,
-                        ephemeral_system_prompt=combined_ephemeral or None,
-                        prefill_messages=self._prefill_messages or None,
-                        reasoning_config=reasoning_config,
-                        providers_allowed=pr.get("only"),
-                        providers_ignored=pr.get("ignore"),
-                        providers_order=pr.get("order"),
-                        provider_sort=pr.get("sort"),
-                        provider_require_parameters=pr.get("require_parameters", False),
-                        provider_data_collection=pr.get("data_collection"),
-                        session_id=session_id,
-                        platform=platform_key,
-                        session_db=_session_db_for_agent,
-                        fallback_model=self._fallback_model,
-                        skip_context_files=_skip_ctx,
-                        skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
-                    )
-                    if _cache_lock and _cache is not None:
-                        with _cache_lock:
-                            _cache[_cache_key_eff] = (agent, _sig)
-                    logger.debug("Created new agent for session %s (sig=%s)", session_key, _sig)
-    
-                self._sync_gateway_agent_turn_route(agent, turn_route)
-    
-                # Per-message state — callbacks and reasoning config change every
-                # turn and must not be baked into the cached agent constructor.
-                agent.tool_progress_callback = progress_callback if tool_progress_enabled else None
-                agent.step_callback = _step_callback_sync if _hooks_ref.loaded_hooks else None
-                agent.stream_delta_callback = _stream_delta_cb
-                agent.status_callback = _status_callback_sync
-                agent.reasoning_config = reasoning_config
-    
-                # Background review delivery — send "💾 Memory updated" etc. to user
-                def _bg_review_send(message: str) -> None:
-                    if not _status_adapter:
-                        return
-                    try:
-                        asyncio.run_coroutine_threadsafe(
-                            _status_adapter.send(
-                                _status_chat_id,
-                                message,
-                                metadata=_status_thread_metadata,
-                            ),
-                            _loop_for_step,
-                        )
-                    except Exception as _e:
-                        logger.debug("background_review_callback error: %s", _e)
-    
-                agent.background_review_callback = _bg_review_send
-    
-                # Store agent reference for interrupt support
-                agent_holder[0] = agent
-                # Capture the full tool definitions for transcript logging
-                tools_holder[0] = agent.tools if hasattr(agent, 'tools') else None
-    
-                # CLI profile router parity: optional delegate to another Hermes profile before
-                # the main loop (same config as agent.profile_router).
-                routed_resp = None
-                if (
-                    isinstance(message, str)
-                    and not profile_router_stub_attempted
-                    and not _pr_skip_manual
-                ):
-                    _pr_cfg2 = (user_config.get("agent") or {}).get("profile_router") or {}
-                    if _pr_cfg2.get("enabled"):
-                        try:
-                            from agent.profile_router import route_and_delegate_if_configured
-                            from hermes_cli.profiles import get_active_profile_name
-    
-                            routed_resp = route_and_delegate_if_configured(
-                                user_message=message,
-                                parent_agent=agent,
-                                agent_config=_pr_cfg2,
-                                current_profile=get_active_profile_name(),
-                                precomputed=pr_precomputed,
-                            )
-                        except Exception as _pr_exc:
-                            logger.debug("profile_router skipped: %s", _pr_exc)
-                            routed_resp = None
-    
-                if routed_resp is not None:
-                    result_holder[0] = {
-                        "final_response": routed_resp,
-                        "messages": agent_history
-                        + [
-                            {"role": "user", "content": message},
-                            {"role": "assistant", "content": routed_resp},
-                        ],
-                        "api_calls": 0,
-                        "completed": True,
-                        "failed": False,
-                    }
-                    if _stream_consumer is not None:
-                        _stream_consumer.finish()
-                    return result_holder[0]
-    
-                # Collect MEDIA paths already in history so we can exclude them
-                # from the current turn's extraction. This is compression-safe:
-                # even if the message list shrinks, we know which paths are old.
-                _history_media_paths: set = set()
-                for _hm in agent_history:
-                    if _hm.get("role") in ("tool", "function"):
-                        _hc = _hm.get("content", "")
-                        if "MEDIA:" in _hc:
-                            for _match in re.finditer(r'MEDIA:(\S+)', _hc):
-                                _p = _match.group(1).strip().rstrip('",}')
-                                if _p:
-                                    _history_media_paths.add(_p)
-                
-                # Register per-session gateway approval callback so dangerous
-                # command approval blocks the agent thread (mirrors CLI input()).
-                # The callback bridges sync→async to send the approval request
-                # to the user immediately.
+                # Register gateway approval **before** profile_router delegation — those paths
+                # call delegate_task → subprocess governance → wait_gateway_blocking_approval.
                 from tools.approval import register_gateway_notify, unregister_gateway_notify
-    
+
                 def _approval_notify_sync(approval_data: dict) -> None:
                     """Send the approval request to the user from the agent thread."""
                     if approval_data.get("kind") == "subprocess_model":
@@ -6551,9 +6167,6 @@ class GatewayRunner:
                             f"Reply `/approve` to execute, `/approve session` to approve this pattern "
                             f"for the session, `/approve always` to approve permanently, or `/deny` to cancel."
                         )
-                    # Fire-and-forget: do **not** block this thread on `.result(timeout=…)`.
-                    # A 15s wait caused `TimeoutError` → `wait_gateway_blocking_approval` treated
-                    # notify as failed, dequeueing the approval so `/approve` saw nothing pending.
                     def _log_approval_send(fut):
                         try:
                             fut.result()
@@ -6572,139 +6185,521 @@ class GatewayRunner:
                         _fut.add_done_callback(_log_approval_send)
                     except Exception as _e:
                         logger.error("Could not schedule approval request send: %s", _e)
-    
+
                 _approval_session_key = session_key or ""
                 register_gateway_notify(_approval_session_key, _approval_notify_sync)
-                # Prevent any Rich/spinner leakage to stdout from this thread; messaging
-                # surfaces only the returned final_response (and explicit status_callback sends).
-                agent._print_fn = lambda *a, **kw: None
                 try:
-                    result = agent.run_conversation(message, conversation_history=agent_history, task_id=session_id)
-                finally:
-                    unregister_gateway_notify(_approval_session_key)
-                result_holder[0] = result
+                    profile_router_stub_attempted = False
     
-                # Signal the stream consumer that the agent is done
-                if _stream_consumer is not None:
-                    _stream_consumer.finish()
+                    # Read from env var or use default (same as CLI)
+                    max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
                 
-                # Return final response, or a message if something went wrong
-                final_response = result.get("final_response")
+                    # Map platform enum to the platform hint key the agent understands.
+                    # Platform.LOCAL ("local") maps to "cli"; others pass through as-is.
+                    platform_key = "cli" if source.platform == Platform.LOCAL else source.platform.value
+                
+                    # Combine platform context with user-configured ephemeral system prompt
+                    combined_ephemeral = context_prompt or ""
+                    if self._ephemeral_system_prompt:
+                        combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
     
-                # Extract actual token counts from the agent instance used for this run
-                _last_prompt_toks = 0
-                _input_toks = 0
-                _output_toks = 0
-                _agent = agent_holder[0]
-                if _agent and hasattr(_agent, "context_compressor"):
-                    _last_prompt_toks = getattr(_agent.context_compressor, "last_prompt_tokens", 0)
-                    _input_toks = getattr(_agent, "session_prompt_tokens", 0)
-                    _output_toks = getattr(_agent, "session_completion_tokens", 0)
-                _resolved_model = getattr(_agent, "model", None) if _agent else None
+                    # Single-bot multi-persona: channel/thread → role slug → role_assignments.yaml
+                    try:
+                        from hermes_constants import get_hermes_home as _gh_home
+                        from gateway.messaging_role import build_messaging_role_ephemeral
     
-                if not final_response:
-                    error_msg = f"⚠️ {result['error']}" if result.get("error") else "(No response generated)"
+                        _msg_cfg = getattr(self.config, "messaging", None) or {}
+                        _rr = _msg_cfg.get("role_routing") if isinstance(_msg_cfg, dict) else None
+                        if isinstance(_rr, dict):
+                            _role_block = build_messaging_role_ephemeral(
+                                source, _rr, hermes_home=_gh_home()
+                            )
+                            if _role_block:
+                                combined_ephemeral = (combined_ephemeral + "\n\n" + _role_block).strip()
+                    except Exception:
+                        pass
+    
+                    # Re-read .env and config for fresh credentials (gateway is long-lived,
+                    # keys may change without restart).
+                    try:
+                        from hermes_constants import get_hermes_home as _gh_dot
+
+                        load_dotenv(_gh_dot() / ".env", override=True, encoding="utf-8")
+                    except UnicodeDecodeError:
+                        from hermes_constants import get_hermes_home as _gh_dot
+
+                        load_dotenv(_gh_dot() / ".env", override=True, encoding="latin-1")
+                    except Exception:
+                        pass
+    
+                    pr_precomputed = None
+    
+                    model = _resolve_gateway_model(user_config)
+    
+                    try:
+                        runtime_kwargs = _resolve_runtime_agent_kwargs()
+                    except Exception as exc:
+                        return {
+                            "final_response": f"⚠️ Provider authentication failed: {exc}",
+                            "messages": [],
+                            "api_calls": 0,
+                            "tools": [],
+                        }
+    
+                    pr = self._provider_routing
+                    reasoning_config = self._load_reasoning_config()
+                    self._reasoning_config = reasoning_config
+                    # Set up streaming consumer if enabled
+                    _stream_consumer = None
+                    _stream_delta_cb = None
+                    _scfg = getattr(getattr(self, 'config', None), 'streaming', None)
+                    if _scfg is None:
+                        from gateway.config import StreamingConfig
+                        _scfg = StreamingConfig()
+    
+                    if _scfg.enabled and _scfg.transport != "off":
+                        try:
+                            from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
+                            from hermes_constants import get_hermes_home as _gh_stream_disc
+    
+                            from gateway.messaging_role import (
+                                messaging_disclosure_applies,
+                                resolve_messaging_disclosure_label,
+                            )
+    
+                            _adapter = self.adapters.get(source.platform)
+                            if _adapter:
+                                _disc_label = None
+                                try:
+                                    _mctx = user_config.get("messaging") or {}
+                                    if (
+                                        isinstance(_mctx, dict)
+                                        and _mctx.get("disclosure_line_append", True) is not False
+                                        and messaging_disclosure_applies(source.platform)
+                                    ):
+                                        _disc_label = resolve_messaging_disclosure_label(
+                                            source, _mctx, hermes_home=_gh_stream_disc()
+                                        )
+                                except Exception:
+                                    _disc_label = None
+                                _consumer_cfg = StreamConsumerConfig(
+                                    edit_interval=_scfg.edit_interval,
+                                    buffer_threshold=_scfg.buffer_threshold,
+                                    cursor=_scfg.cursor,
+                                    disclosure_label=_disc_label,
+                                )
+                                _stream_consumer = GatewayStreamConsumer(
+                                    adapter=_adapter,
+                                    chat_id=source.chat_id,
+                                    config=_consumer_cfg,
+                                    metadata={"thread_id": _progress_thread_id} if _progress_thread_id else None,
+                                )
+                                _stream_delta_cb = _stream_consumer.on_delta
+                                stream_consumer_holder[0] = _stream_consumer
+                        except Exception as _sc_err:
+                            logger.debug("Could not set up stream consumer: %s", _sc_err)
+    
+                    turn_route = self._resolve_turn_agent_config(
+                        message, model, runtime_kwargs, session_key=session_key
+                    )
+    
+                    # Manual /models picks: skip profile_router LLM (aux Gemini, noisy on quota) and
+                    # delegate routing so the sticky pipeline model is the only authority this turn.
+                    # Also skip when a sticky row exists for this session even if merge failed to set
+                    # skip_per_turn_tier_routing on turn_route (otherwise Gemini quota errors flood logs).
+                    _pr_skip_manual = bool(turn_route.get("skip_per_turn_tier_routing"))
+                    if not _pr_skip_manual and session_key:
+                        _sl_pr = getattr(self, "_gateway_models_sticky_lock", None)
+                        _sm_pr = getattr(self, "_gateway_models_sticky", None)
+                        if _sl_pr is not None and isinstance(_sm_pr, dict):
+                            try:
+                                with _sl_pr:
+                                    if _sm_pr.get(session_key):
+                                        _pr_skip_manual = True
+                            except Exception:
+                                pass
+                    _pr_cfg_early = (user_config.get("agent") or {}).get("profile_router") or {}
+                    if (
+                        isinstance(message, str)
+                        and _pr_cfg_early.get("enabled")
+                        and not _pr_skip_manual
+                    ):
+                        try:
+                            from agent.profile_router import classify_profile_for_prompt, list_routable_profile_names
+                            from hermes_cli.profiles import get_active_profile_name
+    
+                            pr_precomputed = classify_profile_for_prompt(
+                                message,
+                                candidates=list_routable_profile_names(),
+                                current_profile=get_active_profile_name(),
+                                router_cfg=_pr_cfg_early,
+                            )
+                        except Exception as _pr_early_exc:
+                            logger.debug("profile_router early classify: %s", _pr_early_exc)
+    
+                    # Convert history to agent format (needed for profile-router delegate return and
+                    # run_conversation; does not depend on AIAgent).
+                    agent_history = []
+                    for msg in history:
+                        role = msg.get("role")
+                        if not role:
+                            continue
+    
+                        if role in ("session_meta",):
+                            continue
+    
+                        if role == "system":
+                            continue
+    
+                        has_tool_calls = "tool_calls" in msg
+                        has_tool_call_id = "tool_call_id" in msg
+                        is_tool_message = role == "tool"
+    
+                        if has_tool_calls or has_tool_call_id or is_tool_message:
+                            clean_msg = {k: v for k, v in msg.items() if k != "timestamp"}
+                            agent_history.append(clean_msg)
+                        else:
+                            content = msg.get("content")
+                            if content:
+                                if msg.get("mirror"):
+                                    mirror_src = msg.get("mirror_source", "another session")
+                                    content = f"[Delivered from {mirror_src}] {content}"
+                                entry = {"role": role, "content": content}
+                                if role == "assistant":
+                                    for _rkey in ("reasoning", "reasoning_details",
+                                                  "codex_reasoning_items"):
+                                        _rval = msg.get(_rkey)
+                                        if _rval:
+                                            entry[_rkey] = _rval
+                                agent_history.append(entry)
+    
+                    routed_early = None
+                    _pr_cfg = (user_config.get("agent") or {}).get("profile_router") or {}
+                    if (
+                        isinstance(message, str)
+                        and _pr_cfg.get("enabled")
+                        and pr_precomputed
+                        and pr_precomputed[0]
+                        and not _pr_skip_manual
+                    ):
+                        profile_router_stub_attempted = True
+                        try:
+                            from agent.profile_router import (
+                                build_router_delegate_parent_stub,
+                                route_and_delegate_if_configured,
+                            )
+                            from hermes_cli.profiles import get_active_profile_name
+    
+                            _prov = self._provider_routing
+                            stub = build_router_delegate_parent_stub(
+                                enabled_toolsets=enabled_toolsets,
+                                model=turn_route["model"],
+                                runtime=turn_route["runtime"],
+                                platform=platform_key,
+                                session_db=_session_db_for_agent,
+                                reasoning_config=reasoning_config,
+                                providers_allowed=_prov.get("only"),
+                                providers_ignored=_prov.get("ignore"),
+                                providers_order=_prov.get("order"),
+                                provider_sort=_prov.get("sort"),
+                                tool_progress_callback=progress_callback if tool_progress_enabled else None,
+                                prefill_messages=self._prefill_messages or None,
+                                defer_opm_manual=_pr_skip_manual,
+                            )
+                            routed_early = route_and_delegate_if_configured(
+                                user_message=message,
+                                parent_agent=stub,
+                                agent_config=_pr_cfg,
+                                current_profile=get_active_profile_name(),
+                                precomputed=pr_precomputed,
+                            )
+                        except Exception as _stub_exc:
+                            logger.debug("profile_router gateway stub delegate: %s", _stub_exc)
+                            routed_early = None
+                        if routed_early is not None:
+                            result_holder[0] = {
+                                "final_response": routed_early,
+                                "messages": agent_history
+                                + [
+                                    {"role": "user", "content": message},
+                                    {"role": "assistant", "content": routed_early},
+                                ],
+                                "api_calls": 0,
+                                "completed": True,
+                                "failed": False,
+                            }
+                            if _stream_consumer is not None:
+                                _stream_consumer.finish()
+                            return result_holder[0]
+    
+                    # Check agent cache — reuse the AIAgent from the previous message
+                    # in this session to preserve the frozen system prompt and tool
+                    # schemas for prompt cache hits.
+                    _skip_ctx = _gateway_skip_context_files()
+                    _sig = self._agent_config_signature(
+                        turn_route["model"],
+                        turn_route["runtime"],
+                        enabled_toolsets,
+                        combined_ephemeral,
+                        _skip_ctx,
+                        self._fallback_cache_signature_token(),
+                    )
+                    agent = None
+                    _cache_lock = getattr(self, "_agent_cache_lock", None)
+                    _cache = getattr(self, "_agent_cache", None)
+                    if _cache_lock and _cache is not None:
+                        with _cache_lock:
+                            cached = _cache.get(_cache_key_eff)
+                            if cached and cached[1] == _sig:
+                                agent = cached[0]
+                                logger.debug("Reusing cached agent for session %s", session_key)
+    
+                    if agent is None:
+                        # Config changed or first message — create fresh agent
+                        agent = AIAgent(
+                            model=turn_route["model"],
+                            **turn_route["runtime"],
+                            max_iterations=max_iterations,
+                            quiet_mode=True,
+                            verbose_logging=False,
+                            enabled_toolsets=enabled_toolsets,
+                            ephemeral_system_prompt=combined_ephemeral or None,
+                            prefill_messages=self._prefill_messages or None,
+                            reasoning_config=reasoning_config,
+                            providers_allowed=pr.get("only"),
+                            providers_ignored=pr.get("ignore"),
+                            providers_order=pr.get("order"),
+                            provider_sort=pr.get("sort"),
+                            provider_require_parameters=pr.get("require_parameters", False),
+                            provider_data_collection=pr.get("data_collection"),
+                            session_id=session_id,
+                            platform=platform_key,
+                            session_db=_session_db_for_agent,
+                            fallback_model=self._fallback_model,
+                            skip_context_files=_skip_ctx,
+                            skip_per_turn_tier_routing=bool(turn_route.get("skip_per_turn_tier_routing")),
+                        )
+                        if _cache_lock and _cache is not None:
+                            with _cache_lock:
+                                _cache[_cache_key_eff] = (agent, _sig)
+                        logger.debug("Created new agent for session %s (sig=%s)", session_key, _sig)
+    
+                    self._sync_gateway_agent_turn_route(agent, turn_route)
+    
+                    # Per-message state — callbacks and reasoning config change every
+                    # turn and must not be baked into the cached agent constructor.
+                    agent.tool_progress_callback = progress_callback if tool_progress_enabled else None
+                    agent.step_callback = _step_callback_sync if _hooks_ref.loaded_hooks else None
+                    agent.stream_delta_callback = _stream_delta_cb
+                    agent.status_callback = _status_callback_sync
+                    agent.reasoning_config = reasoning_config
+    
+                    # Background review delivery — send "💾 Memory updated" etc. to user
+                    def _bg_review_send(message: str) -> None:
+                        if not _status_adapter:
+                            return
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                _status_adapter.send(
+                                    _status_chat_id,
+                                    message,
+                                    metadata=_status_thread_metadata,
+                                ),
+                                _loop_for_step,
+                            )
+                        except Exception as _e:
+                            logger.debug("background_review_callback error: %s", _e)
+    
+                    agent.background_review_callback = _bg_review_send
+    
+                    # Store agent reference for interrupt support
+                    agent_holder[0] = agent
+                    # Capture the full tool definitions for transcript logging
+                    tools_holder[0] = agent.tools if hasattr(agent, 'tools') else None
+    
+                    # CLI profile router parity: optional delegate to another Hermes profile before
+                    # the main loop (same config as agent.profile_router).
+                    routed_resp = None
+                    if (
+                        isinstance(message, str)
+                        and not profile_router_stub_attempted
+                        and not _pr_skip_manual
+                    ):
+                        _pr_cfg2 = (user_config.get("agent") or {}).get("profile_router") or {}
+                        if _pr_cfg2.get("enabled"):
+                            try:
+                                from agent.profile_router import route_and_delegate_if_configured
+                                from hermes_cli.profiles import get_active_profile_name
+    
+                                routed_resp = route_and_delegate_if_configured(
+                                    user_message=message,
+                                    parent_agent=agent,
+                                    agent_config=_pr_cfg2,
+                                    current_profile=get_active_profile_name(),
+                                    precomputed=pr_precomputed,
+                                )
+                            except Exception as _pr_exc:
+                                logger.debug("profile_router skipped: %s", _pr_exc)
+                                routed_resp = None
+    
+                    if routed_resp is not None:
+                        result_holder[0] = {
+                            "final_response": routed_resp,
+                            "messages": agent_history
+                            + [
+                                {"role": "user", "content": message},
+                                {"role": "assistant", "content": routed_resp},
+                            ],
+                            "api_calls": 0,
+                            "completed": True,
+                            "failed": False,
+                        }
+                        if _stream_consumer is not None:
+                            _stream_consumer.finish()
+                        return result_holder[0]
+    
+                    # Collect MEDIA paths already in history so we can exclude them
+                    # from the current turn's extraction. This is compression-safe:
+                    # even if the message list shrinks, we know which paths are old.
+                    _history_media_paths: set = set()
+                    for _hm in agent_history:
+                        if _hm.get("role") in ("tool", "function"):
+                            _hc = _hm.get("content", "")
+                            if "MEDIA:" in _hc:
+                                for _match in re.finditer(r'MEDIA:(\S+)', _hc):
+                                    _p = _match.group(1).strip().rstrip('",}')
+                                    if _p:
+                                        _history_media_paths.add(_p)
+                
+                    # Prevent any Rich/spinner leakage to stdout from this thread; messaging
+                    # surfaces only the returned final_response (and explicit status_callback sends).
+                    agent._print_fn = lambda *a, **kw: None
+                    result = agent.run_conversation(message, conversation_history=agent_history, task_id=session_id)
+                    result_holder[0] = result
+    
+                    # Signal the stream consumer that the agent is done
+                    if _stream_consumer is not None:
+                        _stream_consumer.finish()
+                
+                    # Return final response, or a message if something went wrong
+                    final_response = result.get("final_response")
+    
+                    # Extract actual token counts from the agent instance used for this run
+                    _last_prompt_toks = 0
+                    _input_toks = 0
+                    _output_toks = 0
+                    _agent = agent_holder[0]
+                    if _agent and hasattr(_agent, "context_compressor"):
+                        _last_prompt_toks = getattr(_agent.context_compressor, "last_prompt_tokens", 0)
+                        _input_toks = getattr(_agent, "session_prompt_tokens", 0)
+                        _output_toks = getattr(_agent, "session_completion_tokens", 0)
+                    _resolved_model = getattr(_agent, "model", None) if _agent else None
+    
+                    if not final_response:
+                        error_msg = f"⚠️ {result['error']}" if result.get("error") else "(No response generated)"
+                        return {
+                            "final_response": error_msg,
+                            "messages": result.get("messages", []),
+                            "api_calls": result.get("api_calls", 0),
+                            "tools": tools_holder[0] or [],
+                            "history_offset": len(agent_history),
+                            "last_prompt_tokens": _last_prompt_toks,
+                            "input_tokens": _input_toks,
+                            "output_tokens": _output_toks,
+                            "model": _resolved_model,
+                        }
+                
+                    # Scan tool results for MEDIA:<path> tags that need to be delivered
+                    # as native audio/file attachments.  The TTS tool embeds MEDIA: tags
+                    # in its JSON response, but the model's final text reply usually
+                    # doesn't include them.  We collect unique tags from tool results and
+                    # append any that aren't already present in the final response, so the
+                    # adapter's extract_media() can find and deliver the files exactly once.
+                    #
+                    # Uses path-based deduplication against _history_media_paths (collected
+                    # before run_conversation) instead of index slicing. This is safe even
+                    # when context compression shrinks the message list. (Fixes #160)
+                    if "MEDIA:" not in final_response:
+                        media_tags = []
+                        has_voice_directive = False
+                        for msg in result.get("messages", []):
+                            if msg.get("role") in ("tool", "function"):
+                                content = msg.get("content", "")
+                                if "MEDIA:" in content:
+                                    for match in re.finditer(r'MEDIA:(\S+)', content):
+                                        path = match.group(1).strip().rstrip('",}')
+                                        if path and path not in _history_media_paths:
+                                            media_tags.append(f"MEDIA:{path}")
+                                    if "[[audio_as_voice]]" in content:
+                                        has_voice_directive = True
+                    
+                        if media_tags:
+                            seen = set()
+                            unique_tags = []
+                            for tag in media_tags:
+                                if tag not in seen:
+                                    seen.add(tag)
+                                    unique_tags.append(tag)
+                            if has_voice_directive:
+                                unique_tags.insert(0, "[[audio_as_voice]]")
+                            final_response = final_response + "\n" + "\n".join(unique_tags)
+                
+                    # Sync session_id: the agent may have created a new session during
+                    # mid-run context compression (_compress_context splits sessions).
+                    # If so, update the session store entry so the NEXT message loads
+                    # the compressed transcript, not the stale pre-compression one.
+                    agent = agent_holder[0]
+                    _session_was_split = False
+                    if agent and session_key and hasattr(agent, 'session_id') and agent.session_id != session_id:
+                        _session_was_split = True
+                        logger.info(
+                            "Session split detected: %s → %s (compression)",
+                            session_id, agent.session_id,
+                        )
+                        entry = self.session_store._entries.get(session_key)
+                        if entry:
+                            entry.session_id = agent.session_id
+                            self.session_store._save()
+    
+                    effective_session_id = getattr(agent, 'session_id', session_id) if agent else session_id
+    
+                    # When compression created a new session, the messages list was
+                    # shortened.  Using the original history offset would produce an
+                    # empty new_messages slice, causing the gateway to write only a
+                    # user/assistant pair — losing the compressed summary and tail.
+                    # Reset to 0 so the gateway writes ALL compressed messages.
+                    _effective_history_offset = 0 if _session_was_split else len(agent_history)
+    
+                    # Auto-generate session title after first exchange (non-blocking)
+                    if final_response and self._session_db:
+                        try:
+                            from agent.title_generator import maybe_auto_title
+                            all_msgs = result_holder[0].get("messages", []) if result_holder[0] else []
+                            maybe_auto_title(
+                                self._session_db,
+                                effective_session_id,
+                                message,
+                                final_response,
+                                all_msgs,
+                            )
+                        except Exception:
+                            pass
+    
                     return {
-                        "final_response": error_msg,
-                        "messages": result.get("messages", []),
-                        "api_calls": result.get("api_calls", 0),
+                        "final_response": final_response,
+                        "last_reasoning": result.get("last_reasoning"),
+                        "messages": result_holder[0].get("messages", []) if result_holder[0] else [],
+                        "api_calls": result_holder[0].get("api_calls", 0) if result_holder[0] else 0,
                         "tools": tools_holder[0] or [],
-                        "history_offset": len(agent_history),
+                        "history_offset": _effective_history_offset,
                         "last_prompt_tokens": _last_prompt_toks,
                         "input_tokens": _input_toks,
                         "output_tokens": _output_toks,
                         "model": _resolved_model,
+                        "session_id": effective_session_id,
                     }
-                
-                # Scan tool results for MEDIA:<path> tags that need to be delivered
-                # as native audio/file attachments.  The TTS tool embeds MEDIA: tags
-                # in its JSON response, but the model's final text reply usually
-                # doesn't include them.  We collect unique tags from tool results and
-                # append any that aren't already present in the final response, so the
-                # adapter's extract_media() can find and deliver the files exactly once.
-                #
-                # Uses path-based deduplication against _history_media_paths (collected
-                # before run_conversation) instead of index slicing. This is safe even
-                # when context compression shrinks the message list. (Fixes #160)
-                if "MEDIA:" not in final_response:
-                    media_tags = []
-                    has_voice_directive = False
-                    for msg in result.get("messages", []):
-                        if msg.get("role") in ("tool", "function"):
-                            content = msg.get("content", "")
-                            if "MEDIA:" in content:
-                                for match in re.finditer(r'MEDIA:(\S+)', content):
-                                    path = match.group(1).strip().rstrip('",}')
-                                    if path and path not in _history_media_paths:
-                                        media_tags.append(f"MEDIA:{path}")
-                                if "[[audio_as_voice]]" in content:
-                                    has_voice_directive = True
-                    
-                    if media_tags:
-                        seen = set()
-                        unique_tags = []
-                        for tag in media_tags:
-                            if tag not in seen:
-                                seen.add(tag)
-                                unique_tags.append(tag)
-                        if has_voice_directive:
-                            unique_tags.insert(0, "[[audio_as_voice]]")
-                        final_response = final_response + "\n" + "\n".join(unique_tags)
-                
-                # Sync session_id: the agent may have created a new session during
-                # mid-run context compression (_compress_context splits sessions).
-                # If so, update the session store entry so the NEXT message loads
-                # the compressed transcript, not the stale pre-compression one.
-                agent = agent_holder[0]
-                _session_was_split = False
-                if agent and session_key and hasattr(agent, 'session_id') and agent.session_id != session_id:
-                    _session_was_split = True
-                    logger.info(
-                        "Session split detected: %s → %s (compression)",
-                        session_id, agent.session_id,
-                    )
-                    entry = self.session_store._entries.get(session_key)
-                    if entry:
-                        entry.session_id = agent.session_id
-                        self.session_store._save()
-    
-                effective_session_id = getattr(agent, 'session_id', session_id) if agent else session_id
-    
-                # When compression created a new session, the messages list was
-                # shortened.  Using the original history offset would produce an
-                # empty new_messages slice, causing the gateway to write only a
-                # user/assistant pair — losing the compressed summary and tail.
-                # Reset to 0 so the gateway writes ALL compressed messages.
-                _effective_history_offset = 0 if _session_was_split else len(agent_history)
-    
-                # Auto-generate session title after first exchange (non-blocking)
-                if final_response and self._session_db:
-                    try:
-                        from agent.title_generator import maybe_auto_title
-                        all_msgs = result_holder[0].get("messages", []) if result_holder[0] else []
-                        maybe_auto_title(
-                            self._session_db,
-                            effective_session_id,
-                            message,
-                            final_response,
-                            all_msgs,
-                        )
-                    except Exception:
-                        pass
-    
-                return {
-                    "final_response": final_response,
-                    "last_reasoning": result.get("last_reasoning"),
-                    "messages": result_holder[0].get("messages", []) if result_holder[0] else [],
-                    "api_calls": result_holder[0].get("api_calls", 0) if result_holder[0] else 0,
-                    "tools": tools_holder[0] or [],
-                    "history_offset": _effective_history_offset,
-                    "last_prompt_tokens": _last_prompt_toks,
-                    "input_tokens": _input_toks,
-                    "output_tokens": _output_toks,
-                    "model": _resolved_model,
-                    "session_id": effective_session_id,
-                }
+                finally:
+                    unregister_gateway_notify(_approval_session_key)
             
         # Start progress message sender if enabled
         progress_task = None
