@@ -235,6 +235,62 @@ def pending_approval_count(session_key: str) -> int:
         return len(_gateway_queues.get(session_key, []))
 
 
+def wait_gateway_blocking_approval(session_key: str, approval_data: dict) -> Optional[bool]:
+    """Block the current thread until ``/approve`` or ``/deny`` when a gateway notify
+    callback is registered (same FIFO queue as dangerous-command approval).
+
+    Used for subprocess paid-model approval on messaging gateways. If no callback is
+    registered for *session_key*, returns ``None`` so the caller can fall back to
+    ``clarify_callback`` or deny.
+
+    Returns:
+        ``True`` if the user approved (once/session/always scope).
+        ``False`` if denied, timed out, or notify failed.
+        ``None`` if no gateway notify callback is registered for this session.
+    """
+    session_key = (session_key or "").strip()
+    if not session_key:
+        return None
+    notify_cb = None
+    with _lock:
+        notify_cb = _gateway_notify_cbs.get(session_key)
+    if notify_cb is None:
+        return None
+
+    entry = _ApprovalEntry(approval_data)
+    with _lock:
+        _gateway_queues.setdefault(session_key, []).append(entry)
+    try:
+        notify_cb(approval_data)
+    except Exception as exc:
+        logger.warning("Gateway blocking approval notify failed: %s", exc)
+        with _lock:
+            queue = _gateway_queues.get(session_key, [])
+            if entry in queue:
+                queue.remove(entry)
+            if not queue:
+                _gateway_queues.pop(session_key, None)
+        return False
+
+    timeout = _get_approval_config().get("gateway_timeout", 300)
+    try:
+        timeout = int(timeout)
+    except (ValueError, TypeError):
+        timeout = 300
+    resolved = entry.event.wait(timeout=timeout)
+    with _lock:
+        queue = _gateway_queues.get(session_key, [])
+        if entry in queue:
+            queue.remove(entry)
+        if not queue:
+            _gateway_queues.pop(session_key, None)
+
+    choice = entry.result
+    if not resolved or choice is None or choice == "deny":
+        return False
+    return True
+
+
 def submit_pending(session_key: str, approval: dict):
     """Store a pending approval request for a session."""
     with _lock:

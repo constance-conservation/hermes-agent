@@ -118,6 +118,47 @@ class TestBlockingGatewayApproval:
         assert entry.result == "once"
         unregister_gateway_notify(session_key)
 
+    def test_wait_gateway_blocking_approval_returns_none_without_notify(self):
+        from tools.approval import wait_gateway_blocking_approval
+
+        assert wait_gateway_blocking_approval("no-notify", {"kind": "subprocess_model"}) is None
+
+    def test_wait_gateway_blocking_approval_blocks_until_resolve(self):
+        """Subprocess paid-model approval uses the same queue as dangerous commands."""
+        from tools.approval import (
+            register_gateway_notify,
+            unregister_gateway_notify,
+            wait_gateway_blocking_approval,
+            resolve_gateway_approval,
+        )
+
+        session_key = "subproc-approval-test"
+        notified: list = []
+
+        def _notify(d: dict) -> None:
+            notified.append(d)
+
+        register_gateway_notify(session_key, _notify)
+        results: list = []
+
+        def waiter():
+            results.append(
+                wait_gateway_blocking_approval(
+                    session_key,
+                    {"kind": "subprocess_model", "model_id": "google/gemini-2.5-flash"},
+                )
+            )
+
+        t = threading.Thread(target=waiter)
+        t.start()
+        time.sleep(0.15)
+        assert len(notified) == 1
+        assert notified[0].get("kind") == "subprocess_model"
+        resolve_gateway_approval(session_key, "once")
+        t.join(timeout=5)
+        assert results == [True]
+        unregister_gateway_notify(session_key)
+
     def test_resolve_returns_zero_when_no_pending(self):
         from tools.approval import resolve_gateway_approval
         assert resolve_gateway_approval("nonexistent", "once") == 0

@@ -397,6 +397,29 @@ def request_operator_approval(
         except Exception:
             pass
 
+    # Messaging gateway: same blocking queue + /approve as dangerous terminal commands.
+    session_key = (os.getenv("HERMES_SESSION_KEY") or "").strip()
+    if session_key:
+        try:
+            from tools.approval import wait_gateway_blocking_approval
+
+            gw = wait_gateway_blocking_approval(
+                session_key,
+                {
+                    "kind": "subprocess_model",
+                    "model_id": model_id,
+                    "goal": goal,
+                    "cost_class": cost_class,
+                    "cost_label": cost_label,
+                    "description": f"subprocess with paid model {model_id!r}",
+                    "command": "",
+                },
+            )
+            if gw is not None:
+                return gw
+        except Exception as exc:
+            logger.warning("subprocess_governance: gateway blocking approval failed: %s", exc)
+
     if callable(approval_callback):
         try:
             return approval_callback(msg)
@@ -623,7 +646,8 @@ def _get_approval_callback(agent: Any) -> Optional[Callable[[str], bool]]:
     if callable(cb):
         def _wrap(prompt: str) -> bool:
             try:
-                response = cb(prompt)
+                # AIAgent.clarify_callback signature is (question, choices) -> str
+                response = cb(prompt, [])
                 if isinstance(response, str):
                     return response.strip().lower() in ("y", "yes", "1", "true", "approve")
                 return bool(response)

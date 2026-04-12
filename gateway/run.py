@@ -6518,16 +6518,31 @@ class GatewayRunner:
     
                 def _approval_notify_sync(approval_data: dict) -> None:
                     """Send the approval request to the user from the agent thread."""
-                    cmd = approval_data.get("command", "")
-                    cmd_preview = cmd[:200] + "..." if len(cmd) > 200 else cmd
-                    desc = approval_data.get("description", "dangerous command")
-                    msg = (
-                        f"⚠️ **Dangerous command requires approval:**\n"
-                        f"```\n{cmd_preview}\n```\n"
-                        f"Reason: {desc}\n\n"
-                        f"Reply `/approve` to execute, `/approve session` to approve this pattern "
-                        f"for the session, `/approve always` to approve permanently, or `/deny` to cancel."
-                    )
+                    if approval_data.get("kind") == "subprocess_model":
+                        mid = approval_data.get("model_id", "")
+                        g = str(approval_data.get("goal") or "")
+                        g_preview = g[:200] + ("..." if len(g) > 200 else "")
+                        cost_lbl = approval_data.get("cost_label") or "PAID"
+                        msg = (
+                            f"⚠️ **Subprocess model approval required**\n\n"
+                            f"A delegated/background task wants to use **{mid}** "
+                            f"({cost_lbl}).\n"
+                            f"Goal: {g_preview}\n\n"
+                            f"Reply `/approve` to allow this subprocess, or `/deny` to block it.\n"
+                            f"(Same controls as dangerous-command approval: `/approve session`, "
+                            f"`/approve always`, `/deny all`.)"
+                        )
+                    else:
+                        cmd = approval_data.get("command", "")
+                        cmd_preview = cmd[:200] + "..." if len(cmd) > 200 else cmd
+                        desc = approval_data.get("description", "dangerous command")
+                        msg = (
+                            f"⚠️ **Dangerous command requires approval:**\n"
+                            f"```\n{cmd_preview}\n```\n"
+                            f"Reason: {desc}\n\n"
+                            f"Reply `/approve` to execute, `/approve session` to approve this pattern "
+                            f"for the session, `/approve always` to approve permanently, or `/deny` to cancel."
+                        )
                     try:
                         asyncio.run_coroutine_threadsafe(
                             _status_adapter.send(
