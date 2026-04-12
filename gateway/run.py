@@ -773,6 +773,7 @@ class GatewayRunner:
         runtime_kwargs: dict,
         *,
         session_key: Optional[str] = None,
+        agent_cache_key: Optional[str] = None,
     ) -> dict:
         from agent.smart_model_routing import resolve_turn_route
         from hermes_cli.pipeline_turn_route import merge_pipeline_models_choice_into_turn_route
@@ -793,10 +794,23 @@ class GatewayRunner:
         if session_key and _sticky_lock is not None and isinstance(_sticky_map, dict):
             with _sticky_lock:
                 _sticky_preview = _sticky_map.get(session_key)
+        # Match CLI `HermesCLI._resolve_turn_agent_config`: pass the session's live AIAgent so
+        # `resolve_turn_route` → OPM coercion respects manual pipeline / defer flags.
+        _route_agent = None
+        _ack = agent_cache_key if agent_cache_key is not None else session_key
+        if _ack:
+            _cache_lock = getattr(self, "_agent_cache_lock", None)
+            _cache = getattr(self, "_agent_cache", None)
+            if _cache_lock is not None and isinstance(_cache, dict):
+                with _cache_lock:
+                    _cached = _cache.get(_ack)
+                    if _cached:
+                        _route_agent = _cached[0]
         base = resolve_turn_route(
             user_message,
             getattr(self, "_smart_model_routing", {}),
             primary,
+            _route_agent,
             allow_cheap_route=not _sticky_preview,
         )
         if not session_key or _sticky_lock is None or not isinstance(_sticky_map, dict):
@@ -1907,6 +1921,18 @@ class GatewayRunner:
         # simultaneous updates. Do NOT interrupt for photo-only follow-ups here;
         # let the adapter-level batching/queueing logic absorb them.
         _quick_key = self._session_key_for_source(source)
+
+        # Natural-language approval (yes/no/approve/…) only when a blocking FIFO
+        # exists — avoids treating casual "ok" in chat as approval.
+        # Photo messages may include a caption (same session_key): allow NL on caption text.
+        if not event.is_command():
+            from tools.approval import has_blocking_approval, parse_gateway_approval_natural_language
+
+            if has_blocking_approval(_quick_key):
+                _nl = parse_gateway_approval_natural_language(event.text or "")
+                if _nl is not None:
+                    return self._apply_parsed_blocking_approval(_quick_key, _nl)
+
         if _quick_key in self._running_agents:
             if event.get_command() == "status":
                 return await self._handle_status_command(event)
@@ -1994,6 +2020,16 @@ class GatewayRunner:
                     else:
                         adapter._pending_messages[_quick_key] = event
                 return None
+
+            # /approve and /deny must resolve blocking approvals before interrupt —
+            # the agent thread is often blocked in wait_gateway_blocking_approval.
+            from tools.approval import has_blocking_approval as _has_block_appr
+
+            if _has_block_appr(_quick_key):
+                if _cmd_def_inner and _cmd_def_inner.name == "approve":
+                    return await self._handle_approve_command(event)
+                if _cmd_def_inner and _cmd_def_inner.name == "deny":
+                    return await self._handle_deny_command(event)
 
             running_agent = self._running_agents.get(_quick_key)
             if running_agent is _AGENT_PENDING_SENTINEL:
@@ -2232,9 +2268,8 @@ class GatewayRunner:
             except Exception as e:
                 logger.debug("Skill command check failed (non-fatal): %s", e)
         
-        # Pending exec approvals are handled by /approve and /deny commands above.
-        # No bare text matching — "yes" in normal conversation must not trigger
-        # execution of a dangerous command.
+        # Pending exec approvals: /approve, /deny, and (when a FIFO exists)
+        # short natural-language replies — see parse_gateway_approval_natural_language.
 
         # ── Claim this session before any await ───────────────────────
         # Between here and _run_agent registering the real AIAgent, there
@@ -4360,7 +4395,11 @@ class GatewayRunner:
             self._reasoning_config = reasoning_config
             _bg_session_key = self._session_key_for_source(source)
             turn_route = self._resolve_turn_agent_config(
-                prompt, model, runtime_kwargs, session_key=_bg_session_key
+                prompt,
+                model,
+                runtime_kwargs,
+                session_key=_bg_session_key,
+                agent_cache_key=_bg_session_key,
             )
 
             def run_sync():
@@ -4530,7 +4569,11 @@ class GatewayRunner:
             platform_key = _platform_config_key(source.platform)
             reasoning_config = self._load_reasoning_config()
             turn_route = self._resolve_turn_agent_config(
-                question, model, runtime_kwargs, session_key=session_key
+                question,
+                model,
+                runtime_kwargs,
+                session_key=session_key,
+                agent_cache_key=session_key,
             )
             pr = self._provider_routing
 
@@ -5144,6 +5187,66 @@ class GatewayRunner:
 
     _APPROVAL_TIMEOUT_SECONDS = 300  # 5 minutes
 
+    def _apply_parsed_blocking_approval(self, session_key: str, parsed: dict) -> str:
+        """Apply :func:`tools.approval.parse_gateway_approval_natural_language` result."""
+        action = parsed.get("action")
+        resolve_all = bool(parsed.get("resolve_all"))
+        if action == "deny":
+            return self._gateway_blocking_apply_deny(session_key, resolve_all=resolve_all)
+        choice = parsed.get("choice") or "once"
+        return self._gateway_blocking_apply_approve(
+            session_key, choice=choice, resolve_all=resolve_all, via_slash=False
+        )
+
+    def _gateway_blocking_apply_approve(
+        self,
+        session_key: str,
+        *,
+        choice: str,
+        resolve_all: bool,
+        via_slash: bool,
+    ) -> str:
+        from tools.approval import resolve_gateway_approval, has_blocking_approval
+
+        if not has_blocking_approval(session_key):
+            if session_key in self._pending_approvals:
+                self._pending_approvals.pop(session_key)
+                return "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again."
+            return "No pending command to approve."
+
+        if choice == "always":
+            scope_msg = " (pattern approved permanently)"
+        elif choice == "session":
+            scope_msg = " (pattern approved for this session)"
+        else:
+            scope_msg = ""
+
+        count = resolve_gateway_approval(session_key, choice, resolve_all=resolve_all)
+        if not count:
+            return "No pending command to approve."
+
+        count_msg = f" ({count} commands)" if count > 1 else ""
+        src = "/approve" if via_slash else "natural-language approval"
+        logger.info("User approved %d dangerous command(s) via %s%s", count, src, scope_msg)
+        return f"✅ Command{'s' if count > 1 else ''} approved{scope_msg}{count_msg}. The agent is resuming..."
+
+    def _gateway_blocking_apply_deny(self, session_key: str, *, resolve_all: bool) -> str:
+        from tools.approval import resolve_gateway_approval, has_blocking_approval
+
+        if not has_blocking_approval(session_key):
+            if session_key in self._pending_approvals:
+                self._pending_approvals.pop(session_key)
+                return "❌ Command denied (approval was stale)."
+            return "No pending command to deny."
+
+        count = resolve_gateway_approval(session_key, "deny", resolve_all=resolve_all)
+        if not count:
+            return "No pending command to deny."
+
+        count_msg = f" ({count} commands)" if count > 1 else ""
+        logger.info("User denied %d dangerous command(s) via /deny", count)
+        return f"❌ Command{'s' if count > 1 else ''} denied{count_msg}."
+
     async def _handle_approve_command(self, event: MessageEvent) -> Optional[str]:
         """Handle /approve command — unblock waiting agent thread(s).
 
@@ -5167,17 +5270,6 @@ class GatewayRunner:
         source = event.source
         session_key = self._session_key_for_source(source)
 
-        from tools.approval import (
-            resolve_gateway_approval, has_blocking_approval,
-            pending_approval_count,
-        )
-
-        if not has_blocking_approval(session_key):
-            if session_key in self._pending_approvals:
-                self._pending_approvals.pop(session_key)
-                return "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again."
-            return "No pending command to approve."
-
         # Parse args: support "all", "all session", "all always", "session", "always"
         args = event.get_command_args().strip().lower().split()
         resolve_all = "all" in args
@@ -5185,21 +5277,14 @@ class GatewayRunner:
 
         if any(a in ("always", "permanent", "permanently") for a in remaining):
             choice = "always"
-            scope_msg = " (pattern approved permanently)"
         elif any(a in ("session", "ses") for a in remaining):
             choice = "session"
-            scope_msg = " (pattern approved for this session)"
         else:
             choice = "once"
-            scope_msg = ""
 
-        count = resolve_gateway_approval(session_key, choice, resolve_all=resolve_all)
-        if not count:
-            return "No pending command to approve."
-
-        count_msg = f" ({count} commands)" if count > 1 else ""
-        logger.info("User approved %d dangerous command(s) via /approve%s", count, scope_msg)
-        return f"✅ Command{'s' if count > 1 else ''} approved{scope_msg}{count_msg}. The agent is resuming..."
+        return self._gateway_blocking_apply_approve(
+            session_key, choice=choice, resolve_all=resolve_all, via_slash=True
+        )
 
     async def _handle_deny_command(self, event: MessageEvent) -> str:
         """Handle /deny command — reject pending dangerous command(s).
@@ -5212,26 +5297,10 @@ class GatewayRunner:
         source = event.source
         session_key = self._session_key_for_source(source)
 
-        from tools.approval import (
-            resolve_gateway_approval, has_blocking_approval,
-        )
-
-        if not has_blocking_approval(session_key):
-            if session_key in self._pending_approvals:
-                self._pending_approvals.pop(session_key)
-                return "❌ Command denied (approval was stale)."
-            return "No pending command to deny."
-
         args = event.get_command_args().strip().lower()
         resolve_all = "all" in args
 
-        count = resolve_gateway_approval(session_key, "deny", resolve_all=resolve_all)
-        if not count:
-            return "No pending command to deny."
-
-        count_msg = f" ({count} commands)" if count > 1 else ""
-        logger.info("User denied %d dangerous command(s) via /deny", count)
-        return f"❌ Command{'s' if count > 1 else ''} denied{count_msg}."
+        return self._gateway_blocking_apply_deny(session_key, resolve_all=resolve_all)
 
     async def _handle_update_command(self, event: MessageEvent) -> str:
         """Handle /update command — update Hermes Agent to the latest version.
@@ -6150,7 +6219,8 @@ class GatewayRunner:
                             f"**Model:** `{mid}` ({cost_lbl})\n"
                             f"**Goal:** {g_preview}\n\n"
                             f"**Queued:** {nq} blocking approval(s) in this chat (FIFO — oldest first).\n\n"
-                            f"**Reply with a slash command** (plain “yes” is ignored for safety):\n"
+                            f"**Reply** while this request is pending — slash commands or short text (e.g. **yes**/**no**, "
+                            f"**approve**/**deny**; only matches when a queue entry is waiting):\n"
                             f"• `/approve` — allow **this** subprocess only (once)\n"
                             f"• `/approve session` — allow **`{mid}`** for subprocess for **this chat session**\n"
                             f"• `/approve always` — allow **`{mid}`** for subprocess **until revoked** (saved under your Hermes home)\n"
@@ -6164,8 +6234,8 @@ class GatewayRunner:
                             f"⚠️ **Dangerous command requires approval:**\n"
                             f"```\n{cmd_preview}\n```\n"
                             f"Reason: {desc}\n\n"
-                            f"Reply `/approve` to execute, `/approve session` to approve this pattern "
-                            f"for the session, `/approve always` to approve permanently, or `/deny` to cancel."
+                            f"Reply `/approve` or short **yes**/**approve** to run once; `/approve session` or `/approve always` "
+                            f"for scope; **no**/**deny** or `/deny` to cancel."
                         )
                     def _log_approval_send(fut):
                         try:
@@ -6300,7 +6370,11 @@ class GatewayRunner:
                             logger.debug("Could not set up stream consumer: %s", _sc_err)
     
                     turn_route = self._resolve_turn_agent_config(
-                        message, model, runtime_kwargs, session_key=session_key
+                        message,
+                        model,
+                        runtime_kwargs,
+                        session_key=session_key,
+                        agent_cache_key=_cache_key_eff,
                     )
     
                     # Manual /models picks: skip profile_router LLM (aux Gemini, noisy on quota) and
@@ -6961,6 +7035,12 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                  Useful for systemd services to avoid restart-loop deadlocks
                  when the previous process hasn't fully exited yet.
     """
+    # Child processes (terminal tool, subprocesses) inherit this so
+    # ``hermes gateway restart`` defaults to a deferred/detached path that survives
+    # stopping the gateway from Slack/Telegram/WhatsApp.
+    os.environ["HERMES_GATEWAY_SUPERVISED"] = "1"
+    os.environ.setdefault("HERMES_GATEWAY_SESSION", "1")
+
     # Best-effort: terminate stray duplicate daemons for this HERMES_HOME before
     # we consult gateway.pid (watchdog-check also dedupes when enforcing singleton).
     try:

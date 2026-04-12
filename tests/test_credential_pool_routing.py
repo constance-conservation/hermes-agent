@@ -10,6 +10,7 @@ Covers:
 """
 
 import os
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -151,9 +152,11 @@ class TestGatewayTurnRoutePool:
         from agent.smart_model_routing import resolve_turn_route
         captured = {}
 
-        def spy_resolve(user_message, routing_config, primary):
+        def spy_resolve(user_message, routing_config, primary, agent=None, *, allow_cheap_route=True):
             captured["primary"] = primary
-            return resolve_turn_route(user_message, routing_config, primary)
+            return resolve_turn_route(
+                user_message, routing_config, primary, agent, allow_cheap_route=allow_cheap_route
+            )
 
         monkeypatch.setattr(
             "agent.smart_model_routing.resolve_turn_route", spy_resolve
@@ -163,6 +166,10 @@ class TestGatewayTurnRoutePool:
 
         runner = SimpleNamespace(
             _smart_model_routing={"enabled": False},
+            _gateway_models_sticky_lock=threading.Lock(),
+            _gateway_models_sticky={},
+            _agent_cache_lock=threading.Lock(),
+            _agent_cache={},
         )
 
         runtime_kwargs = {
@@ -180,6 +187,44 @@ class TestGatewayTurnRoutePool:
 
         assert "credential_pool" in captured["primary"]
         assert captured["primary"]["credential_pool"] is runtime_kwargs["credential_pool"]
+
+    def test_resolve_turn_passes_cached_agent_for_opm_parity(self, monkeypatch):
+        """Gateway must pass the session-cached AIAgent into resolve_turn_route like the CLI."""
+        from agent.smart_model_routing import resolve_turn_route
+
+        captured = {}
+
+        def spy_resolve(user_message, routing_config, primary, agent=None, *, allow_cheap_route=True):
+            captured["agent"] = agent
+            return resolve_turn_route(
+                user_message, routing_config, primary, agent, allow_cheap_route=allow_cheap_route
+            )
+
+        monkeypatch.setattr("agent.smart_model_routing.resolve_turn_route", spy_resolve)
+
+        from gateway.run import GatewayRunner
+
+        dummy_agent = object()
+        sk = "telegram:123:456"
+        runner = SimpleNamespace(
+            _smart_model_routing={"enabled": False},
+            _gateway_models_sticky_lock=threading.Lock(),
+            _gateway_models_sticky={},
+            _agent_cache_lock=threading.Lock(),
+            _agent_cache={sk: (dummy_agent, "sig")},
+        )
+        runtime_kwargs = {
+            "api_key": "sk-test",
+            "base_url": None,
+            "provider": "openai-codex",
+            "api_mode": "codex_responses",
+            "command": None,
+            "args": [],
+            "credential_pool": None,
+        }
+        bound = GatewayRunner._resolve_turn_agent_config.__get__(runner)
+        bound("hello", "gpt-5.4", runtime_kwargs, session_key=sk, agent_cache_key=sk)
+        assert captured.get("agent") is dummy_agent
 
 
 # ---------------------------------------------------------------------------

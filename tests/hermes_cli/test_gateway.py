@@ -252,3 +252,20 @@ class TestWaitForGatewayExit:
 
         # Should not raise — ProcessLookupError means it's already gone.
         gateway._wait_for_gateway_exit(timeout=10.0, force_after=2.0)
+
+
+class TestGatewayRestartDefer:
+    def test_should_defer_when_supervised(self, monkeypatch):
+        monkeypatch.setenv("HERMES_GATEWAY_SUPERVISED", "1")
+        args = SimpleNamespace(defer_restart=False, restart_sync=False)
+        assert gateway.gateway_restart_should_defer(args) is True
+
+    def test_should_not_defer_when_sync(self, monkeypatch):
+        monkeypatch.setenv("HERMES_GATEWAY_SUPERVISED", "1")
+        args = SimpleNamespace(defer_restart=False, restart_sync=True)
+        assert gateway.gateway_restart_should_defer(args) is False
+
+    def test_should_defer_with_explicit_flag(self, monkeypatch):
+        monkeypatch.delenv("HERMES_GATEWAY_SUPERVISED", raising=False)
+        args = SimpleNamespace(defer_restart=True, restart_sync=False)
+        assert gateway.gateway_restart_should_defer(args) is True

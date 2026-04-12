@@ -400,6 +400,8 @@ PTY mode: Set pty=true for interactive CLI tools (Codex, Claude Code, Python REP
 
 Do NOT use vim/nano/interactive tools without pty=true — they hang without a pseudo-terminal. Pipe git output to cat if it might page.
 Important: cloud sandboxes may be cleaned up, idled out, or recreated between turns. Persistent filesystem means files can resume later; it does NOT guarantee a continuously running machine or surviving background processes. Use terminal sandboxes for task work, not durable hosting.
+
+Gateway restarts from messaging (operator/droplet): use the repo venv and profile, e.g. ``cd <hermes-agent> && ./venv/bin/python -m hermes_cli.main -p chief-orchestrator gateway restart`` — deferred restart is automatic under the supervised gateway (no ``--sync``). Do not rely on raw ``gateway run`` to restart in the foreground.
 """
 
 # Global state for environment lifecycle management

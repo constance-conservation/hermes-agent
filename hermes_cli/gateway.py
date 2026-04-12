@@ -6,6 +6,7 @@ Handles: hermes gateway [run|start|stop|restart|status|install|uninstall|setup]
 
 import asyncio
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1386,6 +1387,119 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
         sys.exit(1)
 
 
+def spawn_gateway_run_replace_detached(delay_s: int = 0) -> None:
+    """Start ``hermes_cli.main gateway run --replace`` without blocking this process.
+
+    Used by ``gateway restart`` when no systemd/launchd service is in use. The
+    foreground :func:`run_gateway` would never return, which hangs agent terminal
+    tools and any subprocess of the running gateway.
+
+    When *delay_s* > 0, the child sleeps first so the current gateway process can
+    finish this tool call before ``--replace`` terminates it (required for
+    messaging/operator agents invoking restart from inside the gateway).
+    """
+    py = shlex.quote(sys.executable)
+    if delay_s > 0 and not is_windows():
+        inner = f"sleep {int(delay_s)}; exec {py} -m hermes_cli.main gateway run --replace"
+        cmd = ["/bin/bash", "-c", inner]
+    else:
+        if delay_s > 0 and is_windows():
+            print_warning(
+                "Deferred delay is not supported on Windows for manual replace; starting immediately."
+            )
+        cmd = [sys.executable, "-m", "hermes_cli.main", "gateway", "run", "--replace"]
+    popen_kw: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if is_windows():
+        # Detach from console; avoid a visible window for pythonw-style runs.
+        cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if cf:
+            popen_kw["creationflags"] = cf
+    else:
+        popen_kw["start_new_session"] = True
+    try:
+        subprocess.Popen(cmd, **popen_kw)
+    except OSError as e:
+        print_error(f"Failed to spawn gateway: {e}")
+        sys.exit(1)
+    try:
+        from hermes_constants import display_hermes_home
+
+        _home = display_hermes_home()
+    except Exception:
+        _home = "HERMES_HOME"
+    print_success("Gateway start scheduled (background).")
+    print_info(f"  Logs: {_home}/logs/gateway.log")
+    print_info("  Check: hermes gateway status")
+
+
+def _deferred_bash(inner: str) -> None:
+    """Run a bash -c script in a new session (survives parent gateway exit)."""
+    subprocess.Popen(
+        ["/bin/bash", "-c", inner],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def systemd_restart_deferred(system: bool = False, delay_s: int = 5) -> None:
+    """Schedule ``systemctl … restart`` after a delay (safe when run from the gateway process)."""
+    system = _select_systemd_scope(system)
+    if system:
+        _require_root_for_system_service("restart")
+    refresh_systemd_unit_if_needed(system=system)
+    _profile_gateway_dedupe_log("pre-restart")
+    svc = get_service_name()
+    sc = _systemctl_cmd(system)
+    restart_invocation = " ".join(shlex.quote(x) for x in sc + ["restart", svc])
+    delay = max(1, int(delay_s))
+    inner = f"sleep {delay}; {restart_invocation}"
+    sr = shutil.which("systemd-run")
+    if sr and not system:
+        try:
+            subprocess.Popen(
+                [sr, "--user", "--collect", "bash", "-c", inner],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            _deferred_bash(inner)
+    else:
+        _deferred_bash(inner)
+    print_success("Gateway service restart scheduled (detached).")
+    print_info(f"  Unit: {svc} — applies in ~{delay}s")
+
+
+def launchd_restart_deferred(delay_s: int = 5) -> None:
+    """Schedule ``launchctl kickstart -k`` after a delay (macOS LaunchAgent gateway)."""
+    _profile_gateway_dedupe_log("pre-restart")
+    refresh_launchd_plist_if_needed()
+    label = get_launchd_label()
+    uid = os.getuid()
+    lc = shutil.which("launchctl") or "/bin/launchctl"
+    target = f"gui/{uid}/{label}"
+    delay = max(1, int(delay_s))
+    inner = f"sleep {delay}; {shlex.quote(lc)} kickstart -k {shlex.quote(target)}"
+    _deferred_bash(inner)
+    print_success("Gateway LaunchAgent restart scheduled (detached).")
+    print_info(f"  Label: {target} — applies in ~{delay}s")
+
+
+def gateway_restart_should_defer(args) -> bool:
+    """True when restart must be scheduled asynchronously (messaging / in-gateway terminal)."""
+    defer_restart = bool(getattr(args, "defer_restart", False))
+    restart_sync = bool(getattr(args, "restart_sync", False))
+    supervised = os.environ.get("HERMES_GATEWAY_SUPERVISED") == "1"
+    return defer_restart or (supervised and not restart_sync)
+
+
 # =============================================================================
 # Gateway Setup (Interactive Messaging Platform Configuration)
 # =============================================================================
@@ -2317,12 +2431,47 @@ def gateway_command(args):
             print(f"✓ Stopped {killed} additional manual gateway process(es) for this profile")
     
     elif subcmd == "restart":
-        # Try service first, fall back to killing and restarting
+        # When run from a supervised gateway (Slack/Telegram/WhatsApp terminal), synchronous
+        # systemctl/launchctl restart tears down this process before the CLI finishes — use a
+        # detached delayed restart. ``--defer`` forces that path from a normal shell too.
         service_available = False
-        system = getattr(args, 'system', False)
+        system = getattr(args, "system", False)
         service_configured = False
-        
-        if is_linux() and (get_systemd_unit_path(system=False).exists() or get_systemd_unit_path(system=True).exists()):
+        use_defer = gateway_restart_should_defer(args)
+
+        if use_defer:
+            print_info(
+                "Using deferred restart (safe for messaging / gateway-managed terminal). "
+                "Override: --sync for immediate service restart from an interactive shell."
+            )
+            if is_linux() and (
+                get_systemd_unit_path(system=False).exists()
+                or get_systemd_unit_path(system=True).exists()
+            ):
+                service_configured = True
+                try:
+                    systemd_restart_deferred(system=system)
+                    service_available = True
+                except Exception as exc:
+                    print_warning(f"Deferred systemd restart: {exc}")
+            elif is_macos() and get_launchd_plist_path().exists():
+                service_configured = True
+                try:
+                    launchd_restart_deferred()
+                    service_available = True
+                except Exception as exc:
+                    print_warning(f"Deferred launchd restart: {exc}")
+            if not service_available:
+                # No unit / deferred failed — replace after delay without synchronous self-kill
+                print("Scheduling manual gateway replace (deferred)...")
+                spawn_gateway_run_replace_detached(delay_s=5)
+            return
+
+        # Synchronous path (interactive shells, or ``--sync`` under supervised gateway)
+        if is_linux() and (
+            get_systemd_unit_path(system=False).exists()
+            or get_systemd_unit_path(system=True).exists()
+        ):
             service_configured = True
             try:
                 systemd_restart(system=system)
@@ -2336,13 +2485,14 @@ def gateway_command(args):
                 service_available = True
             except subprocess.CalledProcessError:
                 pass
-        
+
         if not service_available:
             # systemd/launchd restart failed — check if linger is the issue
             if is_linux():
                 linger_ok, _detail = get_systemd_linger_status()
                 if linger_ok is not True:
                     import getpass
+
                     _username = getpass.getuser()
                     print()
                     print("⚠ Cannot restart gateway as a service — linger is not enabled.")
@@ -2368,10 +2518,11 @@ def gateway_command(args):
 
             _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
 
-            # Start fresh
-            print("Starting gateway...")
-            run_gateway(verbose=0)
-    
+            # Start fresh — must not use foreground :func:`run_gateway` here: it blocks until
+            # the gateway exits, which hangs agent terminal sessions and tools indefinitely.
+            print("Starting gateway (detached)...")
+            spawn_gateway_run_replace_detached()
+
     elif subcmd == "status":
         deep = getattr(args, 'deep', False)
         system = getattr(args, 'system', False)

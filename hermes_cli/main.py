@@ -4294,6 +4294,24 @@ For more help on a command:
     # gateway restart
     gateway_restart = gateway_subparsers.add_parser("restart", help="Restart gateway service")
     gateway_restart.add_argument("--system", action="store_true", help="Target the Linux system-level gateway service")
+    gateway_restart.add_argument(
+        "--defer",
+        action="store_true",
+        dest="defer_restart",
+        help=(
+            "Schedule a delayed detached restart (default when the gateway sets "
+            "HERMES_GATEWAY_SUPERVISED — safe from messaging/terminal inside the gateway)"
+        ),
+    )
+    gateway_restart.add_argument(
+        "--sync",
+        action="store_true",
+        dest="restart_sync",
+        help=(
+            "Force immediate service stop/start (may interrupt the CLI if run from the "
+            "same gateway process; use from an interactive shell or SSH)"
+        ),
+    )
     
     # gateway status
     gateway_status = gateway_subparsers.add_parser("status", help="Show gateway status")
