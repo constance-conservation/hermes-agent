@@ -18,7 +18,16 @@
  *   node bridge.js --port 3000 --session ~/.hermes/whatsapp/session
  */
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } from '@whiskeysockets/baileys';
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  downloadMediaMessage,
+  jidDecode,
+  jidEncode,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
 import express from 'express';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -26,7 +35,12 @@ import path from 'path';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
 import { randomBytes } from 'crypto';
 import qrcode from 'qrcode-terminal';
-import { matchesAllowedUser, parseAllowedUsers } from './allowlist.js';
+import {
+  matchesAllowedUser,
+  parseAllowedUsers,
+  normalizeWhatsAppIdentifier,
+  expandWhatsAppIdentifiers,
+} from './allowlist.js';
 
 // Parse CLI args
 const args = process.argv.slice(2);
@@ -48,18 +62,40 @@ const DOCUMENT_CACHE_DIR = path.join(process.env.HOME || '~', '.hermes', 'docume
 const AUDIO_CACHE_DIR = path.join(process.env.HOME || '~', '.hermes', 'audio_cache');
 const PAIR_ONLY = args.includes('--pair-only');
 const WHATSAPP_MODE = getArg('mode', process.env.WHATSAPP_MODE || 'self-chat'); // "bot" or "self-chat"
+/** When WHATSAPP_MODE=self-chat: allow DMs that are not "message yourself" (default off). */
+const WHATSAPP_ALLOW_NON_SELF_DM =
+  typeof process.env.WHATSAPP_ALLOW_NON_SELF_DM === 'string' &&
+  ['1', 'true', 'yes', 'on'].includes(process.env.WHATSAPP_ALLOW_NON_SELF_DM.toLowerCase());
 const ALLOWED_USERS = parseAllowedUsers(process.env.WHATSAPP_ALLOWED_USERS || '');
 const DEFAULT_REPLY_PREFIX = '⚕ *Hermes Agent*\n────────────\n';
 const REPLY_PREFIX = process.env.WHATSAPP_REPLY_PREFIX === undefined
   ? DEFAULT_REPLY_PREFIX
   : process.env.WHATSAPP_REPLY_PREFIX.replace(/\\n/g, '\n');
 
+/** Invisible marker on bot-mode outbound text so upserts can distinguish Hermes vs user (loop-safe). */
+const BOT_OUTBOUND_SENTINEL = '\u200C\u200C\u200C';
+
+/** Min length for prefix-based echo detection (avoids `''.startsWith('')` / tiny-prefix false positives). */
+const MIN_PREFIX_ECHO_LEN = 8;
+
+function isLikelyAgentEchoBody(body, messageId) {
+  const bn = (body || '').replace(/\r\n/g, '\n');
+  if (WHATSAPP_MODE === 'bot' && bn.startsWith(BOT_OUTBOUND_SENTINEL)) return true;
+  if (recentlySentIds.has(messageId)) return true;
+  const rp = (REPLY_PREFIX || '').replace(/\r\n/g, '\n');
+  if (rp.length < MIN_PREFIX_ECHO_LEN) return false;
+  return bn.startsWith(rp);
+}
+
 function formatOutgoingMessage(message) {
-  // In bot mode, messages come from a different number so the prefix is
-  // redundant — the sender identity is already clear.  Only prepend in
-  // self-chat mode where bot and user share the same number.
-  if (WHATSAPP_MODE !== 'self-chat') return message;
-  return REPLY_PREFIX ? `${REPLY_PREFIX}${message}` : message;
+  const raw = String(message ?? '');
+  if (WHATSAPP_MODE === 'self-chat') {
+    return REPLY_PREFIX ? `${REPLY_PREFIX}${raw}` : raw;
+  }
+  if (WHATSAPP_MODE === 'bot') {
+    return `${BOT_OUTBOUND_SENTINEL}${raw}`;
+  }
+  return raw;
 }
 
 mkdirSync(SESSION_DIR, { recursive: true });
@@ -79,6 +115,88 @@ function buildLidMap() {
   return map;
 }
 let lidToPhone = buildLidMap();
+
+/**
+ * sendMessage() is most reliable with @s.whatsapp.net for 1:1 chats. Session/chat keys
+ * may arrive as @lid; map LID → phone via lid-mapping-*.json so replies reach the device.
+ */
+function resolveOutboundChatJid(raw) {
+  if (!raw) return raw;
+  const s = String(raw);
+  const cand = jidNormalizedUser(s) || s;
+  const d = jidDecode(cand);
+  if (!d) return cand;
+  if (d.server === 'g.us' || d.server === 'broadcast' || s.includes('status@')) {
+    return cand;
+  }
+  if (d.server === 'lid') {
+    const phone = lidToPhone[String(d.user)];
+    if (phone) {
+      const pn = jidEncode(phone, 's.whatsapp.net');
+      if (WHATSAPP_DEBUG && pn !== s) {
+        try {
+          console.log(JSON.stringify({ event: 'send_jid_resolve', from: s, to: pn }));
+        } catch { /* ignore */ }
+      }
+      return pn;
+    }
+  }
+  return cand;
+}
+
+/** Strip :device@ and @host so PN/LID JIDs match gateway allowlist + lid-mapping files. */
+function jidNumericId(jid) {
+  return normalizeWhatsAppIdentifier(jid || '');
+}
+
+/**
+ * Self-chat "fromMe" messages must pass here or they are dropped with no enqueue.
+ * WhatsApp may use `phone:device@s.whatsapp.net`, `phone@s.whatsapp.net`, or `lid@lid`;
+ * raw `split('@')[0]` is wrong when a device segment is present.
+ */
+function isSelfChatDm(chatId, sock) {
+  const myNumber = jidNumericId(sock.user?.id || '');
+  const myLid = jidNumericId(sock.user?.lid || '');
+  const chatNorm = jidNumericId(chatId);
+  if (!chatNorm) return false;
+  if (myNumber && chatNorm === myNumber) return true;
+  if (myLid && chatNorm === myLid) return true;
+  if (myNumber && lidToPhone[chatNorm] === myNumber) return true;
+  try {
+    const chatAliases = expandWhatsAppIdentifiers(chatId, SESSION_DIR);
+    for (const seed of [myNumber, myLid].filter(Boolean)) {
+      const selfAliases = expandWhatsAppIdentifiers(seed, SESSION_DIR);
+      for (const a of chatAliases) {
+        if (selfAliases.has(a)) return true;
+      }
+    }
+  } catch {
+    /* ignore mapping read errors */
+  }
+  return false;
+}
+
+/** Plain text from any common Baileys leaf (incl. wrappers + edits). */
+function extractTextBody(message) {
+  if (!message) return '';
+  if (message.conversation) return String(message.conversation);
+  const et = message.extendedTextMessage;
+  if (et?.text) return String(et.text);
+  if (message.imageMessage?.caption) return String(message.imageMessage.caption);
+  if (message.videoMessage?.caption) return String(message.videoMessage.caption);
+  if (message.documentMessage?.caption) return String(message.documentMessage.caption);
+  for (const wrap of ['ephemeralMessage', 'viewOnceMessage', 'documentWithCaptionMessage', 'buttonsMessage', 'listMessage']) {
+    if (message[wrap]?.message) {
+      const inner = extractTextBody(message[wrap].message);
+      if (inner) return inner;
+    }
+  }
+  if (message.editedMessage?.message) {
+    const inner = extractTextBody(message.editedMessage.message);
+    if (inner) return inner;
+  }
+  return '';
+}
 
 const logger = pino({ level: 'warn' });
 
@@ -175,43 +293,58 @@ async function startSocket() {
       const isGroup = chatId.endsWith('@g.us');
       const senderNumber = senderId.replace(/@.*/, '');
 
+      // Self-chat mode (recommended for two-host operator + droplet): only the "message
+      // yourself" 1:1 thread — not groups, not status, not other DMs — unless
+      // WHATSAPP_ALLOW_NON_SELF_DM=1.
+      if (WHATSAPP_MODE === 'self-chat' && !WHATSAPP_ALLOW_NON_SELF_DM) {
+        if (isGroup || String(chatId || '').includes('status')) {
+          if (WHATSAPP_DEBUG) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_only',
+                detail: isGroup ? 'group' : 'status',
+                chatId: String(chatId || '').slice(0, 64),
+              }));
+            } catch { /* ignore */ }
+          }
+          continue;
+        }
+        if (!isSelfChatDm(chatId, sock)) {
+          if (WHATSAPP_DEBUG) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_only',
+                chatId: String(chatId || '').slice(0, 64),
+              }));
+            } catch { /* ignore */ }
+          }
+          continue;
+        }
+      }
+
       // Handle fromMe messages based on mode
       if (msg.key.fromMe) {
         if (isGroup || chatId.includes('status')) continue;
-
-        if (WHATSAPP_MODE === 'bot') {
-          // Bot mode: separate number. ALL fromMe are echo-backs of our own replies — skip.
-          continue;
-        }
-
-        // Self-chat mode: only allow messages in the user's own self-chat
-        // WhatsApp now uses LID (Linked Identity Device) format: 67427329167522@lid
-        // AND classic format: 34652029134@s.whatsapp.net
-        // sock.user has both: { id: "number:10@s.whatsapp.net", lid: "lid_number:10@lid" }
-        const myNumber = (sock.user?.id || '').replace(/:.*@/, '@').replace(/@.*/, '');
-        const myLid = (sock.user?.lid || '').replace(/:.*@/, '@').replace(/@.*/, '');
-        const chatNumber = chatId.replace(/@.*/, '');
-        const isSelfChat = (myNumber && chatNumber === myNumber) || (myLid && chatNumber === myLid);
-        if (!isSelfChat) continue;
+        // Self-chat: non-self threads already dropped above. Bot mode: deliver fromMe
+        // (Hermes echoes filtered below).
       }
 
-      // Check allowlist for messages from others (resolve LID ↔ phone aliases)
-      if (!msg.key.fromMe && !matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
+      // Allowlist: inbound uses remote sender; fromMe uses remote chat JID (peer you are messaging).
+      const peerForAllowlist = msg.key.fromMe ? chatId : senderId;
+      if (!matchesAllowedUser(peerForAllowlist, ALLOWED_USERS, SESSION_DIR)) {
         continue;
       }
 
-      // Extract message body
-      let body = '';
+      // Extract message body (conversation / extendedText / nested wrappers / captions)
+      let body = extractTextBody(msg.message);
       let hasMedia = false;
       let mediaType = '';
       const mediaUrls = [];
 
-      if (msg.message.conversation) {
-        body = msg.message.conversation;
-      } else if (msg.message.extendedTextMessage?.text) {
-        body = msg.message.extendedTextMessage.text;
-      } else if (msg.message.imageMessage) {
-        body = msg.message.imageMessage.caption || '';
+      if (msg.message.imageMessage) {
+        if (!body) body = msg.message.imageMessage.caption || '';
         hasMedia = true;
         mediaType = 'image';
         try {
@@ -227,7 +360,7 @@ async function startSocket() {
           console.error('[bridge] Failed to download image:', err.message);
         }
       } else if (msg.message.videoMessage) {
-        body = msg.message.videoMessage.caption || '';
+        if (!body) body = msg.message.videoMessage.caption || '';
         hasMedia = true;
         mediaType = 'video';
         try {
@@ -257,7 +390,7 @@ async function startSocket() {
           console.error('[bridge] Failed to download audio:', err.message);
         }
       } else if (msg.message.documentMessage) {
-        body = msg.message.documentMessage.caption || '';
+        if (!body) body = msg.message.documentMessage.caption || '';
         hasMedia = true;
         mediaType = 'document';
         const fileName = msg.message.documentMessage.fileName || 'document';
@@ -278,8 +411,8 @@ async function startSocket() {
         body = `[${mediaType} received]`;
       }
 
-      // Ignore Hermes' own reply messages in self-chat mode to avoid loops.
-      if (msg.key.fromMe && ((REPLY_PREFIX && body.startsWith(REPLY_PREFIX)) || recentlySentIds.has(msg.key.id))) {
+      // Ignore Hermes' own replies (prefix + recently sent ids) to avoid loops.
+      if (msg.key.fromMe && isLikelyAgentEchoBody(body, msg.key.id)) {
         if (WHATSAPP_DEBUG) {
           try { console.log(JSON.stringify({ event: 'ignored', reason: 'agent_echo', chatId, messageId: msg.key.id })); } catch {}
         }
@@ -298,10 +431,13 @@ async function startSocket() {
         continue;
       }
 
+      // Gateway allowlist uses user_id = senderId; for fromMe DMs the peer is remoteJid (chatId).
+      const effectiveSenderId = msg.key.fromMe && !isGroup ? chatId : senderId;
+
       const event = {
         messageId: msg.key.id,
         chatId,
-        senderId,
+        senderId: effectiveSenderId,
         senderName: msg.pushName || senderNumber,
         chatName: isGroup ? (chatId.split('@')[0]) : (msg.pushName || senderNumber),
         isGroup,
@@ -342,7 +478,8 @@ app.post('/send', async (req, res) => {
   }
 
   try {
-    const sent = await sock.sendMessage(chatId, { text: formatOutgoingMessage(message) });
+    const jid = resolveOutboundChatJid(chatId);
+    const sent = await sock.sendMessage(jid, { text: formatOutgoingMessage(message) });
 
     // Track sent message ID to prevent echo-back loops
     if (sent?.key?.id) {
@@ -370,8 +507,9 @@ app.post('/edit', async (req, res) => {
   }
 
   try {
-    const key = { id: messageId, fromMe: true, remoteJid: chatId };
-    await sock.sendMessage(chatId, { text: formatOutgoingMessage(message), edit: key });
+    const jid = resolveOutboundChatJid(chatId);
+    const key = { id: messageId, fromMe: true, remoteJid: jid };
+    await sock.sendMessage(jid, { text: formatOutgoingMessage(message), edit: key });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -418,12 +556,22 @@ app.post('/send-media', async (req, res) => {
     const type = mediaType || inferMediaType(ext);
     let msgPayload;
 
+    const jid = resolveOutboundChatJid(chatId);
+
     switch (type) {
       case 'image':
-        msgPayload = { image: buffer, caption: caption || undefined, mimetype: MIME_MAP[ext] || 'image/jpeg' };
+        msgPayload = {
+          image: buffer,
+          caption: caption ? formatOutgoingMessage(caption) : undefined,
+          mimetype: MIME_MAP[ext] || 'image/jpeg',
+        };
         break;
       case 'video':
-        msgPayload = { video: buffer, caption: caption || undefined, mimetype: MIME_MAP[ext] || 'video/mp4' };
+        msgPayload = {
+          video: buffer,
+          caption: caption ? formatOutgoingMessage(caption) : undefined,
+          mimetype: MIME_MAP[ext] || 'video/mp4',
+        };
         break;
       case 'audio': {
         const audioMime = (ext === 'ogg' || ext === 'opus') ? 'audio/ogg; codecs=opus' : 'audio/mpeg';
@@ -435,13 +583,13 @@ app.post('/send-media', async (req, res) => {
         msgPayload = {
           document: buffer,
           fileName: fileName || path.basename(filePath),
-          caption: caption || undefined,
+          caption: caption ? formatOutgoingMessage(caption) : undefined,
           mimetype: MIME_MAP[ext] || 'application/octet-stream',
         };
         break;
     }
 
-    const sent = await sock.sendMessage(chatId, msgPayload);
+    const sent = await sock.sendMessage(jid, msgPayload);
 
     // Track sent message ID to prevent echo-back loops
     if (sent?.key?.id) {
@@ -467,7 +615,8 @@ app.post('/typing', async (req, res) => {
   if (!chatId) return res.status(400).json({ error: 'chatId required' });
 
   try {
-    await sock.sendPresenceUpdate('composing', chatId);
+    const jid = resolveOutboundChatJid(chatId);
+    await sock.sendPresenceUpdate('composing', jid);
     res.json({ success: true });
   } catch (err) {
     res.json({ success: false });

@@ -20,53 +20,52 @@ This guide is for running **two Hermes deployments** that must **never** share l
 3. **`HERMES_GATEWAY_LOCK_INSTANCE` is not a substitute for (1) and (2)**  
    It only separates **filesystem** lock paths under `$XDG_STATE_HOME/hermes/gateway-locks/` when you copy `HERMES_HOME` between machines. It does **not** split WhatsApp/Telegram/Slack provider sessions.
 
-## Recommended WhatsApp split (your scenario)
+## Recommended WhatsApp split (operator Mac + droplet VPS)
 
-| Host | WhatsApp account (QR session) | Mode | Purpose |
-|------|------------------------------|------|--------|
-| **Droplet** | **Business** number (e.g. `61483757391`) | `self-chat` | You message **yourself** on the business account; only the droplet gateway handles that thread. |
-| **Operator Mac** | **Personal** number (e.g. `61419933874`) | `bot` | You chat **with your business contact** from the personal app; the operator gateway is logged in as **personal** and accepts DMs **from** the business JID. |
+Use **two different WhatsApp logins** (one phone number per host). On **each** host, Hermes should only **receive and send** in the **self-chat** thread — the “message yourself” / chat-with-your-own-number conversation — **not** in DMs with other contacts and **not** in groups, unless you explicitly opt in (see below).
 
-This uses **two different WhatsApp accounts**, so two Baileys sessions are valid at the same time.
+**Do not use the old pattern:** operator logged in as **personal** with `WHATSAPP_MODE=bot` and `WHATSAPP_ALLOWED_USERS` set to the **business** number so you DM personal ↔ business. That cross-number setup is deprecated; both hosts use **`WHATSAPP_MODE=self-chat`** on their respective accounts.
 
-### Droplet (`chief-orchestrator` profile) — business self-chat only
+| Host | WhatsApp account (QR session) | Mode | `WHATSAPP_ALLOWED_USERS` |
+|------|------------------------------|------|--------------------------|
+| **Droplet** | **Business** number (e.g. `61483757391`) | `self-chat` | That **same** business number (E.164, no `+`) |
+| **Operator Mac** | **Personal** number (e.g. `61419933874`) | `self-chat` | That **same** personal number (E.164, no `+`) |
 
-In **`HERMES_HOME/.env`** (profile or top-level merged env):
+The bridge drops traffic that is **not** the self-chat thread when `WHATSAPP_MODE=self-chat` and **`WHATSAPP_ALLOW_NON_SELF_DM`** is unset/false (default). Optional: `whatsapp.unauthorized_dm_behavior: ignore` in **`config.yaml`** so unauthorized surfaces stay silent.
+
+### Droplet (`chief-orchestrator` profile) — business line
+
+In **`HERMES_HOME/.env`**:
 
 ```bash
 WHATSAPP_ENABLED=true
 WHATSAPP_MODE=self-chat
-# Only the business number may trigger non–self-chat paths; blocks DMs from your personal number.
 WHATSAPP_ALLOWED_USERS=61483757391
+# Default: omit or false — do not handle non-self-chat DMs until you expand allowlists deliberately:
+# WHATSAPP_ALLOW_NON_SELF_DM=false
 ```
 
-In **`config.yaml`** (optional but recommended):
+Pair the bridge with the **WhatsApp Business** app for that number (`hermes whatsapp` on the server).
 
-```yaml
-whatsapp:
-  unauthorized_dm_behavior: ignore
-```
+### Operator Mac — personal line
 
-Pair the bridge with the **WhatsApp Business** app for `61483757391` (`hermes whatsapp` on the server).
-
-If the gateway keeps sending **DM pairing codes** even though `WHATSAPP_ALLOWED_USERS` lists your business number, ensure `lid-mapping-*.json` under `HERMES_HOME/whatsapp/session` (or `platforms/whatsapp/session`) is present after pairing—Hermes resolves phone ↔ LID against those files—and that you are not mixing two different `HERMES_HOME` profiles for the same host.
-
-If Hermes **replies** never show on the phone but inbound works, the session may be using **LID** JIDs while **outbound** delivery expects a phone JID—the bridge resolves `@lid` → `...@s.whatsapp.net` using those same mapping files when sending.
-
-### Operator Mac — personal inbox, business peer only
-
-On the **operator** machine, use a **separate** `HERMES_HOME` (e.g. `~/.hermes/profiles/operator` or default `~/.hermes`).
+Use a **separate** `HERMES_HOME` (e.g. `~/.hermes/profiles/operator` or default `~/.hermes`).
 
 ```bash
 WHATSAPP_ENABLED=true
-WHATSAPP_MODE=bot
-# Allow incoming messages whose sender is your business number (the contact you message from personal).
-WHATSAPP_ALLOWED_USERS=61483757391
+WHATSAPP_MODE=self-chat
+WHATSAPP_ALLOWED_USERS=61419933874
 ```
 
-Pair with the **personal** WhatsApp (not Business). Hermes sees the DM thread with your business contact: messages **from** business (incoming) and messages **you send** from personal to business (your prompts are delivered to the gateway). Replies go back on that thread. No feedback loop with the droplet because the droplet is logged in as a **different** account.
+Pair with the **personal** WhatsApp app for that number. Interact with Hermes only in **self-chat** on that device.
 
-The bridge tags **bot-mode** outbound text with an invisible sentinel so your own Hermes replies are not mistaken for new user prompts (loop-safe), in addition to message-id tracking. If you ever see echoes in self-chat, keep the default reply prefix (or raise `MIN_PREFIX_ECHO_LEN` in the bridge).
+### LID mapping and replies
+
+If the gateway sends **DM pairing codes** even though allowlists look correct, ensure `lid-mapping-*.json` under `HERMES_HOME/whatsapp/session` (or `platforms/whatsapp/session`) exists after pairing. If **outbound** replies never appear, the session may be using **LID** JIDs — the bridge maps `@lid` → `...@s.whatsapp.net` using those files.
+
+### Extending beyond self-chat later
+
+When you intentionally add more numbers, groups, or non-self DMs, set **`WHATSAPP_ALLOW_NON_SELF_DM=true`**, tune **`WHATSAPP_ALLOWED_USERS`** / **`WHATSAPP_ALLOWED_CHATS`**, and follow [WhatsApp setup](./whatsapp.md).
 
 ## Lock instance + service install (both hosts)
 
@@ -108,7 +107,8 @@ Strict all-platform health (when enabled) requires every configured adapter conn
 ## Checklist summary
 
 - [ ] Different **WhatsApp** QR logins (business on droplet, personal on operator).
-- [ ] `WHATSAPP_ALLOWED_USERS` tuned so droplet does **not** accept personal-number DMs on the business inbox.
+- [ ] Both hosts: **`WHATSAPP_MODE=self-chat`**, **`WHATSAPP_ALLOWED_USERS`** = that host’s **own** number only (unless you have deliberately widened access).
+- [ ] **`WHATSAPP_ALLOW_NON_SELF_DM`** left unset/false until you explicitly allow non-self-chat DMs.
 - [ ] Telegram/Slack: **disjoint tokens** or **disabled** on one host.
 - [ ] `HERMES_GATEWAY_LOCK_INSTANCE` set and services reinstalled on **both** hosts.
 - [ ] One gateway + one external watchdog per `HERMES_HOME` per machine.

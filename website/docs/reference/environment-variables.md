@@ -174,8 +174,9 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `SLACK_NOTIFY_WITH_USER_MENTION` | Prepend `<@U…>` on DM/home posts for Slack push notifications (`true`/`false`, default `true`) |
 | `SLACK_NOTIFY_USER_ID` | Member ID to mention on `SLACK_HOME_CHANNEL` when metadata has no user (optional; else first `SLACK_ALLOWED_USERS`) |
 | `WHATSAPP_ENABLED` | Enable the WhatsApp bridge (`true`/`false`) |
-| `WHATSAPP_MODE` | `bot` (separate number) or `self-chat` (message yourself) |
+| `WHATSAPP_MODE` | `bot` (separate number / open DMs per allowlist) or `self-chat` (only the “message yourself” thread, unless `WHATSAPP_ALLOW_NON_SELF_DM`) |
 | `WHATSAPP_ALLOWED_USERS` | Comma-separated phone numbers (with country code, no `+`), or `*` to allow all senders |
+| `WHATSAPP_ALLOW_NON_SELF_DM` | When `WHATSAPP_MODE=self-chat`: set `true`/`1`/`yes`/`on` to allow 1:1 chats that are **not** self-chat. Default off — bridge ignores other DMs |
 | `WHATSAPP_ALLOW_ALL_USERS` | Allow all WhatsApp senders without an allowlist (`true`/`false`) |
 | `WHATSAPP_DEBUG` | Log raw message events in the bridge for troubleshooting (`true`/`false`) |
 | `HERMES_GATEWAY_LOCK_INSTANCE` | Short label (e.g. `droplet`, `operator-mac`) embedded in **generated** `hermes gateway install` and `hermes gateway watchdog-install` service files so token lock paths under `$XDG_STATE_HOME/hermes/gateway-locks/` differ per machine. Export **before** `gateway install --force`. Does **not** replace distinct Telegram/Slack tokens or separate WhatsApp logins — see [Two isolated gateways](/docs/user-guide/messaging/two-host-operator-droplet). |

@@ -60,6 +60,8 @@
 
 ## WhatsApp
 
+Default for **two-host** (operator + droplet): **`WHATSAPP_MODE=self-chat`** on each gateway; **`WHATSAPP_ALLOWED_USERS`** = that host’s **own** E.164 number; leave **`WHATSAPP_ALLOW_NON_SELF_DM`** unset/false until non-self-chat DMs are explicitly approved. See `policies/core/messaging/whatsapp-self-chat-default.md` and `website/docs/user-guide/messaging/two-host-operator-droplet.md`.
+
 | Logical channel | Chat ID | Notes |
 |-----------------|---------|--------|
 | | | |

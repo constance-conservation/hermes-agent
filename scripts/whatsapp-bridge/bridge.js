@@ -62,6 +62,10 @@ const DOCUMENT_CACHE_DIR = path.join(process.env.HOME || '~', '.hermes', 'docume
 const AUDIO_CACHE_DIR = path.join(process.env.HOME || '~', '.hermes', 'audio_cache');
 const PAIR_ONLY = args.includes('--pair-only');
 const WHATSAPP_MODE = getArg('mode', process.env.WHATSAPP_MODE || 'self-chat'); // "bot" or "self-chat"
+/** When WHATSAPP_MODE=self-chat: allow DMs that are not "message yourself" (default off). */
+const WHATSAPP_ALLOW_NON_SELF_DM =
+  typeof process.env.WHATSAPP_ALLOW_NON_SELF_DM === 'string' &&
+  ['1', 'true', 'yes', 'on'].includes(process.env.WHATSAPP_ALLOW_NON_SELF_DM.toLowerCase());
 const ALLOWED_USERS = parseAllowedUsers(process.env.WHATSAPP_ALLOWED_USERS || '');
 const DEFAULT_REPLY_PREFIX = '⚕ *Hermes Agent*\n────────────\n';
 const REPLY_PREFIX = process.env.WHATSAPP_REPLY_PREFIX === undefined
@@ -289,31 +293,42 @@ async function startSocket() {
       const isGroup = chatId.endsWith('@g.us');
       const senderNumber = senderId.replace(/@.*/, '');
 
+      // Self-chat mode (recommended for two-host operator + droplet): only the "message
+      // yourself" 1:1 thread — not groups, not status, not other DMs — unless
+      // WHATSAPP_ALLOW_NON_SELF_DM=1.
+      if (WHATSAPP_MODE === 'self-chat' && !WHATSAPP_ALLOW_NON_SELF_DM) {
+        if (isGroup || String(chatId || '').includes('status')) {
+          if (WHATSAPP_DEBUG) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_only',
+                detail: isGroup ? 'group' : 'status',
+                chatId: String(chatId || '').slice(0, 64),
+              }));
+            } catch { /* ignore */ }
+          }
+          continue;
+        }
+        if (!isSelfChatDm(chatId, sock)) {
+          if (WHATSAPP_DEBUG) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_only',
+                chatId: String(chatId || '').slice(0, 64),
+              }));
+            } catch { /* ignore */ }
+          }
+          continue;
+        }
+      }
+
       // Handle fromMe messages based on mode
       if (msg.key.fromMe) {
         if (isGroup || chatId.includes('status')) continue;
-
-        if (WHATSAPP_MODE === 'bot') {
-          // Dedicated bot number: outbound traffic is usually Hermes (filtered below via
-          // sent message ids + reply prefix). Personal-account "bot" pairing (two-host
-          // operator setup): user messages to another contact (e.g. business) are also
-          // fromMe — those must be delivered; do not skip here.
-        } else {
-          // Self-chat mode: only allow messages in the user's own self-chat (PN or LID JID).
-          if (!isSelfChatDm(chatId, sock)) {
-            if (WHATSAPP_DEBUG) {
-              try {
-                console.log(JSON.stringify({
-                  event: 'ignored',
-                  reason: 'fromMe_not_self_chat',
-                  chatHost: (chatId.split('@')[1] || '').slice(0, 12),
-                  hasMyLid: !!sock.user?.lid,
-                }));
-              } catch { /* ignore */ }
-            }
-            continue;
-          }
-        }
+        // Self-chat: non-self threads already dropped above. Bot mode: deliver fromMe
+        // (Hermes echoes filtered below).
       }
 
       // Allowlist: inbound uses remote sender; fromMe uses remote chat JID (peer you are messaging).

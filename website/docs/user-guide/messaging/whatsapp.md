@@ -28,6 +28,12 @@ bot stops working after a WhatsApp update, pull the latest Hermes version and re
 | **Separate bot number** (recommended) | Dedicate a phone number to the bot. People message that number directly. | Clean UX, multiple users, lower ban risk |
 | **Personal self-chat** | Use your own WhatsApp. You message yourself to talk to the agent. | Quick setup, single user, testing |
 
+### Operator + droplet (two hosts, two numbers)
+
+For a **Mac operator** and a **VPS droplet** with **different** WhatsApp logins, use **`WHATSAPP_MODE=self-chat` on both**: interact with Hermes only in the **self-chat** (“message yourself”) thread on **each** number. Set **`WHATSAPP_ALLOWED_USERS`** to **that host’s own** E.164 digits (no `+`). The bridge ignores **groups**, **status**, and **other** 1:1 DMs unless **`WHATSAPP_ALLOW_NON_SELF_DM=true`**.
+
+**Deprecated:** operator **`WHATSAPP_MODE=bot`** with **`WHATSAPP_ALLOWED_USERS`** set to the **other** line’s number (personal↔business DMs). Use self-chat per line instead — see [Two isolated gateways](./two-host-operator-droplet.md).
+
 ---
 
 ## Prerequisites
@@ -94,6 +100,9 @@ Add the following to your `~/.hermes/.env` file:
 # Required
 WHATSAPP_ENABLED=true
 WHATSAPP_MODE=bot                          # "bot" or "self-chat"
+
+# With WHATSAPP_MODE=self-chat: set true only if you need 1:1 chats that are not self-chat (default off)
+# WHATSAPP_ALLOW_NON_SELF_DM=false
 
 # Access control — pick ONE of these options:
 WHATSAPP_ALLOWED_USERS=15551234567         # Comma-separated phone numbers (with country code, no +)
