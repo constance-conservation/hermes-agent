@@ -178,6 +178,7 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `WHATSAPP_ALLOWED_USERS` | Comma-separated phone numbers (with country code, no `+`), or `*` to allow all senders |
 | `WHATSAPP_ALLOW_ALL_USERS` | Allow all WhatsApp senders without an allowlist (`true`/`false`) |
 | `WHATSAPP_DEBUG` | Log raw message events in the bridge for troubleshooting (`true`/`false`) |
+| `HERMES_GATEWAY_LOCK_INSTANCE` | Short label (e.g. `droplet`, `operator-mac`) embedded in **generated** `hermes gateway install` and `hermes gateway watchdog-install` service files so token lock paths under `$XDG_STATE_HOME/hermes/gateway-locks/` differ per machine. Export **before** `gateway install --force`. Does **not** replace distinct Telegram/Slack tokens or separate WhatsApp logins — see [Two isolated gateways](/docs/user-guide/messaging/two-host-operator-droplet). |
 | `SIGNAL_HTTP_URL` | signal-cli daemon HTTP endpoint (for example `http://127.0.0.1:8080`) |
 | `SIGNAL_ACCOUNT` | Bot phone number in E.164 format |
 | `SIGNAL_ALLOWED_USERS` | Comma-separated E.164 phone numbers or UUIDs |

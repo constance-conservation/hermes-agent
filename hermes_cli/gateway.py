@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
@@ -540,6 +541,25 @@ def _hermes_home_for_target_user(target_home_dir: str) -> str:
         return str(current_hermes)
 
 
+def _optional_gateway_lock_instance_systemd_line() -> str:
+    """Extra ``Environment=`` line when ``HERMES_GATEWAY_LOCK_INSTANCE`` is set (two-host isolation)."""
+    v = (os.getenv("HERMES_GATEWAY_LOCK_INSTANCE") or "").strip()
+    if not v or "\n" in v or "\x00" in v:
+        return ""
+    return f'Environment="HERMES_GATEWAY_LOCK_INSTANCE={v}"\n'
+
+
+def _optional_gateway_lock_instance_plist_entries() -> str:
+    """Extra ``EnvironmentVariables`` keys when ``HERMES_GATEWAY_LOCK_INSTANCE`` is set."""
+    v = (os.getenv("HERMES_GATEWAY_LOCK_INSTANCE") or "").strip()
+    if not v or "\n" in v or "\x00" in v:
+        return ""
+    esc = _xml_escape(v)
+    return f"""        <key>HERMES_GATEWAY_LOCK_INSTANCE</key>
+        <string>{esc}</string>
+"""
+
+
 def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) -> str:
     python_path = get_python_path()
     working_dir = str(PROJECT_ROOT)
@@ -582,7 +602,7 @@ Environment="LOGNAME={username}"
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
 Environment="HERMES_HOME={hermes_home}"
-Restart=on-failure
+{_optional_gateway_lock_instance_systemd_line()}Restart=on-failure
 RestartSec=30
 KillMode=mixed
 KillSignal=SIGTERM
@@ -611,7 +631,7 @@ WorkingDirectory={working_dir}
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
 Environment="HERMES_HOME={hermes_home}"
-Restart=on-failure
+{_optional_gateway_lock_instance_systemd_line()}Restart=on-failure
 RestartSec=30
 KillMode=mixed
 KillSignal=SIGTERM
@@ -944,7 +964,7 @@ def generate_launchd_plist() -> str:
         <string>{venv_dir}</string>
         <key>HERMES_HOME</key>
         <string>{hermes_home}</string>
-    </dict>
+{_optional_gateway_lock_instance_plist_entries()}    </dict>
     
     <key>RunAtLoad</key>
     <true/>
@@ -1228,7 +1248,7 @@ def generate_watchdog_launchd_plist() -> str:
         <string>{profile_base}</string>
         <key>HERMES_AGENT_DIR</key>
         <string>{working_dir}</string>
-    </dict>
+{_optional_gateway_lock_instance_plist_entries()}    </dict>
 
     <key>RunAtLoad</key>
     <true/>

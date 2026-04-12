@@ -43,3 +43,16 @@ def test_generate_watchdog_launchd_plist_contains_bash_and_script(tmp_path, monk
     assert "HERMES_HOME" in plist
     assert label in plist
     assert label == "ai.hermes.gateway-watchdog-chief-orchestrator"
+
+
+def test_watchdog_launchd_plist_includes_lock_instance_when_set(tmp_path, monkeypatch):
+    from hermes_cli import gateway as gw
+
+    monkeypatch.setenv("HERMES_GATEWAY_LOCK_INSTANCE", "operator-mac")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    prof = tmp_path / ".hermes" / "profiles" / "chief-orchestrator"
+    prof.mkdir(parents=True)
+    with patch.object(gw, "get_hermes_home", return_value=prof):
+        plist = gw.generate_watchdog_launchd_plist()
+    assert "HERMES_GATEWAY_LOCK_INSTANCE" in plist
+    assert "operator-mac" in plist
