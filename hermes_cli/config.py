@@ -948,8 +948,8 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "HERMES_OPENAI_PRIMARY_MODE": {
-        "description": "Set to 0/false/off to disable OpenAI-primary mode (OPM) for the process regardless of config/runtime.",
-        "prompt": "HERMES_OPENAI_PRIMARY_MODE (0 to disable OPM, optional)",
+        "description": "Primary OPM kill switch: set to 0/false/no/off to disable OpenAI-primary mode for the entire process (overrides config.yaml and hermes_token_governance.runtime.yaml). Remove or set to 1 to allow OPM from config/runtime again.",
+        "prompt": "HERMES_OPENAI_PRIMARY_MODE (0 = OPM off, optional)",
         "url": None,
         "password": False,
         "category": "setting",
