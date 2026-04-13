@@ -9,9 +9,11 @@ runs at a time if multiple processes overlap.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 
@@ -42,6 +44,231 @@ from cron.jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_
 # response with this marker to suppress delivery.  Output is still saved
 # locally for audit.
 SILENT_MARKER = "[SILENT]"
+
+# Lines / fragments that change every run but do not change the underlying status.
+_RE_DEDUPE_UPDATED_LINE = re.compile(r"^\s*updated\s*:", re.I)
+_RE_DEDUPE_AS_OF_PAREN = re.compile(r"\s*\(\s*as\s+of\s+[^)]+\)", re.I)
+_RE_DEDUPE_AS_OF_TAIL = re.compile(r"\s+as\s+of\s+.+$", re.I)
+_RE_DEDUPE_ISO_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?([+-]\d{2}:\d{2}|Z|AEST|AEDT|UTC)?"
+)
+
+
+def _normalize_for_delivery_dedupe(text: str) -> str:
+    """Collapse cron/agent output so timestamp-only edits map to the same fingerprint."""
+    lines_out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if _RE_DEDUPE_UPDATED_LINE.match(line):
+            continue
+        line = _RE_DEDUPE_AS_OF_PAREN.sub("", line)
+        line = _RE_DEDUPE_AS_OF_TAIL.sub("", line)
+        line = _RE_DEDUPE_ISO_TIMESTAMP.sub(" ", line)
+        line = re.sub(
+            r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s*(?:AEST|AEDT|UTC|GMT)\b",
+            " ",
+            line,
+            flags=re.I,
+        )
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines_out.append(line.lower())
+    joined = " ".join(lines_out)
+    return re.sub(r"\s+", " ", joined).strip()
+
+
+def _delivery_content_fingerprint(content: str) -> str:
+    normalized = _normalize_for_delivery_dedupe(content)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _cron_delivery_dedupe_enabled() -> bool:
+    try:
+        cfg = load_config()
+        return bool(cfg.get("cron", {}).get("delivery_dedupe", True))
+    except Exception:
+        return True
+
+
+def _cron_read_limits() -> tuple[int, int]:
+    """Return (delivery_max_chars, max_agent_turns) with safe bounds."""
+    try:
+        c = load_config().get("cron") or {}
+        mx = int(c.get("delivery_max_chars", 600))
+        mt = int(c.get("max_agent_turns", 12))
+        return max(200, min(4000, mx)), max(3, min(90, mt))
+    except Exception:
+        return 600, 12
+
+
+_RE_BRACKET_INTERNAL_NOTE = re.compile(r"\[internal note\s*:[^\]]*\]", re.I)
+_RE_BRACKET_CONTEXT = re.compile(r"\[CONTEXT\s*:[^\]]*\]", re.I | re.DOTALL)
+_RE_BRACKET_CONCLUSION = re.compile(r"\[CONCLUSION\s*:[^\]]*\]", re.I | re.DOTALL)
+_RE_SHOWN_RESPONSE = re.compile(r"\[SHOWN RESPONSE\]\s*", re.I)
+
+_ALERT_HINTS = re.compile(
+    r"\b(gateway|whatsapp|telegram|slack|alert|sev\s*[012]|sev\d|down|recovered|reconnected|"
+    r"connected|bridge|systemd|resolved|outstanding|intervention|fatal|error|"
+    r"ok\s+all_connected|start-limit|degraded|watchdog|cron|platforms?)\b",
+    re.I,
+)
+
+_COT_LINE_PREFIXES = (
+    "based on ",
+    "given that ",
+    "therefore,",
+    "therefore ",
+    "the current state indicates",
+    "the current state shows",
+    "the current escalation",
+    "since there",
+    "since the ",
+    "according to",
+    "i will ",
+    "i'll ",
+    "i cannot ",
+    "i'm sorry",
+    "would you like",
+    "the previous state",
+    "the last known",
+    "the last stored",
+    "the status json",
+    "there are no ",
+    "there is no ",
+    "no new ",
+    "no change ",
+    "recent web search",
+    "proceeding with",
+    "following the",
+    "hard requirement",
+    "as per the",
+    "summary:",
+    "analysis:",
+    "final response",
+    "conclusion:",
+    "if you would like",
+    "unable to confirm",
+    "cannot confirm",
+    "given the lack of",
+    "without real-time",
+    "overall effective state",
+    "appropriate action is",
+    "nothing new to report",
+)
+
+
+def _cron_response_means_silent(text: str) -> bool:
+    """True when the model clearly intends no user-visible delivery."""
+    if not text or not str(text).strip():
+        return True
+    s = str(text).strip()
+    low = s.lower()
+    first = s.lstrip()
+    if re.match(r"^\[\.?silent\]", first, re.I):
+        return True
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    if not lines:
+        return True
+    last = lines[-1]
+    if re.match(r"^[\s\.]*\[\.?silent\]", last, re.I):
+        return True
+    if len(last) < 180 and re.search(r"\[\.?silent\]", last, re.I):
+        return True
+    tail = low[-520:]
+    if "[silent]" in tail and any(
+        p in tail
+        for p in (
+            "respond with",
+            "respond exactly",
+            "return exactly",
+            "output exactly",
+            "will now ",
+            "appropriate response is",
+            "[silent].",
+            "finalize this response",
+            "accordingly,",
+        )
+    ):
+        return True
+    one = re.sub(r"\s+", " ", low)
+    if "[silent]" in one and "nothing new" in one and len(s) > 60:
+        return True
+    return False
+
+
+def _is_cot_line(line: str) -> bool:
+    low = line.lower().strip()
+    if len(low) < 30:
+        return False
+    return any(low.startswith(p) for p in _COT_LINE_PREFIXES)
+
+
+def _pick_delivery_paragraph(body: str, max_chars: int) -> str:
+    chunks = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    candidate = ""
+    for chunk in reversed(chunks):
+        if _ALERT_HINTS.search(chunk):
+            candidate = chunk
+            break
+    if not candidate and chunks:
+        candidate = chunks[-1]
+    elif not candidate:
+        candidate = body
+    lines = [ln.strip() for ln in candidate.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    joined = "\n".join(lines)
+    if len(joined) > max_chars:
+        tail = lines[-min(6, len(lines)) :]
+        joined = "\n".join(tail)
+    if len(joined) > max_chars:
+        joined = joined[: max_chars - 1].rstrip() + "…"
+    return joined.strip()
+
+
+def sanitize_cron_deliver_content(raw: str, max_chars: int) -> tuple[str, bool]:
+    """
+    Turn a model final_response into messaging-safe text.
+
+    Returns:
+        (text_to_send, skip_delivery) — skip_delivery True means do not notify the user.
+    """
+    if _cron_response_means_silent(raw):
+        return "", True
+    s = str(raw).strip()
+    s = _RE_BRACKET_INTERNAL_NOTE.sub("", s)
+    s = _RE_BRACKET_CONTEXT.sub("", s)
+    s = _RE_BRACKET_CONCLUSION.sub("", s)
+    s = _RE_SHOWN_RESPONSE.sub("", s)
+    s = s.strip()
+
+    kept: list[str] = []
+    for ln in s.splitlines():
+        lns = ln.strip()
+        if not lns:
+            continue
+        if _is_cot_line(lns):
+            continue
+        kept.append(lns)
+
+    body = "\n".join(kept).strip()
+    if not body:
+        return "", True
+
+    # Short, already-compact replies (tests + simple summaries)
+    if len(body) <= 220 and body.count("\n") <= 2:
+        out = body if len(body) <= max_chars else body[: max_chars - 1].rstrip() + "…"
+        return out, False
+
+    out = _pick_delivery_paragraph(body, max_chars)
+    if not out.strip():
+        return "", True
+    if not _ALERT_HINTS.search(out) and len(out) > 120:
+        return "", True
+    return out, False
+
 
 # Resolve Hermes home directory (respects HERMES_HOME override)
 _hermes_home = get_hermes_home()
@@ -128,12 +355,15 @@ def _resolve_delivery_target(job: dict) -> Optional[dict]:
     }
 
 
-def _deliver_result(job: dict, content: str) -> None:
+def _deliver_result(job: dict, content: str) -> bool:
     """
     Deliver job output to the configured target (origin chat, specific platform, etc.).
 
     Uses the standalone platform send functions from send_message_tool so delivery
     works whether or not the gateway is running.
+
+    Returns:
+        True if a message was sent successfully; False if skipped, misconfigured, or failed.
     """
     target = _resolve_delivery_target(job)
     if not target:
@@ -143,7 +373,7 @@ def _deliver_result(job: dict, content: str) -> None:
                 job["id"],
                 job.get("deliver", "local"),
             )
-        return
+        return False
 
     platform_name = target["platform"]
     chat_id = target["chat_id"]
@@ -170,18 +400,18 @@ def _deliver_result(job: dict, content: str) -> None:
     platform = platform_map.get(platform_name.lower())
     if not platform:
         logger.warning("Job '%s': unknown platform '%s' for delivery", job["id"], platform_name)
-        return
+        return False
 
     try:
         config = load_gateway_config()
     except Exception as e:
         logger.error("Job '%s': failed to load gateway config for delivery: %s", job["id"], e)
-        return
+        return False
 
     pconfig = config.platforms.get(platform)
     if not pconfig or not pconfig.enabled:
         logger.warning("Job '%s': platform '%s' not configured/enabled", job["id"], platform_name)
-        return
+        return False
 
     # Optionally wrap the content with a header/footer so the user knows this
     # is a cron delivery.  Wrapping is on by default; set cron.wrap_response: false
@@ -220,12 +450,13 @@ def _deliver_result(job: dict, content: str) -> None:
             result = future.result(timeout=30)
     except Exception as e:
         logger.error("Job '%s': delivery to %s:%s failed: %s", job["id"], platform_name, chat_id, e)
-        return
+        return False
 
     if result and result.get("error"):
         logger.error("Job '%s': delivery error: %s", job["id"], result["error"])
-    else:
-        logger.info("Job '%s': delivered to %s:%s", job["id"], platform_name, chat_id)
+        return False
+    logger.info("Job '%s': delivered to %s:%s", job["id"], platform_name, chat_id)
+    return True
 
 
 def _build_job_prompt(job: dict) -> str:
@@ -242,6 +473,12 @@ def _build_job_prompt(job: dict) -> str:
         "nothing new to report. [SILENT] suppresses delivery to the user. "
         "Never combine [SILENT] with content — either report your "
         "findings normally, or say [SILENT] and nothing more.]\n\n"
+        "[SYSTEM — OUTPUT FORMAT (mandatory): Your final reply must be EITHER "
+        "(a) exactly the single line [SILENT] with nothing else, OR (b) at most "
+        "four short lines (under 500 characters total) of plain operational "
+        "status — no apologies, no \"I will\", no analysis paragraphs, no "
+        "markdown essays, no restating instructions. If nothing changed since "
+        "the last run, output only [SILENT].]\n\n"
     )
     prompt = silent_hint + prompt
     if skills is None:
@@ -383,8 +620,14 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     logger.warning("Job '%s': failed to parse prefill messages file '%s': %s", job_id, pfpath, e)
                     prefill_messages = None
 
-        # Max iterations
-        max_iterations = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
+        # Max iterations — cron jobs use a lower cap than interactive CLI
+        _, cron_turn_cap = _cron_read_limits()
+        global_max = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
+        try:
+            global_max = int(global_max)
+        except (TypeError, ValueError):
+            global_max = 90
+        max_iterations = min(global_max, cron_turn_cap)
 
         # Provider routing
         pr = _cfg.get("provider_routing", {})
@@ -435,7 +678,19 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             providers_ignored=pr.get("ignore"),
             providers_order=pr.get("order"),
             provider_sort=pr.get("sort"),
-            disabled_toolsets=["cronjob", "messaging", "clarify"],
+            disabled_toolsets=[
+                "cronjob",
+                "messaging",
+                "clarify",
+                # Keep cron monitors cheap: no web/browser/MoA/RL/vision/image tools.
+                "web",
+                "search",
+                "browser",
+                "moa",
+                "rl",
+                "image_gen",
+                "vision",
+            ],
             quiet_mode=True,
             skip_memory=True,  # Cron system prompts would corrupt user representations
             platform="cron",
@@ -569,21 +824,54 @@ def tick(verbose: bool = True) -> int:
                     logger.info("Output saved to: %s", output_file)
 
                 # Deliver the final response to the origin/target chat.
-                # If the agent responded with [SILENT], skip delivery (but
-                # output is already saved above).  Failed jobs always deliver.
+                # Sanitize successful replies (strip chain-of-thought; enforce
+                # silent / no-news). Output files still contain the full model text.
                 deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
                 should_deliver = bool(deliver_content)
+                max_chars, _ = _cron_read_limits()
+                if should_deliver and success:
+                    sanitized, skip_user = sanitize_cron_deliver_content(deliver_content, max_chars)
+                    if skip_user or not (sanitized or "").strip():
+                        logger.info(
+                            "Job '%s': delivery suppressed ([SILENT] rules or empty after sanitize)",
+                            job["id"],
+                        )
+                        should_deliver = False
+                    else:
+                        deliver_content = sanitized
+                elif should_deliver and not success and len(deliver_content) > 2400:
+                    deliver_content = deliver_content[:2399] + "…"
+
                 if should_deliver and success and deliver_content.strip().upper().startswith(SILENT_MARKER):
                     logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
                     should_deliver = False
 
+                dedupe_on = _cron_delivery_dedupe_enabled()
+                fp_new: Optional[str] = None
+                if should_deliver:
+                    fp_new = _delivery_content_fingerprint(deliver_content)
+                if (
+                    should_deliver
+                    and dedupe_on
+                    and fp_new
+                    and job.get("last_deliver_fingerprint")
+                    and job["last_deliver_fingerprint"] == fp_new
+                ):
+                    logger.info(
+                        "Job '%s': delivery dedupe — same status as last send, skipping",
+                        job["id"],
+                    )
+                    should_deliver = False
+
+                deliver_fingerprint_update: Optional[str] = None
                 if should_deliver:
                     try:
-                        _deliver_result(job, deliver_content)
+                        if _deliver_result(job, deliver_content) and dedupe_on:
+                            deliver_fingerprint_update = fp_new
                     except Exception as de:
                         logger.error("Delivery failed for job %s: %s", job["id"], de)
 
-                mark_job_run(job["id"], success, error)
+                mark_job_run(job["id"], success, error, deliver_fingerprint_update=deliver_fingerprint_update)
                 executed += 1
 
             except Exception as e:

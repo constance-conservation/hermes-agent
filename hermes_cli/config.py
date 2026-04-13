@@ -728,6 +728,10 @@ DEFAULT_CONFIG = {
         # Skip messaging delivery when the normalized body matches the last
         # successful delivery for this job (avoids WhatsApp/Telegram spam).
         "delivery_dedupe": True,
+        # Cap agent tool/API rounds for scheduled jobs (see cron/scheduler.py).
+        "max_agent_turns": 12,
+        # Max characters sent to messaging after stripping chain-of-thought.
+        "delivery_max_chars": 600,
     },
 
     # Optional paths to cloned third-party repos for /paperclip and /autoresearch helpers.
@@ -738,7 +742,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 32,
+    "_config_version": 34,
 }
 
 # =============================================================================
@@ -887,6 +891,22 @@ OPTIONAL_ENV_VARS = {
     "MACMINI_SSH_LAN_IP": {
         "description": "Mac mini LAN IPv4 (e.g. 192.168.1.61) for ssh-operator-breakglass / ssh_operator fallback when Tailscale is wedged after Wi‑Fi change; mini must ListenAddress this IP (see operator_mini_add_lan_listenaddress_sshd.sh).",
         "prompt": "Mac mini LAN IP for SSH fallback (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT": {
+        "description": "When MACMINI_SSH_LAN_IP is set, ssh_operator / breakglass use this ConnectTimeout (seconds) for the first host try so LAN fallback runs sooner (default 8).",
+        "prompt": "Operator SSH primary-try timeout seconds (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_OPERATOR_SSH_VERBOSE_TRY": {
+        "description": "If 1, ssh_operator / breakglass print every host attempt; default is only fallback lines.",
+        "prompt": "Operator SSH verbose try messages (optional, 0/1)",
         "url": None,
         "password": False,
         "category": "setting",
@@ -2853,6 +2873,29 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v32 cron dedupe migration skipped: {e}")
             results["warnings"].append(f"v32 migration: {e}")
             merge_user_config_yaml({"_config_version": 32})
+
+    # ── Version 32+ → 34: cron delivery size + agent turn cap (cost / spam control) ──
+    if current_ver < 34:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 34,
+                    "cron": {
+                        "max_agent_turns": 12,
+                        "delivery_max_chars": 600,
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v34: cron.max_agent_turns + cron.delivery_max_chars "
+                    "(shorter scheduled agent runs; compact WhatsApp/Telegram delivery)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v34 cron limits migration skipped: {e}")
+            results["warnings"].append(f"v34 migration: {e}")
+            merge_user_config_yaml({"_config_version": 34})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

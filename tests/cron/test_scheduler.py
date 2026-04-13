@@ -3,11 +3,26 @@
 import json
 import logging
 import os
+import sys
+import types
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
-from cron.scheduler import _resolve_origin, _resolve_delivery_target, _deliver_result, run_job, SILENT_MARKER, _build_job_prompt
+# run_agent imports ``fire`` at module level; CI/slim venv may omit it.
+if "fire" not in sys.modules:
+    sys.modules["fire"] = types.ModuleType("fire")
+
+from cron.scheduler import (
+    _resolve_origin,
+    _resolve_delivery_target,
+    _deliver_result,
+    run_job,
+    SILENT_MARKER,
+    _build_job_prompt,
+    _delivery_content_fingerprint,
+    sanitize_cron_deliver_content,
+)
 
 
 class TestResolveOrigin:
@@ -295,6 +310,7 @@ class TestRunJobSessionPersistence:
 
         with patch("cron.scheduler._hermes_home", tmp_path), \
              patch("cron.scheduler._resolve_origin", return_value=None), \
+             patch("cron.scheduler.load_config", return_value={"cron": {"max_agent_turns": 12, "delivery_max_chars": 600}}), \
              patch("dotenv.load_dotenv"), \
              patch("hermes_state.SessionDB", return_value=fake_db), \
              patch(
@@ -322,6 +338,9 @@ class TestRunJobSessionPersistence:
         assert kwargs["session_db"] is fake_db
         assert kwargs["platform"] == "cron"
         assert kwargs["session_id"].startswith("cron_test-job_")
+        assert kwargs.get("max_iterations") == 12
+        for _ts in ("web", "browser", "cronjob", "messaging"):
+            assert _ts in (kwargs.get("disabled_toolsets") or [])
         fake_db.end_session.assert_called_once()
         call_args = fake_db.end_session.call_args
         assert call_args[0][0].startswith("cron_test-job_")
@@ -624,6 +643,84 @@ class TestRunJobSkillBacked:
         assert "Combine the results." in prompt_arg
 
 
+class TestDeliveryDedupeNormalization:
+    """Stable fingerprints across volatile timestamps in cron agent output."""
+
+    def test_updated_line_stripped(self):
+        a = "Open SEV2: 3 active\nUpdated: 2026-04-13 10:19:20.041296+10:00"
+        b = "Open SEV2: 3 active\nUpdated: 2026-04-14 08:00:00+10:00"
+        assert _delivery_content_fingerprint(a) == _delivery_content_fingerprint(b)
+
+    def test_as_of_clause_stripped(self):
+        a = "Escalations cleared: 0\nNo pending (as of 2026-04-13 12:11 AEST)."
+        b = "Escalations cleared: 0\nNo pending (as of 2026-04-14 09:00 AEST)."
+        assert _delivery_content_fingerprint(a) == _delivery_content_fingerprint(b)
+
+    def test_meaningful_change_changes_fingerprint(self):
+        a = "Open SEV2: 3 active"
+        b = "Open SEV2: 4 active"
+        assert _delivery_content_fingerprint(a) != _delivery_content_fingerprint(b)
+
+
+class TestTickDeliveryDedupe:
+    """Skip messaging when normalized body matches last successful delivery."""
+
+    def test_skips_when_fingerprint_matches_previous(self):
+        body_a = "Status ok\nUpdated: 2026-04-10T10:00:00+10:00"
+        body_b = "Status ok\nUpdated: 2026-04-11T11:00:00+10:00"
+        fp = _delivery_content_fingerprint(body_a)
+        job = {
+            "id": "dedupe-job",
+            "name": "dedupe",
+            "deliver": "origin",
+            "origin": {"platform": "telegram", "chat_id": "1"},
+            "last_deliver_fingerprint": fp,
+        }
+        mark_mock = MagicMock()
+        deliver_mock = MagicMock(return_value=True)
+        with patch("cron.scheduler.get_due_jobs", return_value=[job]), \
+             patch("cron.scheduler.advance_next_run"), \
+             patch("cron.scheduler.run_job", return_value=(True, "# o", body_b, None)), \
+             patch("cron.scheduler.save_job_output", return_value="/tmp/x"), \
+             patch("cron.scheduler._deliver_result", deliver_mock), \
+             patch("cron.scheduler.mark_job_run", mark_mock):
+            from cron.scheduler import tick
+
+            tick(verbose=False)
+
+        deliver_mock.assert_not_called()
+        mark_mock.assert_called_once_with(
+            "dedupe-job",
+            True,
+            None,
+            deliver_fingerprint_update=None,
+        )
+
+    def test_delivers_when_no_prior_fingerprint(self):
+        job = {
+            "id": "dedupe-job-2",
+            "name": "dedupe",
+            "deliver": "origin",
+            "origin": {"platform": "telegram", "chat_id": "1"},
+        }
+        mark_mock = MagicMock()
+        deliver_mock = MagicMock(return_value=True)
+        body = "New alert\nUpdated: 2026-04-10T10:00:00+10:00"
+        fp = _delivery_content_fingerprint(body)
+        with patch("cron.scheduler.get_due_jobs", return_value=[job]), \
+             patch("cron.scheduler.advance_next_run"), \
+             patch("cron.scheduler.run_job", return_value=(True, "# o", body, None)), \
+             patch("cron.scheduler.save_job_output", return_value="/tmp/x"), \
+             patch("cron.scheduler._deliver_result", deliver_mock), \
+             patch("cron.scheduler.mark_job_run", mark_mock):
+            from cron.scheduler import tick
+
+            tick(verbose=False)
+
+        deliver_mock.assert_called_once()
+        assert mark_mock.call_args.kwargs.get("deliver_fingerprint_update") == fp
+
+
 class TestSilentDelivery:
     """Verify that [SILENT] responses suppress delivery while still saving output."""
 
@@ -699,6 +796,31 @@ class TestSilentDelivery:
             tick(verbose=False)
         save_mock.assert_called_once_with("monitor-job", "# full output")
         deliver_mock.assert_not_called()
+
+
+class TestSanitizeCronDeliverContent:
+    """Strip chain-of-thought; keep short operational lines."""
+
+    def test_long_reasoning_with_alert_tail_keeps_tail(self):
+        raw = (
+            "Based on the current state file, no change was detected.\n\n"
+            "WhatsApp gateway recovered\nConnected: whatsapp, telegram, slack"
+        )
+        body, skip = sanitize_cron_deliver_content(raw, 600)
+        assert skip is False
+        assert "Based on" not in body
+        assert "WhatsApp gateway recovered" in body
+
+    def test_silent_intent_paragraph_suppresses(self):
+        raw = (
+            "The gateway was down. Since nothing changed I will respond with [SILENT]."
+        )
+        _body, skip = sanitize_cron_deliver_content(raw, 600)
+        assert skip is True
+
+    def test_exact_silent_suppresses(self):
+        _body, skip = sanitize_cron_deliver_content("[SILENT]", 600)
+        assert skip is True
 
 
 class TestBuildJobPromptSilentHint:
