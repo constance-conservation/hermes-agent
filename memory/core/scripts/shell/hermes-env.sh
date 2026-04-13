@@ -17,7 +17,8 @@
 #                          SSH_PASSPHRASE from ~/.env/.env (see operator_local_gate.sh; no sudo)
 #   operator cmd …       — one remote command (same path)
 #
-# Credentials: ~/.env/.env (SSH_PORT, SSH_USER, SSH_TAILSCALE_IP or SSH_IP) and ~/.env/.ssh_key
+# Credentials: ~/.env/.env (SSH_PORT, SSH_USER, SSH_TAILSCALE_IP or SSH_IP) and
+# ~/.env/.ssh_key or ~/.env/.ssh_droplet_key (or SSH_KEY_FILE in the env file — ssh_droplet.sh).
 # Overrides: HERMES_DROPLET_ENV, SSH_KEY_FILE (see scripts/core/ssh_droplet_user.sh).
 
 if [[ -n "${ZSH_VERSION:-}" ]]; then
