@@ -302,11 +302,12 @@ def _opm_finalize_fallback_chain(chain: List[Dict[str, Any]]) -> List[Dict[str, 
             pass
         try:
             if native_openai_runtime_tuple():
-                return [{"provider": "custom", "model": "gpt-5.4-nano", "only_rate_limit": False}]
+                return [{"provider": "openrouter", "model": _DEFAULT_BUDGET_OPENROUTER_MODEL, "only_rate_limit": False}]
         except Exception:
             pass
         aux = opm_auxiliary_model()
-        return [{"provider": "gemini", "model": aux, "only_rate_limit": False}]
+        aux_provider = "openrouter" if "/" in str(aux or "") else "gemini"
+        return [{"provider": aux_provider, "model": aux, "only_rate_limit": False}]
     except Exception:
         return chain
 

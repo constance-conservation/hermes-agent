@@ -34,11 +34,9 @@ def load_openrouter_step_up_config() -> Dict[str, Any]:
     codex = [str(x).strip() for x in (raw.get("codex_models") or []) if str(x).strip()]
     if not chat:
         chat = [
-            "openai/gpt-5-nano",
-            "openai/gpt-4.1-nano",
+            OPENROUTER_FREE_SYNTHETIC,
             "openai/gpt-5-mini",
             "openai/gpt-4.1-mini",
-            "openai/gpt-5.4-nano",
             "openai/gpt-5.4-mini",
             "openai/gpt-5.2",
             "openai/gpt-5.4",
@@ -164,8 +162,8 @@ def compute_openrouter_step_up_plan(agent: Any) -> Optional[Dict[str, Any]]:
     if not ceiling:
         return None
 
-    # Synthetic free selector: first API hop is a concrete :free slug; then step-up walks
-    # routing_canon openrouter_step_up_escalation hub ids toward the tier ceiling (paid).
+    # Synthetic free selector: first API hop uses ``openrouter/free``; then step-up walks
+    # routing_canon openrouter_step_up_escalation hub ids toward the tier ceiling.
     if ceiling == OPENROUTER_FREE_SYNTHETIC:
         try:
             from agent.openrouter_free_router import resolve_openrouter_free_model_for_api
@@ -183,7 +181,11 @@ def compute_openrouter_step_up_plan(agent: Any) -> Optional[Dict[str, Any]]:
             return None
         hub_ceiling = ordered[-1]
         hub_ladder = build_ladder_to_ceiling(ordered, hub_ceiling)
-        ladder = [resolved] + list(hub_ladder)
+        ladder = [resolved]
+        for mid in hub_ladder:
+            if _norm_slug(mid) == _norm_slug(ladder[-1]):
+                continue
+            ladder.append(mid)
         if len(ladder) < 2:
             return None
         marker = str(cfg.get("escalate_marker") or _DEFAULT_MARKER)

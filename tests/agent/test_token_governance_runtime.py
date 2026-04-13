@@ -609,7 +609,7 @@ def test_opm_clamp_replaces_google_gemini_tier_slug():
 
 
 def test_opm_clamp_trivial_message_prefers_cheapest_native_ladder_rung():
-    """Ping-class prompts should map to nano/mini ladder rung, not the OPM default flagship."""
+    """Ping-class prompts should map to the cheapest remaining native rung, not the flagship."""
     from agent import token_governance_runtime as tgr
 
     agent = object()
@@ -629,11 +629,11 @@ def test_opm_clamp_trivial_message_prefers_cheapest_native_ladder_rung():
         out = tgr._opm_clamp_tier_resolved_model(
             agent, "google/gemini-2.5-flash", "ping", {"enabled": True}
         )
-        assert out == "gpt-5-nano"
+        assert out == "gpt-5-mini"
 
 
 def test_trivial_ping_skips_opm_uplift_and_clamps_gemini_to_cheapest(gov_env, monkeypatch):
-    """Consultant tier A + trivial message must not be uplifted to E; clamp uses ladder nano."""
+    """Consultant tier A + trivial message must not be uplifted to E; clamp uses the cheapest native rung."""
     p = gov_env / RUNTIME_FILENAME
     p.write_text(
         yaml.safe_dump(
@@ -682,7 +682,7 @@ def test_trivial_ping_skips_opm_uplift_and_clamps_gemini_to_cheapest(gov_env, mo
     a._token_governance_cfg = load_runtime_config()
     a._model_is_tier_routed = True
     apply_per_turn_tier_model(a, "ping")
-    assert a.model == "gpt-5-nano"
+    assert a.model == "gpt-5-mini"
 
 
 def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():

@@ -2,9 +2,8 @@
 
 Genuinely **free** (zero API cost) models run without approval. **Budget** models
 (``config subprocess_governance.budget_auto_approve_models``, default
-``openrouter/free`` then ``openai/gpt-5.4-nano`` / ``gpt-5.4-nano``) are cheap paid
-tiers (or the OpenRouter free-router synthetic) that run without blocking gateway
-approval — operators accept per-call cost where applicable.
+``openrouter/free``) run without blocking gateway approval. GPT nano family remains
+treated as budget when an operator explicitly configures or selects it for compatibility.
 
 Other API-cost models still require explicit operator approval when no other rule allows them.
 
@@ -314,7 +313,7 @@ def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC]
         for x in ids:
             s = str(x).strip()
             if not s:
@@ -343,7 +342,7 @@ def requires_operator_approval(model_id: str) -> bool:
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC]
         want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
         if _norm_subprocess_slug(model_id) in want:
             return False
@@ -637,7 +636,7 @@ def enforce_subprocess_model_policy(
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC]
         want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
         if (model_id or "").strip() == OPENROUTER_FREE_SYNTHETIC or _norm_subprocess_slug(model_id) in want:
             register_subprocess(task_id, model_id, goal, approved=True)

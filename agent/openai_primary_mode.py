@@ -7,6 +7,8 @@ import os
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
+
 # Thread-local session agent for the active :meth:`AIAgent.run_conversation` turn.
 # Lets auxiliary code paths (e.g. ``call_llm(..., agent=None)``) respect ``/models``
 # manual overrides via ``_defer_opm_primary_coercion`` without threading *agent* through
@@ -397,7 +399,7 @@ def coerce_under_opm_if_disallowed_family(model: Any, agent: Any = None) -> Any:
         try:
             return opm_auxiliary_model(agent)
         except Exception:
-            return "openai/gpt-5.4-nano"
+            return OPENROUTER_FREE_SYNTHETIC
 
 
 def _legacy_opm_auxiliary_yaml_key() -> str:
@@ -405,7 +407,7 @@ def _legacy_opm_auxiliary_yaml_key() -> str:
 
 
 def opm_auxiliary_model(agent: Any = None) -> str:
-    """Cheap model for auxiliary/review paths under OPM (OpenRouter gpt-5.4-nano by default).
+    """Cheap model for auxiliary/review paths under OPM (``openrouter/free`` by default).
 
     Config: ``openai_primary_mode.opm_auxiliary_model`` (legacy YAML key still read if present).
     """
@@ -418,7 +420,7 @@ def opm_auxiliary_model(agent: Any = None) -> str:
             return raw
     except Exception:
         pass
-    return "openai/gpt-5.4-nano"
+    return OPENROUTER_FREE_SYNTHETIC
 
 
 def filter_fallback_chain_disallowed(chain: Any) -> list:

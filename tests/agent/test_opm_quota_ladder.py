@@ -84,7 +84,7 @@ def test_next_quota_downgrade_model_chat():
         current_model="openai/gpt-5.4-nano",
         api_mode="chat_completions",
         cfg=cfg,
-    ) == "gpt-5-nano"
+    ) is None
     # Legacy mistaken id in session — alias maps to gpt-5.4-mini; next step is cheaper.
     assert next_quota_downgrade_model(
         current_model="openai/gpt-5.3",

@@ -231,9 +231,10 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "default_model": "gpt-5.4",
         "codex_model": "gpt-5.3-codex",
-        "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex", "gpt-5.4-nano"],
+        "allowed_subprocess_models": ["gpt-5.4", "gpt-5.3-codex", "openrouter/free"],
         "require_direct_openai": True,
-        # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty (then openai/gpt-5.4-nano).
+        # When enabled, auxiliary/review paths use ``opm_auxiliary_model`` unless empty
+        # (then ``openrouter/free``).
         "opm_auxiliary_model": "",
         # When true (default), a manual ``/models`` pick disables OPM model/runtime coercion for that agent.
         # Override with env HERMES_MANUAL_PIPELINE_BYPASS_OPM=0 to force OPM even on manual picks (rare).
@@ -259,10 +260,6 @@ DEFAULT_CONFIG = {
     "subprocess_governance": {
         "budget_auto_approve_models": [
             "openrouter/free",
-            "openai/gpt-5.4-nano",
-            "gpt-5.4-nano",
-            "openai/gpt-4.1-nano",
-            "gpt-4.1-nano",
         ],
     },
     "free_model_routing": {
@@ -757,7 +754,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 39,
+    "_config_version": 40,
 }
 
 # =============================================================================
@@ -3080,6 +3077,81 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v39 migration skipped: {e}")
             results["warnings"].append(f"v39 migration: {e}")
             merge_user_config_yaml({"_config_version": 39})
+
+    # ── Version 39 → 40: remove nano defaults from OPM/subprocess budget paths ──
+    if current_ver < 40:
+        try:
+            cfg_now = load_config()
+            payload: dict = {"_config_version": 40}
+
+            opm = cfg_now.get("openai_primary_mode") or {}
+            allowed = opm.get("allowed_subprocess_models")
+            if isinstance(allowed, list):
+                cleaned = []
+                for item in allowed:
+                    s = str(item).strip()
+                    if not s:
+                        continue
+                    if s.lower().endswith("-nano"):
+                        continue
+                    if s not in cleaned:
+                        cleaned.append(s)
+                if "openrouter/free" not in {str(x).strip().lower() for x in cleaned}:
+                    cleaned.append("openrouter/free")
+                if cleaned != allowed:
+                    payload.setdefault("openai_primary_mode", {})["allowed_subprocess_models"] = cleaned
+
+            aux = str(opm.get("opm_auxiliary_model") or "").strip().lower()
+            if aux.endswith("-nano"):
+                payload.setdefault("openai_primary_mode", {})["opm_auxiliary_model"] = "openrouter/free"
+
+            mblock = cfg_now.get("model")
+            md = ""
+            if isinstance(mblock, dict):
+                md = str(mblock.get("default") or "").strip().lower()
+            elif isinstance(mblock, str):
+                md = mblock.strip().lower()
+            if md.endswith("-nano"):
+                payload["model"] = {"default": "openrouter/free"}
+
+            fmr = cfg_now.get("free_model_routing") or {}
+            for key in ("budget_openrouter_fallback", "openrouter_last_resort"):
+                block = fmr.get(key) or {}
+                model = str(block.get("model") or "").strip().lower()
+                if model.endswith("-nano"):
+                    payload.setdefault("free_model_routing", {})[key] = {
+                        "enabled": bool(block.get("enabled", True)),
+                        "model": "openrouter/free",
+                    }
+
+            sg = cfg_now.get("subprocess_governance") or {}
+            budget = sg.get("budget_auto_approve_models")
+            if isinstance(budget, list):
+                cleaned_budget = []
+                for item in budget:
+                    s = str(item).strip()
+                    if not s:
+                        continue
+                    if s.lower().endswith("-nano"):
+                        continue
+                    if s not in cleaned_budget:
+                        cleaned_budget.append(s)
+                if "openrouter/free" not in {str(x).strip().lower() for x in cleaned_budget}:
+                    cleaned_budget.insert(0, "openrouter/free")
+                if cleaned_budget != budget:
+                    payload.setdefault("subprocess_governance", {})["budget_auto_approve_models"] = cleaned_budget
+
+            merge_user_config_yaml(payload)
+            if not quiet:
+                print(
+                    "  ✓ v40: removed nano defaults from OPM auxiliary/subprocess budget lists; "
+                    "added openrouter/free where needed"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v40 migration skipped: {e}")
+            results["warnings"].append(f"v40 migration: {e}")
+            merge_user_config_yaml({"_config_version": 40})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

@@ -56,10 +56,12 @@ class TestFallbackChainInit:
     @patch("hermes_cli.config.load_config", return_value=_sample_free_routing_config())
     def test_no_fallback(self, _mock_lc):
         agent = _make_agent(fallback_model=None)
-        # Omitted fallback_model: synthesized from free_model_routing (Kimi tier router only).
-        assert len(agent._fallback_chain) == 1
-        assert agent._fallback_chain[0]["provider"] == "gemini"
-        assert agent._fallback_chain[0].get("gemini_tier_router") is True
+        # Omitted fallback_model: synthesized from free_model_routing (openrouter/free first).
+        assert len(agent._fallback_chain) == 2
+        assert agent._fallback_chain[0]["provider"] == "openrouter"
+        assert agent._fallback_chain[0]["model"] == "openrouter/free"
+        assert agent._fallback_chain[1]["provider"] == "gemini"
+        assert agent._fallback_chain[1].get("gemini_tier_router") is True
         assert agent._fallback_index == 0
         assert agent._fallback_model == agent._fallback_chain[0]
 

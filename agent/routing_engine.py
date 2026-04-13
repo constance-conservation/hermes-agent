@@ -1,7 +1,7 @@
 """Unified routing engine — one cheap LLM JSON decision per prompt.
 
 Chooses tier (A–G), profile, and brief using **cheapest-first** policy: routing calls
-prefer gpt-5-nano / gpt-4.1-nano / gpt-5.4-nano before any flagship. The catalog
+prefer ``openrouter/free`` and mini-tier models before any flagship. The catalog
 digest is sorted by estimated API cost so advisors see the full model spectrum.
 
 Called from ``agent/consultant_routing.py`` → ``agent/token_governance_runtime.py``
@@ -21,6 +21,7 @@ from agent.openai_primary_mode import resolve_openai_primary_mode
 from agent.provider_model_routing_catalog import format_routing_catalog_digest
 from agent.routing_trace import emit_routing_decision_trace
 from agent.trivial_prompt import trivial_message_skips_opm_tier_uplift
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ plausibly satisfy the user, using the attached catalog (sorted cheapest-first). 
 output JSON — you do **not** run the final user-facing reply; execution uses tier_models.
 
 TIER TABLE (ascending capability/cost — prefer lower letters; ALL tiers may bill):
-  A = ultra-cheap: gpt-5-nano, gpt-4.1-nano, gpt-5.4-nano (routing, classification, pings)
+  A = ultra-cheap: openrouter/free, mini-tier models (routing, classification, pings)
   B = cheap capable: gpt-5-mini, gpt-4.1-mini, gpt-5.4-mini (drafts, short edits, simple Q&A)
   C = mid: gpt-5.2, gpt-4.1, Gemini Flash-class (multi-step but not frontier)
   D = strong generalist: e.g. Sonnet-class / gpt-5.4 only when C is insufficient
@@ -229,39 +230,46 @@ def _call_routing_llm(system: str, user: str) -> str:
             logger.debug("routing_engine: %s failed: %s", label, exc)
         return None
 
-    # Native API: cheapest first (catalog: gpt-5-nano < gpt-4.1-nano < gpt-5.4-nano < …)
-    for mid, lab in (
-        ("gpt-5-nano", "gpt-5-nano"),
-        ("gpt-4.1-nano", "gpt-4.1-nano"),
-        ("gpt-5.4-nano", "gpt-5.4-nano"),
-        ("gpt-5-mini", "gpt-5-mini"),
-    ):
-        out = _try_native(mid, lab)
-        if out:
-            return out
-
-    # OpenRouter hub (same order idea)
-    for or_model, lab in (
-        ("openai/gpt-5-nano", "OR gpt-5-nano"),
-        ("openai/gpt-4.1-nano", "OR gpt-4.1-nano"),
-        ("openai/gpt-5.4-nano", "OR gpt-5.4-nano"),
-        ("openai/gpt-5-mini", "OR gpt-5-mini"),
-    ):
+    def _try_openrouter(model_id: str, label: str) -> Optional[str]:
         try:
             resp = call_llm(
                 task=None,
                 provider="openrouter",
-                model=or_model,
+                model=model_id,
                 messages=msgs,
                 temperature=0.1,
                 max_tokens=320,
             )
             result = extract_content_or_reasoning(resp) or ""
             if result:
-                logger.debug("routing_engine: %s routing OK", lab)
+                logger.debug("routing_engine: %s routing OK", label)
                 return result
         except Exception as exc:
-            logger.debug("routing_engine: %s failed: %s", lab, exc)
+            logger.debug("routing_engine: %s failed: %s", label, exc)
+        return None
+
+    # Free first on OpenRouter; then fall back to cheap non-nano paid models.
+    out = _try_openrouter(OPENROUTER_FREE_SYNTHETIC, "OR openrouter/free")
+    if out:
+        return out
+
+    for mid, lab in (
+        ("gpt-5-mini", "gpt-5-mini"),
+        ("gpt-4.1-mini", "gpt-4.1-mini"),
+        ("gpt-5.4-mini", "gpt-5.4-mini"),
+    ):
+        out = _try_native(mid, lab)
+        if out:
+            return out
+
+    for or_model, lab in (
+        ("openai/gpt-5-mini", "OR gpt-5-mini"),
+        ("openai/gpt-4.1-mini", "OR gpt-4.1-mini"),
+        ("openai/gpt-5.4-mini", "OR gpt-5.4-mini"),
+    ):
+        out = _try_openrouter(or_model, lab)
+        if out:
+            return out
 
     # Quality last resort for JSON routing only (still cheaper than running the main agent on 5.4)
     if bt and ak:
@@ -471,7 +479,7 @@ def review_agent_summary(
         from agent.auxiliary_client import call_llm, extract_content_or_reasoning
         from agent.openai_primary_mode import opm_enabled, opm_auxiliary_model
 
-        _m = "openai/gpt-5.4-nano"
+        _m = OPENROUTER_FREE_SYNTHETIC
         _p = "openrouter"
         if opm_enabled(None):
             _m = opm_auxiliary_model(None)
@@ -493,7 +501,11 @@ def review_agent_summary(
             max_tokens=60,
             temperature=0.0,
         )
-        text = (extract_content_or_reasoning(resp) or "").strip()
+        text = (
+            resp.strip()
+            if isinstance(resp, str)
+            else (extract_content_or_reasoning(resp) or "").strip()
+        )
         m = re.search(r"\{.*\}", text, re.DOTALL)
         if m:
             obj = json.loads(m.group())

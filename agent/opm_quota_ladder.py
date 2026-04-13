@@ -104,7 +104,7 @@ def ladder_model_set_non_empty(cfg: Dict[str, Any]) -> bool:
 def cheapest_opm_native_chat_slug() -> Optional[str]:
     """Smallest chat rung from ``opm_native_quota_downgrade.chat_models`` (for trivial OPM clamps).
 
-    Picks the first match in cost-preference order (nano → mini → 5.2), else the last
+    Picks the first match in cost-preference order (mini → 5.2), else the last
     ladder entry (canon lists are typically flagship-first).
     """
     cfg = load_opm_native_quota_downgrade_config()
@@ -115,7 +115,7 @@ def cheapest_opm_native_chat_slug() -> Optional[str]:
         return None
     bare_list = [_canonical_ladder_id(_bare_slug(str(x))) for x in chat]
     lower_map = {m.lower(): m for m in bare_list if m}
-    for pref in ("gpt-5-nano", "gpt-4.1-nano", "gpt-5.4-nano", "gpt-5-mini", "gpt-5.4-mini", "gpt-5.2"):
+    for pref in ("gpt-5-mini", "gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.2"):
         pl = pref.lower()
         if pl in lower_map:
             return lower_map[pl]
