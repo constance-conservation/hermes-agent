@@ -2156,8 +2156,16 @@ def _reset_config_provider() -> Path:
     return config_path
 
 
-def _prompt_model_selection(model_ids: List[str], current_model: str = "") -> Optional[str]:
-    """Interactive model selection. Puts current_model first with a marker. Returns chosen model ID or None."""
+def _prompt_model_selection(
+    model_ids: List[str],
+    current_model: str = "",
+    *,
+    display_labels: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Interactive model selection. Puts current_model first with a marker. Returns chosen model ID or None.
+
+    If *display_labels* is set and matches *model_ids* length, it is shown in the menu instead of raw ids.
+    """
     # Reorder: current model first, then the rest (deduplicated)
     ordered = []
     if current_model and current_model in model_ids:
@@ -2166,11 +2174,17 @@ def _prompt_model_selection(model_ids: List[str], current_model: str = "") -> Op
         if mid not in ordered:
             ordered.append(mid)
 
+    label_by_mid: dict[str, str] = {}
+    if display_labels is not None and len(display_labels) == len(model_ids):
+        for mid, lab in zip(model_ids, display_labels):
+            label_by_mid[mid] = lab
+
     # Build display labels with marker on current
-    def _label(mid):
+    def _label(mid: str) -> str:
+        base = label_by_mid.get(mid, mid)
         if mid == current_model:
-            return f"{mid}  ← currently in use"
-        return mid
+            return f"{base}  ← currently in use"
+        return base
 
     # Default cursor on the current model (index 0 if it was reordered to top)
     default_idx = 0

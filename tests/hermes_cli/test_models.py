@@ -1,6 +1,13 @@
 """Tests for the hermes_cli models module."""
 
-from hermes_cli.models import OPENROUTER_MODELS, menu_labels, model_ids, detect_provider_for_model
+from hermes_cli.models import (
+    OPENROUTER_MODELS,
+    detect_provider_for_model,
+    format_openrouter_menu_label,
+    menu_labels,
+    model_ids,
+)
+from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
 
 
 class TestModelIds:
@@ -22,6 +29,15 @@ class TestModelIds:
     def test_no_duplicate_ids(self):
         ids = model_ids()
         assert len(ids) == len(set(ids)), "Duplicate model IDs found"
+
+
+class TestFormatOpenrouterMenuLabel:
+    def test_synthetic_routers(self):
+        assert format_openrouter_menu_label("openrouter/auto") == "openrouter/auto (recommended)"
+        assert format_openrouter_menu_label(OPENROUTER_FREE_SYNTHETIC) == "openrouter/free (free)"
+
+    def test_unknown_passthrough(self):
+        assert format_openrouter_menu_label("vendor/xyz") == "vendor/xyz"
 
 
 class TestMenuLabels:

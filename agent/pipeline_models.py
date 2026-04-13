@@ -10,16 +10,14 @@ from agent.free_model_routing import (
     raw_free_model_routing_tiers,
 )
 from agent.local_inference import filter_hub_model_ids_by_local_state
+from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
 from agent.routing_model_blocklist import filter_blocklisted_models, is_routing_blocklisted
 
 MENU_ACTION_OPENROUTER_BROWSE = "openrouter_browse"
 MENU_ACTION_CHOOSE_ROUTER = "choose_router"
 
 # Bumped when /models menu shape changes (shortcuts, actions, pipeline filter rules).
-MODELS_MENU_SCHEMA_VERSION = 2
-
-# Bumped when /models menu shape changes (shortcuts, actions, blocklist). Check with: /models list
-MODELS_MENU_SCHEMA_VERSION = 2
+MODELS_MENU_SCHEMA_VERSION = 3
 
 # Next-prompt routing: api.openai.com + OPENAI_API_KEY (bare model ids).
 PROVIDER_KIND_OPENAI_NATIVE = "openai_native"
@@ -132,7 +130,15 @@ def collect_pipeline_models(config: Optional[Dict[str, Any]]) -> List[Dict[str, 
 
 
 def list_openrouter_picker_model_ids() -> List[str]:
-    """Sorted OpenRouter slugs for full-model pickers (live API, else static catalog)."""
+    """OpenRouter slugs for full-model pickers: synthetic routers first, then sorted rest.
+
+    Live ``/models`` from OpenRouter does not list ``openrouter/auto`` or ``openrouter/free``;
+    those are prepended so /models → OpenRouter browse stays usable.
+    """
+    head: List[str] = []
+    for syn in ("openrouter/auto", OPENROUTER_FREE_SYNTHETIC):
+        if not is_routing_blocklisted(syn):
+            head.append(syn)
     try:
         from hermes_cli.models import fetch_openrouter_model_ids, model_ids
 
@@ -143,7 +149,9 @@ def list_openrouter_picker_model_ids() -> List[str]:
 
         base = model_ids()
     cleaned = filter_blocklisted_models(base)
-    return sorted(set(cleaned), key=str.lower)
+    tail = sorted({m for m in cleaned if m not in head}, key=str.lower)
+    # Preserve order: synthetics, then alphabetical (no dupes).
+    return head + tail
 
 
 def collect_router_picker_model_rows() -> List[Dict[str, Any]]:
@@ -207,7 +215,11 @@ def collect_models_menu_entries(config: Optional[Dict[str, Any]]) -> List[Dict[s
     )
     _add_shortcut("openai/gpt-5.4", "/models shortcut (OpenRouter)")
     _add_shortcut("openai/gpt-5.3-codex", "/models shortcut (OpenRouter)")
-    _add_shortcut("openrouter/auto", "/models shortcut (OpenRouter auto)")
+    _add_shortcut("openrouter/auto", "/models shortcut — openrouter/auto (recommended)")
+    _add_shortcut(
+        "openrouter/free",
+        "/models shortcut — openrouter/free (free), $0-tier auto router",
+    )
 
     entries.append(
         {

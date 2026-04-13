@@ -14,6 +14,8 @@ import urllib.error
 from difflib import get_close_matches
 from typing import Any, Optional
 
+from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
+
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_MODELS_URL = f"{COPILOT_BASE_URL}/models"
 COPILOT_EDITOR_VERSION = "vscode/1.104.1"
@@ -27,6 +29,7 @@ GITHUB_MODELS_CATALOG_URL = COPILOT_MODELS_URL
 # (model_id, display description shown in menus)
 OPENROUTER_MODELS: list[tuple[str, str]] = [
     ("openrouter/auto",                 "recommended"),
+    (OPENROUTER_FREE_SYNTHETIC,         "$0-tier auto router (like openrouter/auto)"),
     ("anthropic/claude-opus-4.6",       ""),
     ("anthropic/claude-sonnet-4.6",     ""),
     ("anthropic/claude-sonnet-4.5",     ""),
@@ -53,6 +56,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
 _PROVIDER_MODELS: dict[str, list[str]] = {
     "nous": [
         "openrouter/auto",
+        OPENROUTER_FREE_SYNTHETIC,
         "anthropic/claude-opus-4.6",
         "anthropic/claude-sonnet-4.6",
         "anthropic/claude-sonnet-4.5",
@@ -316,6 +320,21 @@ def menu_labels() -> list[str]:
     for mid, desc in OPENROUTER_MODELS:
         labels.append(f"{mid} ({desc})" if desc else mid)
     return labels
+
+
+def format_openrouter_menu_label(model_id: str) -> str:
+    """Human label for OpenRouter id in /models pickers (synthetics + curated hints)."""
+    mid = (model_id or "").strip()
+    if not mid:
+        return mid
+    if mid == "openrouter/auto":
+        return "openrouter/auto (recommended)"
+    if mid == OPENROUTER_FREE_SYNTHETIC:
+        return "openrouter/free (free)"
+    for catalog_mid, desc in OPENROUTER_MODELS:
+        if catalog_mid.lower() == mid.lower():
+            return f"{mid} ({desc})" if desc else mid
+    return mid
 
 
 # All provider IDs and aliases that are valid for the provider:model syntax.
@@ -1205,6 +1224,26 @@ def validate_requested_model(
             "persist": False,
             "recognized": False,
             "message": "Model names cannot contain spaces.",
+        }
+
+    if requested == OPENROUTER_FREE_SYNTHETIC:
+        if normalized not in ("openrouter", "nous", "auto"):
+            return {
+                "accepted": False,
+                "persist": False,
+                "recognized": True,
+                "message": (
+                    f"`{OPENROUTER_FREE_SYNTHETIC}` only works with OpenRouter (or Nous/OpenRouter-compatible routing)."
+                ),
+            }
+        return {
+            "accepted": True,
+            "persist": True,
+            "recognized": True,
+            "message": (
+                "Picks a concrete free-tier OpenRouter model each API call from routing canon ∩ live `/models` "
+                "(needs OPENROUTER_API_KEY; strict — no paid fallback)."
+            ),
         }
 
     if normalized == "custom":

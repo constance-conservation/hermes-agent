@@ -6302,6 +6302,7 @@ class HermesCLI:
                 collect_router_picker_model_rows,
                 list_openrouter_picker_model_ids,
             )
+            from hermes_cli.models import format_openrouter_menu_label
             from hermes_cli.tools_config import prompt_choice_tui_safe
         except Exception as e:
             _cprint(f"  /models unavailable: {e}")
@@ -6377,9 +6378,10 @@ class HermesCLI:
             if not or_ids:
                 _cprint("  No OpenRouter models (set OPENROUTER_API_KEY for live list, or check catalog).")
                 return
+            or_labels = [format_openrouter_menu_label(m) for m in or_ids]
             j = prompt_choice_tui_safe(
                 "OpenRouter model (↑/↓, Enter):",
-                or_ids,
+                or_labels,
                 0,
                 pt_app=getattr(self, "_app", None),
             )
@@ -6401,7 +6403,9 @@ class HermesCLI:
             if not rrows:
                 _cprint("  No models available for session router.")
                 return
-            rlabels = [f"{r['model']} — {r['source']}" for r in rrows]
+            rlabels = [
+                f"{format_openrouter_menu_label(r['model'])} — {r['source']}" for r in rrows
+            ]
             j = prompt_choice_tui_safe(
                 "Session router model (↑/↓, Enter):",
                 rlabels,

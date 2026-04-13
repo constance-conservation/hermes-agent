@@ -1399,10 +1399,14 @@ def _model_flow_openrouter(config, current_model=""):
         print("API key saved.")
         print()
 
-    from hermes_cli.models import model_ids
-    openrouter_models = model_ids()
+    from hermes_cli.models import menu_labels, model_ids
 
-    selected = _prompt_model_selection(openrouter_models, current_model=current_model)
+    openrouter_models = model_ids()
+    selected = _prompt_model_selection(
+        openrouter_models,
+        current_model=current_model,
+        display_labels=menu_labels(),
+    )
     if selected:
         _save_model_choice(selected)
 

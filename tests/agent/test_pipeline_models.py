@@ -1,5 +1,7 @@
 """Tests for agent.pipeline_models.collect_pipeline_models."""
 
+from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
+
 from agent.pipeline_models import (
     MENU_ACTION_CHOOSE_ROUTER,
     MENU_ACTION_OPENROUTER_BROWSE,
@@ -8,6 +10,7 @@ from agent.pipeline_models import (
     collect_models_menu_entries,
     collect_pipeline_models,
     collect_router_picker_model_rows,
+    list_openrouter_picker_model_ids,
 )
 
 
@@ -106,6 +109,9 @@ def test_collect_models_menu_entries_includes_actions_and_shortcuts():
     assert any(a.get("action") == MENU_ACTION_CHOOSE_ROUTER for a in actions)
     mids = [e["model"] for e in entries if e.get("kind") == "model"]
     assert "openrouter/auto" in mids
+    assert OPENROUTER_FREE_SYNTHETIC in mids
+    ia = mids.index("openrouter/auto")
+    assert mids.index(OPENROUTER_FREE_SYNTHETIC) == ia + 1
     assert "openai/gpt-5.4" in mids
     assert "gpt-5.4" in mids
     native = [e for e in entries if e.get("kind") == "model" and e["model"] == "gpt-5.4"]
@@ -117,3 +123,15 @@ def test_collect_router_picker_leads_with_native_openai_rows():
     assert rows[0]["model"] == "gpt-5.4"
     assert rows[0]["provider_kind"] == PROVIDER_KIND_OPENAI_NATIVE_ROUTER
     assert rows[1]["model"] == "gpt-5.3-codex"
+
+
+def test_list_openrouter_picker_prepends_synthetic_routers(monkeypatch):
+    def _fake_fetch(timeout: float = 15.0):
+        return ["zz/some-model", "aa/other"]
+
+    monkeypatch.setattr("hermes_cli.models.fetch_openrouter_model_ids", _fake_fetch)
+    ids = list_openrouter_picker_model_ids()
+    assert ids[0] == "openrouter/auto"
+    assert ids[1] == OPENROUTER_FREE_SYNTHETIC
+    assert "aa/other" in ids
+    assert "zz/some-model" in ids
