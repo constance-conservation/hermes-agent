@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Trigger every cron job with deliver=slack:*, then run one scheduler tick for those jobs only.
+"""Trigger every cron job with deliver=slack:*, then run the **real cron pipeline** (LLM + deliver).
 
-Patches cron.scheduler.get_due_jobs for the duration of tick() so other due jobs are not run.
+**Default (no ping flags):** For each job, ``trigger_job`` then ``cron.scheduler.execute_due_cron_job``
+with ``force_llm=True`` — the **agent generates** the Slack check-in (same sanitize / headline /
+dedupe rules as ``tick()``). This path does **not** take ``cron/.tick.lock``, so it works while the
+gateway holds the lock.
+
+``--tick`` uses the legacy locked ``tick()`` + patched ``get_due_jobs`` instead (may run 0 jobs if
+another process holds the lock).
 
 Usage:
   HERMES_HOME=~/.hermes/profiles/chief-orchestrator \\
@@ -97,6 +103,11 @@ def main() -> int:
         action="store_true",
         help="Post policy-shaped upward summary + scheduled prompt excerpt per slack job (no LLM / no tick).",
     )
+    mx.add_argument(
+        "--tick",
+        action="store_true",
+        help="Use locked tick() with patched get_due_jobs (default: direct LLM via execute_due_cron_job).",
+    )
     args = ap.parse_args()
     if args.no_dedupe:
         os.environ["HERMES_CRON_DELIVERY_DEDUPE"] = "0"
@@ -115,7 +126,7 @@ def main() -> int:
 
     load_hermes_dotenv(hermes_home=Path(os.environ["HERMES_HOME"]))
 
-    from cron.jobs import load_jobs, trigger_job
+    from cron.jobs import get_job, load_jobs, trigger_job
     import cron.scheduler as sch
 
     slack_jobs = [j for j in load_jobs() if str(j.get("deliver", "")).startswith("slack:")]
@@ -154,32 +165,50 @@ def main() -> int:
     for jid in slack_ids:
         trigger_job(jid)
 
-    _orig = sch.get_due_jobs
-    slack_set = frozenset(slack_ids)
+    if args.tick:
+        _orig = sch.get_due_jobs
+        slack_set = frozenset(slack_ids)
 
-    def _slack_due():
-        return [j for j in _orig() if j["id"] in slack_set]
+        def _slack_due():
+            return [j for j in _orig() if j["id"] in slack_set]
 
-    sch.get_due_jobs = _slack_due
-    try:
-        total = 0
-        # tick() may return 0 if another process holds ~/.hermes/.../cron/.tick.lock (e.g. gateway).
-        for attempt in range(60):
-            n = sch.tick(verbose=True)
-            total += n
-            if n > 0:
-                print(f"tick executed {n} job(s) (attempt {attempt + 1})", file=sys.stderr)
-                break
-            due = _slack_due()
-            if not due:
-                print("No slack jobs remain due after tick — done or already advanced.", file=sys.stderr)
-                break
-            time.sleep(5)
+        sch.get_due_jobs = _slack_due
+        try:
+            for attempt in range(60):
+                n = sch.tick(verbose=True)
+                if n > 0:
+                    print(f"tick executed {n} job(s) (attempt {attempt + 1})", file=sys.stderr)
+                    break
+                due = _slack_due()
+                if not due:
+                    print("No slack jobs remain due after tick — done or already advanced.", file=sys.stderr)
+                    break
+                time.sleep(5)
+            else:
+                print("Gave up waiting for cron tick lock (gateway may hold it).", file=sys.stderr)
+                return 3
+        finally:
+            sch.get_due_jobs = _orig
+        return 0
+
+    from cron.scheduler import execute_due_cron_job
+
+    llm_runs = 0
+    for j in slack_jobs:
+        jid = j["id"]
+        fresh = get_job(jid)
+        if not fresh:
+            print(f"run-agent: job id {jid!r} missing after trigger", file=sys.stderr)
+            continue
+        name = fresh.get("name", jid)
+        target = str(fresh.get("deliver", ""))
+        print(f"LLM+deliver {name} {target} …", file=sys.stderr)
+        if execute_due_cron_job(fresh, verbose=True, force_llm=True):
+            llm_runs += 1
+            print(f"LLM+deliver {name} -> done", file=sys.stderr)
         else:
-            print("Gave up waiting for cron tick lock (gateway may hold it).", file=sys.stderr)
-            return 3
-    finally:
-        sch.get_due_jobs = _orig
+            print(f"LLM+deliver {name} -> skipped or failed (see logs)", file=sys.stderr)
+    print(f"Finished {llm_runs}/{len(slack_jobs)} slack job(s) through LLM path.", file=sys.stderr)
     return 0
 
 

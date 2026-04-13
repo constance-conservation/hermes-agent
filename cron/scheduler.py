@@ -135,7 +135,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         except Exception as e:
             logger.warning("Job '%s': failed to load config.yaml, using defaults: %s", job_id, e)
 
-        from hermes_constants import parse_reasoning_effort
+        from hermes_constants import OPENROUTER_FREE_SYNTHETIC, parse_reasoning_effort
+
+        if not str(model or "").strip():
+            model = OPENROUTER_FREE_SYNTHETIC
 
         effort = os.getenv("HERMES_REASONING_EFFORT", "")
         if not effort:
@@ -179,6 +182,8 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 _cp = str((_cfg.get("cron") or {}).get("default_provider") or "").strip()
                 if _cp:
                     _req_prov = _cp
+            if not str(_req_prov or "").strip() and str(model or "").strip() == OPENROUTER_FREE_SYNTHETIC:
+                _req_prov = "openrouter"
             runtime_kwargs = {"requested": _req_prov}
             if job.get("base_url"):
                 runtime_kwargs["explicit_base_url"] = job.get("base_url")
@@ -305,6 +310,116 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 logger.debug("Job '%s': failed to close SQLite session store: %s", job_id, e)
 
 
+def execute_due_cron_job(
+    job: dict,
+    *,
+    verbose: bool = True,
+    force_llm: bool = False,
+) -> bool:
+    """Run a single job through the same pipeline as ``tick()`` (LLM + sanitize + deliver + mark).
+
+    Does **not** take the tick-wide file lock — safe for one-off bursts while the gateway holds
+    ``.tick.lock``. When *force_llm* is true, the pre-LLM ``state_skip_gate`` short-circuit is skipped
+    so the provider always runs (manual ``run_slack_cron_burst_now`` / operator-requested reports).
+
+    Returns:
+        True if the job reached the same completion path as ``tick`` where ``executed`` is incremented
+        (LLM path with ``mark_job_run`` at end). False when the state gate skipped the LLM or on
+        outer exception (matches ``tick`` accounting).
+    """
+    job_id = job["id"]
+    try:
+        advance_next_run(job_id)
+
+        skip_llm, _gate_fp = should_skip_llm_for_unchanged_state(job)
+        if skip_llm and not force_llm:
+            logger.info(
+                "Job '%s': state_skip_gate unchanged — skipping LLM / provider call",
+                job_id,
+            )
+            mark_job_run(job_id, True, None, skip_repeat_increment=True)
+            return False
+
+        success, output, final_response, error = run_job(job)
+
+        output_file = save_job_output(job_id, output)
+        if verbose:
+            logger.info("Output saved to: %s", output_file)
+
+        deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job_id)}' failed:\n{error}"
+        should_deliver = bool(deliver_content)
+        max_chars, _ = _cron_read_limits()
+        if should_deliver and success:
+            strict_env = job.get("strict_delivery_envelope")
+            if strict_env is None:
+                strict_env = cron_strict_delivery_envelope()
+            sanitized, skip_user = sanitize_cron_deliver_content(
+                deliver_content,
+                max_chars,
+                strict_delivery_envelope=bool(strict_env),
+            )
+            if skip_user or not (sanitized or "").strip():
+                logger.info(
+                    "Job '%s': delivery suppressed (envelope / [SILENT] / sanitize)",
+                    job_id,
+                )
+                should_deliver = False
+            else:
+                deliver_content = sanitized
+        elif should_deliver and not success and len(deliver_content) > 2400:
+            deliver_content = deliver_content[:2399] + "…"
+
+        if should_deliver and success and deliver_content.strip().upper().startswith(SILENT_MARKER):
+            logger.info("Job '%s': agent returned %s — skipping delivery", job_id, SILENT_MARKER)
+            should_deliver = False
+
+        if should_deliver:
+            deliver_content = format_cron_delivery_with_headline(job, deliver_content, success=success)
+
+        dedupe_on = _cron_delivery_dedupe_enabled()
+        fp_new: Optional[str] = None
+        if should_deliver:
+            fp_new = _delivery_content_fingerprint(deliver_content)
+        if (
+            should_deliver
+            and dedupe_on
+            and fp_new
+            and job.get("last_deliver_fingerprint")
+            and job["last_deliver_fingerprint"] == fp_new
+        ):
+            logger.info(
+                "Job '%s': delivery dedupe — same status as last send, skipping",
+                job_id,
+            )
+            should_deliver = False
+
+        deliver_fingerprint_update: Optional[str] = None
+        if should_deliver:
+            try:
+                if _deliver_result(job, deliver_content) and dedupe_on:
+                    deliver_fingerprint_update = fp_new
+            except Exception as de:
+                logger.error("Delivery failed for job %s: %s", job_id, de)
+
+        state_gate_fp: Optional[str] = None
+        if success:
+            state_gate_fp = fingerprint_for_state_skip_gate(job)
+
+        mark_job_run(
+            job_id,
+            success,
+            error,
+            deliver_fingerprint_update=deliver_fingerprint_update,
+            state_gate_fingerprint_update=state_gate_fp,
+        )
+        return True
+
+    except Exception as e:
+        logger.error("Error processing job %s: %s", job_id, e)
+        mark_job_run(job_id, False, str(e))
+        return False
+
+
 def tick(verbose: bool = True) -> int:
     """
     Check and run all due jobs.
@@ -345,95 +460,8 @@ def tick(verbose: bool = True) -> int:
 
         executed = 0
         for job in due_jobs:
-            try:
-                advance_next_run(job["id"])
-
-                skip_llm, _gate_fp = should_skip_llm_for_unchanged_state(job)
-                if skip_llm:
-                    logger.info(
-                        "Job '%s': state_skip_gate unchanged — skipping LLM / provider call",
-                        job["id"],
-                    )
-                    mark_job_run(job["id"], True, None, skip_repeat_increment=True)
-                    continue
-
-                success, output, final_response, error = run_job(job)
-
-                output_file = save_job_output(job["id"], output)
-                if verbose:
-                    logger.info("Output saved to: %s", output_file)
-
-                deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
-                should_deliver = bool(deliver_content)
-                max_chars, _ = _cron_read_limits()
-                if should_deliver and success:
-                    strict_env = job.get("strict_delivery_envelope")
-                    if strict_env is None:
-                        strict_env = cron_strict_delivery_envelope()
-                    sanitized, skip_user = sanitize_cron_deliver_content(
-                        deliver_content,
-                        max_chars,
-                        strict_delivery_envelope=bool(strict_env),
-                    )
-                    if skip_user or not (sanitized or "").strip():
-                        logger.info(
-                            "Job '%s': delivery suppressed (envelope / [SILENT] / sanitize)",
-                            job["id"],
-                        )
-                        should_deliver = False
-                    else:
-                        deliver_content = sanitized
-                elif should_deliver and not success and len(deliver_content) > 2400:
-                    deliver_content = deliver_content[:2399] + "…"
-
-                if should_deliver and success and deliver_content.strip().upper().startswith(SILENT_MARKER):
-                    logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
-                    should_deliver = False
-
-                if should_deliver:
-                    deliver_content = format_cron_delivery_with_headline(job, deliver_content, success=success)
-
-                dedupe_on = _cron_delivery_dedupe_enabled()
-                fp_new: Optional[str] = None
-                if should_deliver:
-                    fp_new = _delivery_content_fingerprint(deliver_content)
-                if (
-                    should_deliver
-                    and dedupe_on
-                    and fp_new
-                    and job.get("last_deliver_fingerprint")
-                    and job["last_deliver_fingerprint"] == fp_new
-                ):
-                    logger.info(
-                        "Job '%s': delivery dedupe — same status as last send, skipping",
-                        job["id"],
-                    )
-                    should_deliver = False
-
-                deliver_fingerprint_update: Optional[str] = None
-                if should_deliver:
-                    try:
-                        if _deliver_result(job, deliver_content) and dedupe_on:
-                            deliver_fingerprint_update = fp_new
-                    except Exception as de:
-                        logger.error("Delivery failed for job %s: %s", job["id"], de)
-
-                state_gate_fp: Optional[str] = None
-                if success:
-                    state_gate_fp = fingerprint_for_state_skip_gate(job)
-
-                mark_job_run(
-                    job["id"],
-                    success,
-                    error,
-                    deliver_fingerprint_update=deliver_fingerprint_update,
-                    state_gate_fingerprint_update=state_gate_fp,
-                )
+            if execute_due_cron_job(job, verbose=verbose, force_llm=False):
                 executed += 1
-
-            except Exception as e:
-                logger.error("Error processing job %s: %s", job["id"], e)
-                mark_job_run(job["id"], False, str(e))
 
         return executed
     finally:

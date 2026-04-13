@@ -111,3 +111,49 @@ def test_policy_checkin_sends_upward_summary_and_slug(
             assert "UPWARD SUMMARY" in body or "upward" in body.lower()
             assert "org-mapper-hr-controller" in body
             assert "Slack-only daily status" in body
+
+
+def test_default_burst_uses_execute_due_cron_not_tick(
+    burst_main,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    home = tmp_path / ".hermes"
+    (home / "cron").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.chdir(REPO)
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+
+    jobs = [{"id": "a1", "name": "daily-a", "deliver": "slack:C111"}]
+    with patch("cron.jobs.load_jobs", return_value=jobs):
+        with patch("cron.jobs.trigger_job") as trig:
+            with patch("cron.jobs.get_job", return_value=dict(jobs[0])):
+                with patch("cron.scheduler.execute_due_cron_job", return_value=True) as ex:
+                    with patch("cron.scheduler.tick") as tick:
+                        monkeypatch.setattr(sys, "argv", ["x"])
+                        assert burst_main() == 0
+                        trig.assert_called_once_with("a1")
+                        ex.assert_called_once()
+                        tick.assert_not_called()
+
+
+def test_tick_mode_calls_scheduler_tick(
+    burst_main,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    home = tmp_path / ".hermes"
+    (home / "cron").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.chdir(REPO)
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+
+    jobs = [{"id": "a1", "name": "daily-a", "deliver": "slack:C111"}]
+    with patch("cron.jobs.load_jobs", return_value=jobs):
+        with patch("cron.jobs.trigger_job"):
+            with patch("cron.scheduler.tick", return_value=1) as tick:
+                monkeypatch.setattr(sys, "argv", ["x", "--tick"])
+                assert burst_main() == 0
+                tick.assert_called()
