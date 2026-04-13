@@ -7,6 +7,11 @@ Use on **operator** or **droplet** when each machine has its **own** Slack app t
 
 This reverses the ``isolate_droplet_orchestrator`` defaults that disabled Slack on the VPS.
 
+If the **same machine** still has another profile (e.g. ``chief-orchestrator``) that must **not**
+post Slack role check-ins, set ``messaging.slack_role_cron_leader: false`` on that profile and run
+``prune_slack_cron_for_non_leader.py --apply`` (or ``--apply --also-set-non-leader``) so only one
+profile owns ``slack:`` cron jobs.
+
 After running, execute (same profile):
 
   HERMES_HOME=... ./venv/bin/python scripts/core/repair_cron_next_run.py

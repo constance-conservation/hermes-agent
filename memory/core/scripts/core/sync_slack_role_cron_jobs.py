@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Create per-Slack-channel daily status cron jobs from messaging.role_routing (chief profile).
 
+Only one profile per **physical host** should have ``messaging.slack_role_cron_leader: true`` and
+Slack role jobs for a given Slack workspace; use disjoint channel maps (and
+``prune_slack_cron_for_non_leader.py`` on duplicate profiles). Operator Mac vs VPS droplet = split
+ownership, not the same ``slack:C…`` targets twice.
+
 - Skips channels already covered by an existing job with the same deliver target.
 - Stagger minutes starting at base (default 10:05 Sydney wall time via cron minute/hour fields).
 - Prompts enforce [SILENT] when no state change and forbid cross-channel duplication.
