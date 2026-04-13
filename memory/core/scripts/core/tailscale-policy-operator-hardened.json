@@ -1,4 +1,9 @@
 {
+  "hosts": {
+    "operator": "100.67.17.9/32",
+    "agent-os": "100.109.37.89/32",
+    "agent-droplet": "100.88.191.4/32"
+  },
   "grants": [
     {
       "src": ["autogroup:member"],
