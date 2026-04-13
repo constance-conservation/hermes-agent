@@ -7,6 +7,8 @@
 #   optional MACMINI_SSH_LAN_IP — when set (and differs from MACMINI_SSH_HOST), try LAN first by default
 #     with HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 8s), then Tailscale with
 #     HERMES_OPERATOR_SSH_CONNECT_TIMEOUT (default 30s). Set MACMINI_SSH_TRY_LAN_FIRST=0 for TS-first.
+#     If LAN shows "Permission denied (publickey)" but Tailscale works, the mini's ~/.ssh/authorized_keys
+#     may use from="…" that allows only Tailscale (100.x); widen CIDR or add a second pubkey line for LAN.
 #   optional HERMES_OPERATOR_REPO — absolute path on the mini (e.g. /Users/operator/hermes-agent)
 #   optional HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE or HERMES_DROPLET_ALLOW_ENV_PASSPHRASE + SSH_PASSPHRASE
 #   for encrypted keys without TTY (shared ~/.env)
@@ -224,6 +226,39 @@ _n="${#_candidate_hosts[@]}"
 if [[ "$_n" -eq 0 ]]; then
   echo "ssh_operator.sh: no SSH target hosts (internal error)." >&2
   exit 1
+fi
+
+# Probes use BatchMode=yes by default — passphrase-protected keys need SSH_ASKPASS (env file) or
+# an interactive TTY so ssh can prompt. Otherwise every probe fails with "Permission denied
+# (publickey)" before the real connection runs.
+if [[ "$_n" -gt 1 ]]; then
+  if ! ssh-keygen -y -f "$KEY_FILE" -P "" >/dev/null 2>&1 && [[ "$_ALLOW_ENV_PASS_FROM_FILE" != "1" ]]; then
+    if [[ "${HERMES_OPERATOR_SSH_NO_TTY:-0}" == "1" ]] || [[ ! -t 0 ]]; then
+      echo "ssh_operator.sh: ${KEY_FILE} is passphrase-protected; multi-host probes need non-interactive unlock." >&2
+      echo "  Set HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE=1 (or HERMES_DROPLET_ALLOW_ENV_PASSPHRASE=1) and SSH_PASSPHRASE in ${ENV_FILE}," >&2
+      echo "  or unset MACMINI_SSH_LAN_IP / use a single host, or run from an interactive terminal (no HERMES_OPERATOR_SSH_NO_TTY=1)." >&2
+      exit 1
+    fi
+    _SSH_FLAGS_PROBE=(
+      -4
+      -T
+      -o BatchMode=no
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o AddKeysToAgent=no
+      -o ControlMaster=no
+      -o ControlPath=none
+      -o StrictHostKeyChecking=accept-new
+      -o ServerAliveInterval=5
+      -o ServerAliveCountMax=2
+      -o TCPKeepAlive=yes
+      -i "$KEY_FILE"
+      -p "${MACMINI_PORT:?}"
+    )
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      _SSH_FLAGS_PROBE+=(-o UseKeychain=no)
+    fi
+  fi
 fi
 
 if [[ "$_n" -eq 1 ]]; then
