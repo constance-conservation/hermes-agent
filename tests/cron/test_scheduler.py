@@ -705,6 +705,7 @@ class TestTickDeliveryDedupe:
             True,
             None,
             deliver_fingerprint_update=None,
+            state_gate_fingerprint_update=None,
         )
 
     def test_delivers_when_no_prior_fingerprint(self):
@@ -1094,6 +1095,45 @@ class TestBuildJobPromptMissingSkill:
             result = _build_job_prompt({"skills": ["ghost-skill", "real-skill"], "prompt": "go"})
         assert "Real skill content." in result
         assert "go" in result
+
+
+class TestTickStateSkipGate:
+    """Pre-LLM state fingerprint skips provider when semantic state is unchanged."""
+
+    def test_skips_run_job_when_state_unchanged(self, tmp_path):
+        def fake_skip(job):
+            return True, "samefp"
+
+        with patch("cron.scheduler.get_due_jobs", return_value=[{"id": "g1", "name": "g"}]), \
+             patch("cron.scheduler.advance_next_run"), \
+             patch("cron.scheduler.should_skip_llm_for_unchanged_state", side_effect=fake_skip), \
+             patch("cron.scheduler.run_job") as run_mock, \
+             patch("cron.scheduler.mark_job_run") as mark_mock, \
+             patch("cron.scheduler.save_job_output"):
+            from cron.scheduler import tick
+
+            tick(verbose=False)
+
+        run_mock.assert_not_called()
+        mark_mock.assert_called_once()
+        assert mark_mock.call_args.args[0] == "g1"
+        assert mark_mock.call_args.kwargs.get("skip_repeat_increment") is True
+
+    def test_runs_job_when_state_changed(self, tmp_path):
+        with patch("cron.scheduler.get_due_jobs", return_value=[{"id": "g2", "name": "g"}]), \
+             patch("cron.scheduler.advance_next_run"), \
+             patch("cron.scheduler.should_skip_llm_for_unchanged_state", return_value=(False, "fp")), \
+             patch("cron.scheduler.run_job", return_value=(True, "o", "r", None)), \
+             patch("cron.scheduler.save_job_output", return_value=tmp_path / "o.md"), \
+             patch("cron.scheduler.mark_job_run") as mark_mock, \
+             patch("cron.scheduler._deliver_result"), \
+             patch("cron.scheduler.fingerprint_for_state_skip_gate", return_value=None):
+            from cron.scheduler import tick
+
+            tick(verbose=False)
+
+        mark_mock.assert_called_once()
+        assert not mark_mock.call_args.kwargs.get("skip_repeat_increment")
 
 
 class TestTickAdvanceBeforeRun:

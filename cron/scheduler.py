@@ -48,6 +48,7 @@ from cron.delivery import (
 )
 from cron.job_prompt import build_cron_job_prompt
 from cron.jobs import advance_next_run, get_due_jobs, mark_job_run, save_job_output
+from cron.state_gate import fingerprint_for_state_skip_gate, should_skip_llm_for_unchanged_state
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,15 @@ def tick(verbose: bool = True) -> int:
             try:
                 advance_next_run(job["id"])
 
+                skip_llm, _gate_fp = should_skip_llm_for_unchanged_state(job)
+                if skip_llm:
+                    logger.info(
+                        "Job '%s': state_skip_gate unchanged — skipping LLM / provider call",
+                        job["id"],
+                    )
+                    mark_job_run(job["id"], True, None, skip_repeat_increment=True)
+                    continue
+
                 success, output, final_response, error = run_job(job)
 
                 output_file = save_job_output(job["id"], output)
@@ -402,7 +412,17 @@ def tick(verbose: bool = True) -> int:
                     except Exception as de:
                         logger.error("Delivery failed for job %s: %s", job["id"], de)
 
-                mark_job_run(job["id"], success, error, deliver_fingerprint_update=deliver_fingerprint_update)
+                state_gate_fp: Optional[str] = None
+                if success:
+                    state_gate_fp = fingerprint_for_state_skip_gate(job)
+
+                mark_job_run(
+                    job["id"],
+                    success,
+                    error,
+                    deliver_fingerprint_update=deliver_fingerprint_update,
+                    state_gate_fingerprint_update=state_gate_fp,
+                )
                 executed += 1
 
             except Exception as e:

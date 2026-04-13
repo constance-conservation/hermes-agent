@@ -623,6 +623,8 @@ def mark_job_run(
     error: Optional[str] = None,
     *,
     deliver_fingerprint_update: Optional[str] = None,
+    state_gate_fingerprint_update: Optional[str] = None,
+    skip_repeat_increment: bool = False,
 ):
     """
     Mark a job as having been run.
@@ -632,6 +634,12 @@ def mark_job_run(
 
     When *deliver_fingerprint_update* is set (non-None), stores it as
     *last_deliver_fingerprint* for cron delivery deduplication.
+
+    When *state_gate_fingerprint_update* is set, stores *last_state_gate_fingerprint*
+    for ``state_skip_gate`` (pre-LLM skip on unchanged semantic state).
+
+    *skip_repeat_increment*: when True (e.g. state gate skipped the LLM), do not bump
+    *repeat.completed* — the scheduled tick did not consume an LLM run.
     """
     jobs = load_jobs()
     for i, job in enumerate(jobs):
@@ -642,9 +650,11 @@ def mark_job_run(
             job["last_error"] = error if not success else None
             if deliver_fingerprint_update is not None:
                 job["last_deliver_fingerprint"] = deliver_fingerprint_update
+            if state_gate_fingerprint_update is not None:
+                job["last_state_gate_fingerprint"] = state_gate_fingerprint_update
             
             # Increment completed count
-            if job.get("repeat"):
+            if job.get("repeat") and not skip_repeat_increment:
                 job["repeat"]["completed"] = job["repeat"].get("completed", 0) + 1
                 
                 # Check if we've hit the repeat limit

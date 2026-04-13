@@ -339,6 +339,24 @@ class TestMarkJobRun:
         assert updated["last_status"] == "error"
         assert updated["last_error"] == "timeout"
 
+    def test_deliver_fingerprint_update_persisted(self, tmp_cron_dir):
+        job = create_job(prompt="Ping", schedule="every 1h")
+        mark_job_run(job["id"], success=True, deliver_fingerprint_update="abc123hash")
+        updated = get_job(job["id"])
+        assert updated.get("last_deliver_fingerprint") == "abc123hash"
+
+    def test_state_gate_fingerprint_update_persisted(self, tmp_cron_dir):
+        job = create_job(prompt="Gated", schedule="every 1h")
+        mark_job_run(job["id"], success=True, state_gate_fingerprint_update="gatefp9")
+        updated = get_job(job["id"])
+        assert updated.get("last_state_gate_fingerprint") == "gatefp9"
+
+    def test_skip_repeat_increment(self, tmp_cron_dir):
+        job = create_job(prompt="SkipInc", schedule="every 1h")
+        mark_job_run(job["id"], success=True, skip_repeat_increment=True)
+        updated = get_job(job["id"])
+        assert updated["repeat"]["completed"] == 0
+
 
 class TestAdvanceNextRun:
     """Tests for advance_next_run() — crash-safety for recurring jobs."""
