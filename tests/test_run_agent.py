@@ -1839,6 +1839,85 @@ class TestRetryExhaustion:
 
 
 # ---------------------------------------------------------------------------
+# HTTP status coercion + encrypted reasoning history
+# ---------------------------------------------------------------------------
+
+
+class TestCoerceHttpStatusAndEncryptedReasoning:
+    """Fatal 400s must not retry blindly; strip encrypted reasoning for wrong upstream."""
+
+    def test_coerce_http_status_from_message_without_status_attr(self):
+        class E(Exception):
+            pass
+
+        e = E("HTTP 400: Encrypted content is not supported with this model.")
+        assert AIAgent._coerce_http_status_from_exception(e) == 400
+        assert getattr(e, "status_code", None) is None
+
+    def test_encrypted_content_400_aborts_without_retry_loop(self, agent):
+        """SDK sometimes omits status_code; coercion must still abort (no 3x retry)."""
+        agent._cached_system_prompt = "You are helpful."
+        agent._use_prompt_caching = False
+        agent.tool_delay = 0
+        agent.compression_enabled = False
+        agent.save_trajectories = False
+
+        class Bad(Exception):
+            pass
+
+        err = Bad("HTTP 400: Encrypted content is not supported with this model.")
+        agent.client.chat.completions.create.side_effect = err
+
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+            patch("run_agent.time", TestRetryExhaustion._make_fast_time_mock()),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert agent.client.chat.completions.create.call_count == 1
+        assert result.get("failed") is True
+
+    def test_reasoning_details_dropped_for_openrouter_non_o_series(self, agent):
+        """openai/gpt-* on OpenRouter must not replay encrypted reasoning_details."""
+        agent._cached_system_prompt = "You are helpful."
+        agent._use_prompt_caching = False
+        agent.tool_delay = 0
+        agent.compression_enabled = False
+        agent.save_trajectories = False
+        agent.base_url = "https://openrouter.ai/api/v1"
+        agent.model = "openai/gpt-5.4-nano"
+        agent.api_mode = "chat_completions"
+
+        agent.client.chat.completions.create.return_value = _mock_response(
+            content="done", finish_reason="stop"
+        )
+
+        history = [
+            {
+                "role": "assistant",
+                "content": "hi",
+                "reasoning_details": [
+                    {"type": "reasoning", "encrypted_content": "blob", "summary": []},
+                ],
+            },
+            {"role": "user", "content": "again"},
+        ]
+
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            agent.run_conversation("again", conversation_history=history)
+
+        sent = agent.client.chat.completions.create.call_args.kwargs["messages"]
+        for m in sent:
+            assert "reasoning_details" not in m
+
+
+# ---------------------------------------------------------------------------
 # Flush sentinel leak
 # ---------------------------------------------------------------------------
 

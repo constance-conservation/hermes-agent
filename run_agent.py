@@ -5392,6 +5392,43 @@ class AIAgent:
         return {k: v for k, v in fb.items() if k not in _FALLBACK_CHAIN_META_KEYS}
 
     @staticmethod
+    def _coerce_http_status_from_exception(exc: BaseException) -> Optional[int]:
+        """Best-effort HTTP status for retry / 4xx classification.
+
+        Some SDKs omit ``status_code`` on the exception but embed ``HTTP NNN`` in
+        ``str(exc)`` (e.g. Google GenAI, LiteLLM wrappers). Without coercion, Hermes
+        retries fatal 400s (e.g. ``Encrypted content is not supported with this model``)
+        up to ``max_retries``, burning tokens and spamming gateways.
+        """
+        code = getattr(exc, "status_code", None)
+        if isinstance(code, int) and 100 <= code <= 599:
+            return code
+        low = str(exc).lower()
+        for needle, val in (
+            ("error code: 400", 400),
+            ("http 400", 400),
+            ("[http 400]", 400),
+            ("status code 400", 400),
+            ("error code: 401", 401),
+            ("http 401", 401),
+            ("error code: 403", 403),
+            ("http 403", 403),
+            ("error code: 404", 404),
+            ("error code: 422", 422),
+        ):
+            if needle in low:
+                return val
+        m = re.search(r"\bhttp\s+(\d{3})\b", low)
+        if m:
+            try:
+                n = int(m.group(1))
+                if 100 <= n <= 599:
+                    return n
+            except ValueError:
+                pass
+        return None
+
+    @staticmethod
     def _quota_style_api_failure(exc: BaseException) -> bool:
         """True for rate limits, quota exhaustion, or provider billing/credits errors.
 
@@ -7126,6 +7163,26 @@ class AIAgent:
             "google/gemini-2",
         )
         return any(model.startswith(prefix) for prefix in reasoning_model_prefixes)
+
+    def _preserve_openrouter_reasoning_details_in_chat_history(self) -> bool:
+        """Whether ``reasoning_details`` (incl. ``encrypted_content``) may be replayed on assistant turns.
+
+        OpenRouter returns structured reasoning that must be echoed for some upstream
+        families (o-series, Claude, DeepSeek, Grok). Other models reject encrypted
+        reasoning payloads with HTTP 400 — common after tier routing or session import.
+        """
+        if getattr(self, "api_mode", None) != "chat_completions":
+            return True
+        if (getattr(self, "provider", None) or "").lower() == "gemini":
+            return False
+        base = getattr(self, "_base_url_lower", "") or ""
+        if "generativelanguage.googleapis.com" in base:
+            return False
+        model_l = (getattr(self, "model", None) or "").lower()
+        if "openrouter.ai" in base:
+            return model_l.startswith(("openai/o", "anthropic/", "deepseek/", "x-ai/"))
+        # Imported or mixed sessions may carry OpenRouter-shaped history on other hosts.
+        return model_l.startswith(("openai/o", "anthropic/", "deepseek/", "x-ai/"))
 
     def _github_models_reasoning_extra_body(self) -> dict | None:
         """Format reasoning payload for GitHub Models/OpenAI-compatible routes."""
@@ -8998,8 +9055,12 @@ class AIAgent:
                     # for Codex Responses compatibility.
                     if "api.mistral.ai" in self._base_url_lower:
                         self._sanitize_tool_calls_for_strict_api(api_msg)
-                    # Keep 'reasoning_details' - OpenRouter uses this for multi-turn reasoning context
-                    # The signature field helps maintain reasoning continuity
+                    # Keep ``reasoning_details`` for OpenRouter families that replay encrypted
+                    # reasoning (o-series, Claude, …). Other models reject ``encrypted_content``
+                    # with HTTP 400 — strip before append so tier routing / imports do not break.
+                    if msg.get("role") == "assistant" and not self._preserve_openrouter_reasoning_details_in_chat_history():
+                        api_msg.pop("reasoning_details", None)
+                        api_msg.pop("codex_reasoning_items", None)
                     api_messages.append(api_msg)
         
                 # Build the final system message: cached prompt + ephemeral system prompt.
@@ -9602,7 +9663,7 @@ class AIAgent:
                             # Surrogates weren't in messages — might be in system
                             # prompt or prefill.  Fall through to normal error path.
         
-                        status_code = getattr(api_error, "status_code", None)
+                        status_code = self._coerce_http_status_from_exception(api_error)
                         recovered_with_pool, has_retried_429 = self._recover_with_credential_pool(
                             status_code=status_code,
                             has_retried_429=has_retried_429,
@@ -9735,7 +9796,7 @@ class AIAgent:
                         # Check for 413 payload-too-large BEFORE generic 4xx handler.
                         # A 413 is a payload-size error — the correct response is to
                         # compress history and retry, not abort immediately.
-                        status_code = getattr(api_error, "status_code", None)
+                        # (``status_code`` was coerced earlier in this ``except`` block.)
         
                         # Record failure for provider health tracking.
                         ph = getattr(self, "_provider_health", None)
@@ -10012,6 +10073,7 @@ class AIAgent:
                         is_client_error = (is_local_validation_error or is_client_status_error or any(phrase in error_msg for phrase in [
                             'error code: 401', 'error code: 403',
                             'error code: 404', 'error code: 422',
+                            'encrypted content is not supported',
                             'is not a valid model', 'invalid model', 'model not found',
                             'invalid api key', 'invalid_api_key', 'authentication',
                             'unauthorized', 'forbidden', 'not found',
