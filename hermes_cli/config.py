@@ -848,7 +848,7 @@ OPTIONAL_ENV_VARS = {
         "description": (
             "When 1/true: cron messaging requires a valid ###HERMES_CRON_DELIVERY_JSON … block; "
             "missing or invalid JSON suppresses WhatsApp/Telegram/Slack delivery (saves tokens on VPS). "
-            "Put in the active profile .env (e.g. chief-orchestrator-droplet). Overrides cron.strict_delivery_envelope in config.yaml."
+            "Put in the active profile .env (e.g. ~/.hermes/profiles/chief-orchestrator/.env). Overrides cron.strict_delivery_envelope in config.yaml."
         ),
         "prompt": "Cron strict JSON delivery envelope (optional, 1/true for droplet)",
         "url": None,
