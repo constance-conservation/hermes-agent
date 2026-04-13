@@ -5,7 +5,11 @@
 # plus optional MACMINI_SSH_LAN_IP for same-LAN fallback when Tailscale is wedged after a
 # Wi‑Fi change (Screen Sharing still works via 192.168.x.x but TS SSH times out).
 #
-# Try order (deduped): Tailscale host (MACMINI_SSH_HOST), then MACMINI_SSH_LAN_IP.
+# Try order (deduped): Tailscale host (MACMINI_SSH_HOST), then MACMINI_SSH_LAN_IP — unless **MACMINI_SSH_TRY_LAN_FIRST=1**
+# in ~/.env/.env (then LAN first; use at home when 100.x is stale).
+# With two targets: first hop uses **HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT** (default **8**);
+# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **20** here). **HERMES_OPERATOR_SSH_VERBOSE_TRY=1**
+# prints every attempt (default: only fallback).
 # On the mini, run once (sudo): memory/core/scripts/core/operator_mini_add_lan_listenaddress_sshd.sh
 # so sshd actually listens on that LAN IP (Hermes default is loopback + TS only).
 #
@@ -25,6 +29,7 @@ _ef_host=""
 _ef_port=""
 _ef_user=""
 _ef_lan=""
+_ef_try_lan_first=""
 if [[ -f "$ENV_FILE" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -46,6 +51,7 @@ if [[ -f "$ENV_FILE" ]]; then
       MACMINI_SSH_PORT) _ef_port="${val}" ;;
       MACMINI_SSH_USER) _ef_user="${val}" ;;
       MACMINI_SSH_LAN_IP) _ef_lan="${val}" ;;
+      MACMINI_SSH_TRY_LAN_FIRST) _ef_try_lan_first="${val}" ;;
     esac
   done <"$ENV_FILE"
 fi
@@ -100,28 +106,33 @@ if [[ -z "$KEY" ]]; then
   exit 1
 fi
 
-CTO="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-20}"
-_SSH_BASE=(
-  -4
-  -o BatchMode=no
-  -o IdentitiesOnly=yes
-  -o IdentityAgent=none
-  -o AddKeysToAgent=no
-  -o ControlMaster=no
-  -o ControlPath=none
-  -o StrictHostKeyChecking=accept-new
-  -o ConnectTimeout="$CTO"
-  -o ServerAliveInterval=10
-  -o ServerAliveCountMax=6
-  -o TCPKeepAlive=yes
-  -o PreferredAuthentications=publickey
-  -o PubkeyAuthentication=yes
-  -i "$KEY"
-  -p "$PORT"
-)
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  _SSH_BASE+=(-o UseKeychain=no)
-fi
+CTO_FINAL="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-20}"
+CTO_QUICK="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-8}"
+
+_breakglass_ssh_opts() {
+  local cto="$1"
+  _SSH_BASE=(
+    -4
+    -o BatchMode=no
+    -o IdentitiesOnly=yes
+    -o IdentityAgent=none
+    -o AddKeysToAgent=no
+    -o ControlMaster=no
+    -o ControlPath=none
+    -o StrictHostKeyChecking=accept-new
+    -o ConnectTimeout="$cto"
+    -o ServerAliveInterval=10
+    -o ServerAliveCountMax=6
+    -o TCPKeepAlive=yes
+    -o PreferredAuthentications=publickey
+    -o PubkeyAuthentication=yes
+    -i "$KEY"
+    -p "$PORT"
+  )
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    _SSH_BASE+=(-o UseKeychain=no)
+  fi
+}
 
 if [[ "${OPERATOR_BREAKGLASS_USE_TAILSCALE_SSH:-0}" == "1" ]] && command -v tailscale >/dev/null 2>&1; then
   exec tailscale ssh "${USER_NAME}@${HOST}" "$@"
@@ -138,16 +149,35 @@ _add_candidate() {
   _candidate_hosts+=("$cand")
 }
 
-_add_candidate "$HOST"
-_add_candidate "$LAN_IP"
+_try_lan_first=0
+case "${MACMINI_SSH_TRY_LAN_FIRST:-${_ef_try_lan_first:-0}}" in 1|true|TRUE|True|yes|YES) _try_lan_first=1 ;; esac
+if [[ "$_try_lan_first" == "1" ]]; then
+  _add_candidate "$LAN_IP"
+  _add_candidate "$HOST"
+else
+  _add_candidate "$HOST"
+  _add_candidate "$LAN_IP"
+fi
 
 if [[ "${#_candidate_hosts[@]}" -eq 1 ]]; then
+  _breakglass_ssh_opts "$CTO_FINAL"
   exec ssh "${_SSH_BASE[@]}" "${USER_NAME}@${_candidate_hosts[0]}" "$@"
 fi
 
 last=255
-for h in "${_candidate_hosts[@]}"; do
-  echo "[ssh-operator-breakglass] trying ${USER_NAME}@${h} port ${PORT} ..." >&2
+_n="${#_candidate_hosts[@]}"
+for ((_i = 0; _i < _n; _i++)); do
+  h="${_candidate_hosts[$_i]}"
+  if [[ "$_n" -gt 1 && "$_i" -lt $((_n - 1)) ]]; then
+    _breakglass_ssh_opts "$CTO_QUICK"
+  else
+    _breakglass_ssh_opts "$CTO_FINAL"
+  fi
+  if [[ "$_i" -gt 0 ]]; then
+    echo "[ssh-operator-breakglass] fallback: trying ${USER_NAME}@${h} port ${PORT} ..." >&2
+  elif [[ "${HERMES_OPERATOR_SSH_VERBOSE_TRY:-0}" == "1" ]]; then
+    echo "[ssh-operator-breakglass] trying ${USER_NAME}@${h} port ${PORT} ..." >&2
+  fi
   if ssh "${_SSH_BASE[@]}" "${USER_NAME}@${h}" "$@"; then
     exit 0
   fi

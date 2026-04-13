@@ -16,6 +16,11 @@
 # Sudo: this script does **not** run **sudo** (no **sudo -S** / env password, unlike ssh_droplet). Optional
 # **HERMES_OPERATOR_SSH_NO_TTY=1** uses **ssh -T** for automation that must not allocate a PTY.
 #
+# When **MACMINI_SSH_LAN_IP** is set (two targets): default try order is Tailscale (**MACMINI_SSH_HOST**) then LAN.
+# Set **MACMINI_SSH_TRY_LAN_FIRST=1** to try LAN first (skips a slow timeout when **MACMINI_SSH_HOST** is a stale 100.x
+# and you are on the same LAN). Non-final hops use **HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT** (default **8**);
+# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **30**). **HERMES_OPERATOR_SSH_VERBOSE_TRY=1** prints every target.
+#
 # Usage:
 #   ./ssh_operator.sh
 #   ./ssh_operator.sh 'hostname'
@@ -32,6 +37,7 @@ MACMINI_USER=""
 MACMINI_HOST=""
 MACMINI_PORT="52822"
 MACMINI_SSH_LAN_IP="${MACMINI_SSH_LAN_IP:-}"
+MACMINI_SSH_TRY_LAN_FIRST="${MACMINI_SSH_TRY_LAN_FIRST:-0}"
 HERMES_OPERATOR_REPO_REMOTE=""
 _ALLOW_ENV_PASS_FROM_FILE=0
 _RAW_SSH_PASSPHRASE=""
@@ -53,6 +59,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       ;;
     MACMINI_SSH_PORT) MACMINI_PORT="${val}" ;;
     MACMINI_SSH_LAN_IP) MACMINI_SSH_LAN_IP="${val}" ;;
+    MACMINI_SSH_TRY_LAN_FIRST) MACMINI_SSH_TRY_LAN_FIRST="${val}" ;;
     MACMINI_SSH_KEY) KEY_FILE="${val}" ;;
     HERMES_OPERATOR_REPO) HERMES_OPERATOR_REPO_REMOTE="${val}" ;;
     HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE)
@@ -109,27 +116,30 @@ if [[ "${HERMES_OPERATOR_SSH_NO_TTY:-0}" == "1" ]]; then
   _USE_TT=0
 fi
 
-_SSH_FLAGS=(
-  -o BatchMode=no
-  -o IdentitiesOnly=yes
-  -o IdentityAgent=none
-  -o AddKeysToAgent=no
-  -o ControlMaster=no
-  -o ControlPath=none
-  -o StrictHostKeyChecking=accept-new
-  -o ConnectTimeout="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-30}"
-  -o ServerAliveInterval=10
-  -o ServerAliveCountMax=30
-  -o TCPKeepAlive=yes
-  -i "$KEY_FILE"
-  -p "${MACMINI_PORT:?}"
-)
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  _SSH_FLAGS+=(-o UseKeychain=no)
-fi
-if [[ "$_USE_TT" == "1" ]]; then
-  _SSH_FLAGS+=(-o RequestTTY=force)
-fi
+_operator_build_ssh_flags() {
+  local _cto="$1"
+  _SSH_FLAGS=(
+    -o BatchMode=no
+    -o IdentitiesOnly=yes
+    -o IdentityAgent=none
+    -o AddKeysToAgent=no
+    -o ControlMaster=no
+    -o ControlPath=none
+    -o StrictHostKeyChecking=accept-new
+    -o ConnectTimeout="${_cto}"
+    -o ServerAliveInterval=10
+    -o ServerAliveCountMax=30
+    -o TCPKeepAlive=yes
+    -i "$KEY_FILE"
+    -p "${MACMINI_PORT:?}"
+  )
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    _SSH_FLAGS+=(-o UseKeychain=no)
+  fi
+  if [[ "$_USE_TT" == "1" ]]; then
+    _SSH_FLAGS+=(-o RequestTTY=force)
+  fi
+}
 
 _set_ssh_base_host() {
   local h="$1"
@@ -147,13 +157,34 @@ _run_remote() {
 
 _operator_try_hosts() {
   local remote_bash_cmd="$1"
-  local h _hosts=("$MACMINI_HOST") _last=255 _n
-  if [[ -n "${MACMINI_SSH_LAN_IP:-}" && "${MACMINI_SSH_LAN_IP}" != "$MACMINI_HOST" ]]; then
-    _hosts+=("$MACMINI_SSH_LAN_IP")
+  local h _hosts _last=255 _n _i
+  local _cto_final="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-30}"
+  local _cto_quick="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-8}"
+  local _lan="${MACMINI_SSH_LAN_IP:-}"
+  local _lan_first=0
+  case "${MACMINI_SSH_TRY_LAN_FIRST:-0}" in 1|true|TRUE|True|yes|YES) _lan_first=1 ;; esac
+  if [[ -n "$_lan" && "$_lan" != "$MACMINI_HOST" ]]; then
+    if [[ "$_lan_first" == "1" ]]; then
+      _hosts=("$_lan" "$MACMINI_HOST")
+    else
+      _hosts=("$MACMINI_HOST" "$_lan")
+    fi
+  else
+    _hosts=("$MACMINI_HOST")
   fi
   _n="${#_hosts[@]}"
-  for h in "${_hosts[@]}"; do
-    [[ "$_n" -gt 1 ]] && echo "[ssh_operator] trying ${MACMINI_USER}@${h}:${MACMINI_PORT} ..." >&2
+  for ((_i = 0; _i < _n; _i++)); do
+    h="${_hosts[$_i]}"
+    if [[ "$_n" -gt 1 && "$_i" -lt $((_n - 1)) ]]; then
+      _operator_build_ssh_flags "$_cto_quick"
+    else
+      _operator_build_ssh_flags "$_cto_final"
+    fi
+    if [[ "$_i" -gt 0 ]]; then
+      echo "[ssh_operator] fallback: trying ${MACMINI_USER}@${h}:${MACMINI_PORT} ..." >&2
+    elif [[ "${HERMES_OPERATOR_SSH_VERBOSE_TRY:-0}" == "1" ]]; then
+      echo "[ssh_operator] trying ${MACMINI_USER}@${h}:${MACMINI_PORT} ..." >&2
+    fi
     _set_ssh_base_host "$h"
     if _run_remote "$remote_bash_cmd"; then
       return 0

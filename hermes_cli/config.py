@@ -912,8 +912,16 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
         "advanced": True,
     },
+    "MACMINI_SSH_TRY_LAN_FIRST": {
+        "description": "If 1/true, ssh_operator / ssh-operator-breakglass try MACMINI_SSH_LAN_IP before MACMINI_SSH_HOST when both are set (avoids Tailscale connect timeout when the 100.x address is stale but you are on LAN). Leave unset when connecting from outside the LAN so Tailscale is tried first.",
+        "prompt": "Try LAN before Tailscale for operator SSH (optional, 0/1)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
     "HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT": {
-        "description": "When MACMINI_SSH_LAN_IP is set, ssh_operator / breakglass use this ConnectTimeout (seconds) for the first host try so LAN fallback runs sooner (default 8).",
+        "description": "When two SSH targets are configured, ssh_operator / breakglass use this ConnectTimeout (seconds) for non-final hops (default 8).",
         "prompt": "Operator SSH primary-try timeout seconds (optional)",
         "url": None,
         "password": False,
