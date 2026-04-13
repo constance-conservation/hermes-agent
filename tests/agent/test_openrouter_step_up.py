@@ -83,6 +83,39 @@ def test_compute_plan_when_openrouter(tmp_path, monkeypatch):
     assert "[HERMES_ESCALATE]" in (plan.get("system_suffix") or "")
 
 
+def test_compute_plan_openrouter_free_resolves_then_hub_ladder(tmp_path, monkeypatch):
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    class _A:
+        model = "openrouter/free"
+        api_key = "k"
+        base_url = "https://openrouter.ai/api/v1"
+        api_mode = "chat_completions"
+        _defer_opm_primary_coercion = False
+        _skip_per_turn_tier_routing = False
+        _model_is_tier_routed = True
+        _fallback_activated = False
+
+        def _is_openrouter_url(self):
+            return True
+
+    from agent.routing_canon import invalidate_routing_canon_cache
+
+    invalidate_routing_canon_cache()
+    resolved = "qwen/qwen-2.5-7b-instruct:free"
+    with patch(
+        "agent.openrouter_free_router.resolve_openrouter_free_model_for_api",
+        return_value=resolved,
+    ):
+        plan = compute_openrouter_step_up_plan(_A())
+    assert plan is not None
+    assert plan["start_model"] == resolved
+    assert plan["ladder"][0] == resolved
+    assert plan["ladder"][1] == "openai/gpt-5-nano"
+
+
 def test_prepare_swaps_start_model(monkeypatch):
     """_prepare_openrouter_step_up_for_turn swaps to ladder[0] when tier ceiling differs."""
     from run_agent import AIAgent

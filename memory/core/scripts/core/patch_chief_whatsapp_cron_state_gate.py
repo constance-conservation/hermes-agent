@@ -95,12 +95,12 @@ def main() -> int:
                 job["prompt"] = pr.rstrip() + suffix
                 edits += 1
                 print(f"suffix: {job.get('name')}")
-            if job.get("model") != "openai/gpt-5.4-nano" or job.get("provider") != "openrouter":
-                job["model"] = "openai/gpt-5.4-nano"
+            if job.get("model") != "openrouter/free" or job.get("provider") != "openrouter":
+                job["model"] = "openrouter/free"
                 job["provider"] = "openrouter"
                 job["base_url"] = None
                 edits += 1
-                print(f"model: {job.get('name')} -> openrouter/gpt-5.4-nano")
+                print(f"model: {job.get('name')} -> openrouter/free")
 
     if not edits:
         print("No changes needed.")

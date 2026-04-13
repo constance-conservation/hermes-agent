@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from utils import is_truthy_value
 
 from agent.routing_canon import load_merged_routing_canon
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,51 @@ def compute_openrouter_step_up_plan(agent: Any) -> Optional[Dict[str, Any]]:
         return None
 
     ceiling = str(getattr(agent, "model", None) or "").strip()
-    if not ceiling or _non_openai_hub_ceiling(ceiling):
+    if not ceiling:
+        return None
+
+    # Synthetic free selector: first API hop is a concrete :free slug; then step-up walks
+    # routing_canon openrouter_step_up_escalation hub ids toward the tier ceiling (paid).
+    if ceiling == OPENROUTER_FREE_SYNTHETIC:
+        try:
+            from agent.openrouter_free_router import resolve_openrouter_free_model_for_api
+
+            resolved = resolve_openrouter_free_model_for_api(
+                configured_model=ceiling,
+                api_key=str(getattr(agent, "api_key", "") or ""),
+                base_url=str(getattr(agent, "base_url", "") or ""),
+            )
+        except Exception as exc:
+            logger.debug("openrouter/free step-up: could not resolve free slug: %s", exc)
+            return None
+        ordered = _hub_models_for_agent(agent, cfg)
+        if not ordered:
+            return None
+        hub_ceiling = ordered[-1]
+        hub_ladder = build_ladder_to_ceiling(ordered, hub_ceiling)
+        ladder = [resolved] + list(hub_ladder)
+        if len(ladder) < 2:
+            return None
+        marker = str(cfg.get("escalate_marker") or _DEFAULT_MARKER)
+        suffix = ""
+        if cfg.get("escalate_on_escalate_marker"):
+            suffix = (
+                "\n\n[OpenRouter step-up routing] If this request is beyond what you can do "
+                f"reliably on this model, respond with a single line containing exactly `{marker}` "
+                "and nothing else. Otherwise answer normally."
+            )
+        return {
+            "ladder": ladder,
+            "ceiling": hub_ceiling,
+            "start_model": resolved,
+            "system_suffix": suffix,
+            "marker": marker,
+            "max_escalations": int(cfg.get("max_escalations_per_turn") or 12),
+            "escalate_on_quota_errors": bool(cfg.get("escalate_on_quota_errors")),
+            "escalate_on_escalate_marker": bool(cfg.get("escalate_on_escalate_marker")),
+        }
+
+    if _non_openai_hub_ceiling(ceiling):
         return None
 
     ordered = _hub_models_for_agent(agent, cfg)

@@ -258,6 +258,7 @@ DEFAULT_CONFIG = {
     # Subprocess/delegation: models that may run without gateway /approve (still billed; cheapest tier).
     "subprocess_governance": {
         "budget_auto_approve_models": [
+            "openrouter/free",
             "openai/gpt-5.4-nano",
             "gpt-5.4-nano",
             "openai/gpt-4.1-nano",
@@ -269,7 +270,7 @@ DEFAULT_CONFIG = {
         # First hop when primary fails: OpenRouter cheapest GPT-5.4 tier (not Gemini).
         "budget_openrouter_fallback": {
             "enabled": True,
-            "model": "openai/gpt-5.4-nano",
+            "model": "openrouter/free",
         },
         # When local_models/hub/state.json lists downloads, tier hub ids not marked
         # downloaded are hidden from /models and omitted from the synthesized fallback chain.
@@ -722,6 +723,10 @@ DEFAULT_CONFIG = {
     },
 
     "cron": {
+        # When a job omits model/provider in jobs.json, use these before model.default /
+        # HERMES_INFERENCE_PROVIDER (synthetic openrouter/free → concrete :free slug per routing canon).
+        "default_model": "openrouter/free",
+        "default_provider": "openrouter",
         # Wrap delivered cron responses with a header (task name) and footer
         # ("The agent cannot see this message").  Set to false for clean output.
         "wrap_response": True,
@@ -746,7 +751,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 35,
+    "_config_version": 36,
 }
 
 # =============================================================================
@@ -2941,6 +2946,37 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v35 cron envelope migration skipped: {e}")
             results["warnings"].append(f"v35 migration: {e}")
             merge_user_config_yaml({"_config_version": 35})
+
+    # ── Version 35 → 36: cron defaults + budget OpenRouter fallback → openrouter/free ──
+    if current_ver < 36:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 36,
+                    "cron": {
+                        "default_model": "openrouter/free",
+                        "default_provider": "openrouter",
+                    },
+                    "free_model_routing": {
+                        "budget_openrouter_fallback": {
+                            "enabled": True,
+                            "model": "openrouter/free",
+                        },
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v36: cron.default_model openrouter/free; "
+                    "free_model_routing.budget_openrouter_fallback.model → openrouter/free "
+                    "(paid escalation: routing_canon openrouter_step_up_escalation). "
+                    "Add openrouter/free to subprocess_governance.budget_auto_approve_models if missing."
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v36 migration skipped: {e}")
+            results["warnings"].append(f"v36 migration: {e}")
+            merge_user_config_yaml({"_config_version": 36})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

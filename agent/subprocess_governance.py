@@ -2,8 +2,9 @@
 
 Genuinely **free** (zero API cost) models run without approval. **Budget** models
 (``config subprocess_governance.budget_auto_approve_models``, default
-``openai/gpt-5.4-nano`` / ``gpt-5.4-nano``) are cheap paid tiers that run without
-blocking gateway approval — operators accept per-call cost.
+``openrouter/free`` then ``openai/gpt-5.4-nano`` / ``gpt-5.4-nano``) are cheap paid
+tiers (or the OpenRouter free-router synthetic) that run without blocking gateway
+approval — operators accept per-call cost where applicable.
 
 Other API-cost models still require explicit operator approval when no other rule allows them.
 
@@ -48,6 +49,7 @@ from agent.openai_primary_mode import (
     resolve_openai_primary_mode,
 )
 from agent.routing_trace import emit_routing_decision_trace
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 logger = logging.getLogger(__name__)
 
@@ -293,10 +295,10 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
 
 
 def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
-    """Preferred ``openai/gpt-*-nano`` id when rewriting a blocked delegate/subprocess.
+    """Preferred cheap subprocess/delegate id when rewriting a blocked paid model.
 
-    Uses the first nano entry in ``subprocess_governance.budget_auto_approve_models`` when
-    present, else ``openai/gpt-5.4-nano``.
+    Uses ``openrouter/free`` first when listed in ``budget_auto_approve_models``, then the
+    first ``gpt-*-nano`` entry, else ``openai/gpt-5.4-nano``.
     """
     try:
         from hermes_cli.config import load_config
@@ -305,10 +307,14 @@ def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
         for x in ids:
             s = str(x).strip()
-            if s and _is_budget_gpt_nano_family(s):
+            if not s:
+                continue
+            if s == OPENROUTER_FREE_SYNTHETIC:
+                return s
+            if _is_budget_gpt_nano_family(s):
                 return _norm_subprocess_slug(s)
     except Exception:
         pass
@@ -321,6 +327,8 @@ def requires_operator_approval(model_id: str) -> bool:
         return False
     if _is_budget_gpt_nano_family(model_id):
         return False
+    if (model_id or "").strip() == OPENROUTER_FREE_SYNTHETIC:
+        return False
     try:
         from hermes_cli.config import load_config
 
@@ -328,7 +336,7 @@ def requires_operator_approval(model_id: str) -> bool:
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
         want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
         if _norm_subprocess_slug(model_id) in want:
             return False
@@ -622,9 +630,9 @@ def enforce_subprocess_model_policy(
         raw = cfg.get("subprocess_governance") or {}
         ids = raw.get("budget_auto_approve_models")
         if not isinstance(ids, list) or not ids:
-            ids = ["openai/gpt-5.4-nano", "gpt-5.4-nano"]
+            ids = [OPENROUTER_FREE_SYNTHETIC, "openai/gpt-5.4-nano", "gpt-5.4-nano"]
         want = {_norm_subprocess_slug(str(x)) for x in ids if str(x).strip()}
-        if _norm_subprocess_slug(model_id) in want:
+        if (model_id or "").strip() == OPENROUTER_FREE_SYNTHETIC or _norm_subprocess_slug(model_id) in want:
             register_subprocess(task_id, model_id, goal, approved=True)
             emit_routing_decision_trace(
                 stage="subprocess_governance_gate",

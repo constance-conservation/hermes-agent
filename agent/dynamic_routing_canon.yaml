@@ -178,6 +178,11 @@ compression:
 # -----------------------------------------------------------------------------
 # Synthetic /models selector: openrouter/free (strict free-tier only)
 # -----------------------------------------------------------------------------
+# When the configured primary is ``openrouter/free``, the first API hop is a concrete
+# OpenRouter ``:free`` slug; quota errors or a lone ``[HERMES_ESCALATE]`` reply then
+# advance along ``openrouter_step_up_escalation`` toward paid hub ids (nano → … → ceiling).
+# ``strict_no_paid_fallback`` applies only to free-router resolution (no paid substitute
+# inside the selector); it does not block step-up / failover elsewhere in the retry loop.
 openrouter_free_router:
   enabled: true
   strict_no_paid_fallback: true

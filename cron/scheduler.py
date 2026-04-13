@@ -125,7 +125,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     _cfg = yaml.safe_load(_f) or {}
                 _model_cfg = _cfg.get("model", {})
                 if not job.get("model"):
-                    if isinstance(_model_cfg, str):
+                    _cron_m = str((_cfg.get("cron") or {}).get("default_model") or "").strip()
+                    if _cron_m:
+                        model = _cron_m
+                    elif isinstance(_model_cfg, str):
                         model = _model_cfg
                     elif isinstance(_model_cfg, dict):
                         model = _model_cfg.get("default", model)
@@ -171,9 +174,12 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         from hermes_cli.runtime_provider import format_runtime_provider_error, resolve_runtime_provider
 
         try:
-            runtime_kwargs = {
-                "requested": job.get("provider") or os.getenv("HERMES_INFERENCE_PROVIDER"),
-            }
+            _req_prov = job.get("provider") or os.getenv("HERMES_INFERENCE_PROVIDER")
+            if not (str(_req_prov or "").strip()) and not job.get("provider"):
+                _cp = str((_cfg.get("cron") or {}).get("default_provider") or "").strip()
+                if _cp:
+                    _req_prov = _cp
+            runtime_kwargs = {"requested": _req_prov}
             if job.get("base_url"):
                 runtime_kwargs["explicit_base_url"] = job.get("base_url")
             runtime = resolve_runtime_provider(**runtime_kwargs)
