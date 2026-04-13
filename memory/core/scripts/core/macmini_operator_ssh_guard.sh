@@ -9,10 +9,16 @@
 # - Your **workstation** keeps access when you change Wi‑Fi/Ethernet/hotspot because it uses the
 #   **Tailscale overlay** (stable 100.x per machine), not the workstation’s ephemeral LAN IP.
 #
-# Typical sequence:
+# Typical sequence (step 1 — SSH stack):
 #   sudo bash ./macmini_operator_ssh_guard.sh begin 600
 #   sudo bash ./macmini_operator_ssh_guard.sh apply
 #   # from laptop: ssh -p 52822 operator@<tailscale-ip>
+#   sudo bash ./macmini_operator_ssh_guard.sh cancel
+#
+# Step 2 — PF: explicit tailnet allow for Screen Sharing (5900), keep :22 drop (after step 1 is stable):
+#   sudo bash ./macmini_operator_ssh_guard.sh begin 600
+#   sudo bash ./macmini_sshd_tailscale_launchd_pf.sh   # rewrites /etc/pf.anchors/org.hermes + pfctl -f
+#   # verify: SSH still works; Screen Sharing from a tailnet peer to :5900 still works
 #   sudo bash ./macmini_operator_ssh_guard.sh cancel
 #
 # If login fails, wait for auto-restore or: sudo bash ./macmini_operator_ssh_guard.sh restore-now
