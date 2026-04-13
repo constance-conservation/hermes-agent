@@ -5,7 +5,7 @@
 #   2) $PWD/id_ed25519, $PWD/operator_breakglass, $PWD/breakglass_ed25519
 #   3) Script directory: same filenames
 #   4) $HOME/.env/.breakglass as FILE (private key PEM/OpenSSH)
-#   5) $HOME/.env/.breakglass/id_ed25519 (or operator_breakglass)
+#   5) $HOME/.env/.breakglass/id_ed25519, operator_breakglass, .operator_key (same dir as this script)
 #
 # Works from any network if you can reach HOST:PORT (use Tailscale IP).
 #
@@ -25,9 +25,13 @@ _resolve_breakglass_key() {
     "${PWD}/id_ed25519" \
     "${PWD}/operator_breakglass" \
     "${PWD}/breakglass_ed25519" \
+    "${PWD}/.operator_key" \
+    "${PWD}/operator_key" \
     "${SCRIPT_DIR}/id_ed25519" \
     "${SCRIPT_DIR}/operator_breakglass" \
-    "${SCRIPT_DIR}/breakglass_ed25519"; do
+    "${SCRIPT_DIR}/breakglass_ed25519" \
+    "${SCRIPT_DIR}/.operator_key" \
+    "${SCRIPT_DIR}/operator_key"; do
     if [[ -f "$f" && ! "$f" =~ \.pub$ ]]; then
       echo "$f"
       return 0
@@ -39,7 +43,7 @@ _resolve_breakglass_key() {
     return 0
   fi
   if [[ -d "$bg" ]]; then
-    for f in "$bg/id_ed25519" "$bg/operator_breakglass" "$bg/breakglass_ed25519"; do
+    for f in "$bg/id_ed25519" "$bg/operator_breakglass" "$bg/breakglass_ed25519" "$bg/.operator_key" "$bg/operator_key"; do
       if [[ -f "$f" ]]; then
         echo "$f"
         return 0
@@ -52,7 +56,7 @@ _resolve_breakglass_key() {
 KEY="$(_resolve_breakglass_key || true)"
 if [[ -z "$KEY" ]]; then
   echo "No break-glass private key found." >&2
-  echo "Set OPERATOR_BREAKGLASS_KEY, put id_ed25519 in this directory (${PWD}), script dir (${SCRIPT_DIR}), or ~/.env/.breakglass (file or dir with id_ed25519)." >&2
+  echo "Set OPERATOR_BREAKGLASS_KEY, put .operator_key or id_ed25519 beside this script (${SCRIPT_DIR}), in \$PWD, or under ~/.env/.breakglass/." >&2
   exit 1
 fi
 exec ssh -o IdentitiesOnly=yes -o IdentityAgent=none -i "$KEY" -p "$PORT" "$USER_NAME@$HOST" "$@"

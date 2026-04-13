@@ -1,9 +1,0 @@
-# Single checkpoint that fits a ~100 GiB budget (VPS + many laptops). Weights under local_models/hub/ (gitignored).
-
-version: 1
-budget_gb: 90
-max_workers: 64
-
-repos:
-  - id: Qwen/Qwen2.5-1.5B-Instruct
-    priority: 10

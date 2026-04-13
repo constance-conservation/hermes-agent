@@ -62,11 +62,8 @@ environments/benchmarks/evals/
 .release_notes.md
 mini-swe-agent/
 
-# Local HF weights (see scripts/local_models/ — manifest + README are tracked)
-local_models/hub/
-local_models/logs/
-!local_models/README.md
-!local_models/manifest.yaml
+# Local HF weights / model cache — keep entire tree out of git (clone-specific)
+local_models/
 
 # Nix
 .direnv/
