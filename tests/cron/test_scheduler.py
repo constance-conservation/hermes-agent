@@ -246,7 +246,7 @@ class TestDeliverResultWrapping:
 
         with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
              patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock, \
-             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": False}}):
+             patch("cron.delivery.load_config", return_value={"cron": {"wrap_response": False}}):
             job = {
                 "id": "test-job",
                 "name": "daily-report",
@@ -321,7 +321,7 @@ class TestRunJobSessionPersistence:
 
         with patch("cron.scheduler._hermes_home", tmp_path), \
              patch("cron.scheduler._resolve_origin", return_value=None), \
-             patch("cron.scheduler.load_config", return_value={"cron": {"max_agent_turns": 12, "delivery_max_chars": 600}}), \
+             patch("cron.delivery.load_config", return_value={"cron": {"max_agent_turns": 12, "delivery_max_chars": 600}}), \
              patch("dotenv.load_dotenv"), \
              patch("hermes_state.SessionDB", return_value=fake_db), \
              patch(

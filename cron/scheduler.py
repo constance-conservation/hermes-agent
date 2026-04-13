@@ -6,18 +6,22 @@ calls this every 60 seconds from a background thread.
 
 Uses a file-based lock (~/.hermes/cron/.tick.lock) so only one tick
 runs at a time if multiple processes overlap.
+
+Delivery filtering, headlines, and platform send live in cron.delivery.
+Prompt assembly lives in cron.job_prompt.
 """
 
-import asyncio
-import hashlib
-import json
+from __future__ import annotations
+
 import logging
 import os
-import re
 import sys
 import traceback
+from pathlib import Path
+from typing import Optional
 
-# fcntl is Unix-only; on Windows use msvcrt for file locking
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 try:
     import fcntl
 except ImportError:
@@ -26,870 +30,57 @@ except ImportError:
         import msvcrt
     except ImportError:
         msvcrt = None
-from pathlib import Path
-from hermes_constants import get_hermes_home
-from hermes_cli.config import load_config
-from typing import Optional
 
+from hermes_constants import get_hermes_home
 from hermes_time import now as _hermes_now
+
+from cron.delivery import (
+    SILENT_MARKER,
+    cron_delivery_dedupe_enabled,
+    deliver_cron_result,
+    delivery_content_fingerprint,
+    format_cron_delivery_with_headline,
+    read_cron_limits,
+    resolve_delivery_target,
+    resolve_origin,
+    sanitize_cron_deliver_content,
+)
+from cron.job_prompt import build_cron_job_prompt
+from cron.jobs import advance_next_run, get_due_jobs, mark_job_run, save_job_output
 
 logger = logging.getLogger(__name__)
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Test / monkeypatch compatibility (historical names on this module)
+_cron_delivery_dedupe_enabled = cron_delivery_dedupe_enabled
+_delivery_content_fingerprint = delivery_content_fingerprint
+_cron_read_limits = read_cron_limits
+_deliver_result = deliver_cron_result
+_resolve_origin = resolve_origin
+_resolve_delivery_target = resolve_delivery_target
+_build_job_prompt = build_cron_job_prompt
 
-from cron.jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
-
-# Sentinel: when a cron agent has nothing new to report, it can start its
-# response with this marker to suppress delivery.  Output is still saved
-# locally for audit.
-SILENT_MARKER = "[SILENT]"
-
-# Lines / fragments that change every run but do not change the underlying status.
-_RE_DEDUPE_UPDATED_LINE = re.compile(r"^\s*updated\s*:", re.I)
-_RE_DEDUPE_AS_OF_PAREN = re.compile(r"\s*\(\s*as\s+of\s+[^)]+\)", re.I)
-_RE_DEDUPE_AS_OF_TAIL = re.compile(r"\s+as\s+of\s+.+$", re.I)
-_RE_DEDUPE_ISO_TIMESTAMP = re.compile(
-    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?([+-]\d{2}:\d{2}|Z|AEST|AEDT|UTC)?"
-)
-
-
-def _normalize_for_delivery_dedupe(text: str) -> str:
-    """Collapse cron/agent output so timestamp-only edits map to the same fingerprint."""
-    lines_out: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if _RE_DEDUPE_UPDATED_LINE.match(line):
-            continue
-        line = _RE_DEDUPE_AS_OF_PAREN.sub("", line)
-        line = _RE_DEDUPE_AS_OF_TAIL.sub("", line)
-        line = _RE_DEDUPE_ISO_TIMESTAMP.sub(" ", line)
-        line = re.sub(
-            r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s*(?:AEST|AEDT|UTC|GMT)\b",
-            " ",
-            line,
-            flags=re.I,
-        )
-        line = re.sub(r"\s+", " ", line).strip()
-        if line:
-            lines_out.append(line.lower())
-    joined = " ".join(lines_out)
-    return re.sub(r"\s+", " ", joined).strip()
-
-
-def _delivery_content_fingerprint(content: str) -> str:
-    normalized = _normalize_for_delivery_dedupe(content)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def _cron_delivery_dedupe_enabled() -> bool:
-    try:
-        cfg = load_config()
-        return bool(cfg.get("cron", {}).get("delivery_dedupe", True))
-    except Exception:
-        return True
-
-
-def _cron_read_limits() -> tuple[int, int]:
-    """Return (delivery_max_chars, max_agent_turns) with safe bounds."""
-    try:
-        c = load_config().get("cron") or {}
-        mx = int(c.get("delivery_max_chars", 600))
-        mt = int(c.get("max_agent_turns", 12))
-        return max(200, min(4000, mx)), max(3, min(90, mt))
-    except Exception:
-        return 600, 12
-
-
-_RE_BRACKET_INTERNAL_NOTE = re.compile(r"\[internal note\s*:[^\]]*\]", re.I)
-_RE_BRACKET_CONTEXT = re.compile(r"\[CONTEXT\s*:[^\]]*\]", re.I | re.DOTALL)
-_RE_BRACKET_CONCLUSION = re.compile(r"\[CONCLUSION\s*:[^\]]*\]", re.I | re.DOTALL)
-_RE_SHOWN_RESPONSE = re.compile(r"\[SHOWN RESPONSE\]\s*", re.I)
-
-# Require "alert:" (or similar) so prose like "no alert is necessary" is not an alert signal.
-_ALERT_HINTS = re.compile(
-    r"\b(gateway|whatsapp|telegram|slack|sev\s*[012]|sev\d|down|recovered|reconnected|"
-    r"connected|bridge|systemd|resolved|outstanding|intervention|fatal|error|"
-    r"ok\s+all_connected|start-limit|degraded|watchdog|cron|platforms?)\b"
-    r"|\balert\s*[:\-]",
-    re.I,
-)
-
-_COT_LINE_PREFIXES = (
-    "based on ",
-    "ased on ",  # truncated model output still reads as chain-of-thought
-    "given that ",
-    "therefore,",
-    "therefore ",
-    "the current state indicates",
-    "the current state shows",
-    "the current escalation",
-    "since there",
-    "since the ",
-    "according to",
-    "i will ",
-    "i'll ",
-    "i cannot ",
-    "i'm sorry",
-    "would you like",
-    "the previous state",
-    "the last known",
-    "the last stored",
-    "the status json",
-    "there are no ",
-    "there is no ",
-    "no new ",
-    "no change ",
-    "recent web search",
-    "proceeding with",
-    "following the",
-    "hard requirement",
-    "as per the",
-    "summary:",
-    "analysis:",
-    "final response",
-    "conclusion:",
-    "if you would like",
-    "unable to confirm",
-    "cannot confirm",
-    "given the lack of",
-    "without real-time",
-    "overall effective state",
-    "appropriate action is",
-    "nothing new to report",
-)
-
-
-# ASCII and common fullwidth / CJK brackets around SILENT.
-_RE_SILENT_BRACKET = re.compile(
-    r"[\[〔【［]\s*\.?\s*silent\s*[\]〕】］]",
-    re.I,
-)
-
-_HALLUCINATION_SNIPPETS = (
-    "alert audio",
-    "audio message",
-    "generated an alert",
-    "i have generated",
-    "text-to-speech",
-    "voice note",
-)
-
-
-def _normalize_silent_brackets(text: str) -> str:
-    """Fullwidth / alternate brackets from some models break [SILENT] detection."""
-    t = text
-    for a, b in (
-        ("\u3010", "["),
-        ("\u3011", "]"),
-        ("［", "["),
-        ("］", "]"),
-        ("\uff3b", "["),
-        ("\uff3d", "]"),
-        ("〔", "["),
-        ("〕", "]"),
-        ("【", "["),
-        ("】", "]"),
-    ):
-        t = t.replace(a, b)
-    return t
-
-
-def _strip_hallucination_sentences(text: str) -> str:
-    """Remove sentences that claim audio/TTS/alerts the gateway did not send."""
-    if not text or not any(sn in text.lower() for sn in _HALLUCINATION_SNIPPETS):
-        return text
-    chunks = re.split(r"(?<=[.!?])\s+", text.strip())
-    kept: list[str] = []
-    for ch in chunks:
-        lowc = ch.lower()
-        if any(sn in lowc for sn in _HALLUCINATION_SNIPPETS):
-            continue
-        t = ch.strip()
-        if t:
-            kept.append(t)
-    return " ".join(kept).strip()
-
-
-def _cron_vague_operational_claim_only(body: str) -> bool:
-    """
-    True when text is only hand-wavy 'everything is up' copy with no check output
-    (watchdog, connected=, gateway_state, etc.) — not worth a WhatsApp ping.
-    """
-    low = body.lower()
-    if not any(w in low for w in ("recovered", "restored", "reconnected", "operational", "is now up")):
-        return False
-    # Do not treat prose lists ("whatsapp, telegram") as tool output — require structural cues.
-    evidence = (
-        "watchdog",
-        "all_connected",
-        "gateway_state",
-        "gateway.pid",
-        "connected:",
-        "platforms:",
-        "systemctl",
-        "start-limit",
-        "`",
-    )
-    if any(sig in low for sig in evidence):
-        return False
-    if "all platforms" in low or "now up" in low or "fully operational" in low:
-        return True
-    return False
-
-
-# Meta-narrative about messaging / absence of news (general blanket — not per-incident strings).
-_CRON_META_FLUFF_RES = (
-    re.compile(r"\bi[' ]?m\s+sending\b", re.I),
-    re.compile(r"\bi\s+am\s+sending\b", re.I),
-    re.compile(r"\bhere\s+is\s+(another\s+)?(message|update)\b", re.I),
-    re.compile(r"\b(this|that)\s+message\s+(is\s+)?(to\s+)?(tell|say|inform)\b", re.I),
-    re.compile(r"\bsending\s+(you\s+)?(a\s+)?(message|update)\b", re.I),
-    re.compile(r"\bnothing\s+to\s+(update|tell|report|say)\b", re.I),
-    re.compile(r"\bnothing\s+has\s+changed\b", re.I),
-    re.compile(r"\bnothing\s+new\s+to\s+report\b", re.I),
-    re.compile(r"\bnothing\s+to\s+report\b", re.I),
-    re.compile(r"\bno\s+changes?\s+(to\s+)?report\b", re.I),
-    re.compile(r"\bno\s+changes?\s+since\b", re.I),
-    re.compile(r"\bthere\s+is\s+nothing\s+to\s+", re.I),
-    re.compile(r"\bthere\s+(has\s+)?been\s+no\s+change\b", re.I),
-    re.compile(r"\bthere\s+are\s+no\s+new\s+(updates?|issues?|incidents?)\b", re.I),
-    re.compile(r"\bjust\s+(wanted\s+)?to\s+(let\s+you\s+know|inform\s+you)\b", re.I),
-    re.compile(r"\btelling\s+you\s+that\s+there\s+(is|are)\s+no\b", re.I),
-    re.compile(r"\bto\s+inform\s+you\s+that\b", re.I),
-    re.compile(r"\bi\s+will\s+(now\s+)?(send|respond|reply|output|provide)\b", re.I),
-    re.compile(r"\bas\s+an\s+ai\b", re.I),
-    re.compile(r"\bfor\s+transparency\b", re.I),
-    re.compile(r"\bhope\s+this\s+(helps|message)\b", re.I),
-    re.compile(r"\bsaying\s+nothing\s+has\s+changed\b", re.I),
-    re.compile(r"\bmessage\s+(to\s+)?(tell|say)\s+you\b", re.I),
-    re.compile(r"\bno\s+alert\s+is\s+necessary\b", re.I),
-    re.compile(r"\bno\s+change\s+in\s+(the\s+)?(state|status)\b", re.I),
-    re.compile(r"\bwith\s+no\s+change\s+in\s+(the\s+)?(state|status)\b", re.I),
-)
-
-# Concrete artefacts operators expect (any hit raises “informative” score).
-_CRON_INFO_SIGNAL_RES = (
-    re.compile(r"\d{3,}"),
-    re.compile(r"\b(sev\s*[012]|sev\d)\b", re.I),
-    re.compile(
-        r"\b(all_connected|gateway_state|gateway\.pid|watchdog|start-limit|start limit)\b",
-        re.I,
-    ),
-    re.compile(r"\d{4}-\d{2}-\d{2}"),
-    re.compile(r"=\s*[\w@.,:+-]+"),
-    re.compile(r"\b(telegram|slack|whatsapp)\s*[=:]"),
-    re.compile(r"[:]\s*(fatal|down|up|ok|connected|disconnected)\b", re.I),
-    re.compile(r"/[\w./~-]{4,}\b"),
-    re.compile(r"\b(error|errno|exception|traceback|timeout|failed)\b", re.I),
-    re.compile(
-        r"\b(fatal|degraded|recovered|resolved|outstanding|intervention|escalat)\w*\b",
-        re.I,
-    ),
-    re.compile(r"^\s*[-*•]\s+\S", re.M),
-)
-
-
-def _cron_meta_fluff_hits(body: str) -> int:
-    return sum(1 for rx in _CRON_META_FLUFF_RES if rx.search(body))
-
-
-def _cron_informative_signal_hits(body: str) -> int:
-    return sum(1 for rx in _CRON_INFO_SIGNAL_RES if rx.search(body))
-
-
-def _cron_announces_remain_silent(low: str) -> bool:
-    """
-    Models say 'the system remains silent' instead of output-only [SILENT].
-    Suppress when that is clearly no-news prose, not a degraded/failure report.
-    """
-    if not re.search(
-        r"\b(will\s+remain\s+silent|remains?\s+silent|staying\s+silent|stay\s+silent|"
-        r"remain\s+silent|the\s+system\s+remains\s+silent|i\s+will\s+remain\s+silent|"
-        r"i\s+am\s+remaining\s+silent|i\s+will\s+stay\s+silent)\b",
-        low,
-    ):
-        return False
-    if re.search(
-        r"\b(degraded|fatal|disconnected|unstable|traceback|exception:|errno\s+|http\s*5\d\d)\b",
-        low,
-        re.I,
-    ):
-        return False
-    return _cron_informative_signal_hits(low) <= 1
-
-
-def _cron_suppress_meta_fluff(body: str) -> bool:
-    """
-    Drop LLM prose about *being a message* or *there being nothing to say*.
-    Policy: deliver facts/tools output only; narrative without signals is noise.
-    """
-    if not (body or "").strip():
-        return True
-    low = body.lower()
-    wc = len(body.split())
-    meta = _cron_meta_fluff_hits(body)
-    info = _cron_informative_signal_hits(body)
-    first_person = len(
-        re.findall(r"\b(i'(?:m|ve)|i\s+will|i\s+am|i\s+have|i\s+cannot)\b", low)
-    )
-
-    if meta >= 1 and info == 0:
-        return True
-    if meta >= 2:
-        return True
-    if wc >= 26 and info == 0:
-        return True
-    if wc >= 16 and info <= 1 and meta >= 1:
-        return True
-    if wc >= 18 and first_person >= 2 and info <= 1:
-        return True
-    return False
-
-
-def _cron_prose_announces_silent(low: str) -> bool:
-    """Model wrote [SILENT] inside a paragraph instead of alone — never deliver that."""
-    if not _RE_SILENT_BRACKET.search(low):
-        return False
-    if any(
-        p in low
-        for p in (
-            "will respond",
-            "respond with",
-            "return exactly",
-            "i will return",
-            "will return exactly",
-            "will return ",
-            "output exactly",
-            "comply with",
-            "comply to",
-            "avoid redundant",
-            "avoid duplicate",
-            "no change since",
-            "no change in",
-            "has been no change",
-            "unchanged",
-            "nothing new",
-            "nothing to report",
-            "therefore, i will",
-            "therefore i will",
-            "accordingly, i will",
-            "appropriate response is",
-            "finalize this response",
-            "protocol and avoid",
-        )
-    ):
-        return True
-    # Long reasoning that only exists to justify [SILENT]
-    if len(low) > 120 and "resolved" in low and "no new" in low:
-        return True
-    return False
-
-
-def _cron_response_means_silent(text: str) -> bool:
-    """True when the model clearly intends no user-visible delivery."""
-    if not text or not str(text).strip():
-        return True
-    s = _normalize_silent_brackets(str(text).strip())
-    low = s.lower()
-    if _cron_announces_remain_silent(low):
-        return True
-    if _cron_prose_announces_silent(low):
-        return True
-    first = s.lstrip()
-    if re.match(r"^\[\.?silent\]", first, re.I):
-        return True
-    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
-    if not lines:
-        return True
-    last = lines[-1]
-    if re.match(r"^[\s\.]*\[\.?silent\]", last, re.I):
-        return True
-    if len(last) < 220 and _RE_SILENT_BRACKET.search(last):
-        return True
-    tail = low[-520:]
-    if "[silent]" in tail and any(
-        p in tail
-        for p in (
-            "respond with",
-            "respond exactly",
-            "return exactly",
-            "output exactly",
-            "will now ",
-            "appropriate response is",
-            "[silent].",
-            "finalize this response",
-            "accordingly,",
-        )
-    ):
-        return True
-    one = re.sub(r"\s+", " ", low)
-    if "[silent]" in one and "nothing new" in one and len(s) > 60:
-        return True
-    return False
-
-
-def _is_cot_line(line: str) -> bool:
-    low = line.lower().strip()
-    if len(low) < 30:
-        return False
-    return any(low.startswith(p) for p in _COT_LINE_PREFIXES)
-
-
-def _pick_delivery_paragraph(body: str, max_chars: int) -> str:
-    chunks = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
-    candidate = ""
-    for chunk in reversed(chunks):
-        if _ALERT_HINTS.search(chunk):
-            candidate = chunk
-            break
-    if not candidate and chunks:
-        candidate = chunks[-1]
-    elif not candidate:
-        candidate = body
-    lines = [ln.strip() for ln in candidate.splitlines() if ln.strip()]
-    if not lines:
-        return ""
-    joined = "\n".join(lines)
-    if len(joined) > max_chars:
-        tail = lines[-min(6, len(lines)) :]
-        joined = "\n".join(tail)
-    if len(joined) > max_chars:
-        joined = joined[: max_chars - 1].rstrip() + "…"
-    return joined.strip()
-
-
-def sanitize_cron_deliver_content(raw: str, max_chars: int) -> tuple[str, bool]:
-    """
-    Turn a model final_response into messaging-safe text.
-
-    Returns:
-        (text_to_send, skip_delivery) — skip_delivery True means do not notify the user.
-    """
-    raw = _normalize_silent_brackets(str(raw or "").strip())
-    if _cron_response_means_silent(raw):
-        return "", True
-    s = raw.strip()
-    s = _strip_hallucination_sentences(s)
-    if not s.strip():
-        return "", True
-    if _cron_response_means_silent(s):
-        return "", True
-    s = _RE_BRACKET_INTERNAL_NOTE.sub("", s)
-    s = _RE_BRACKET_CONTEXT.sub("", s)
-    s = _RE_BRACKET_CONCLUSION.sub("", s)
-    s = _RE_SHOWN_RESPONSE.sub("", s)
-    s = s.strip()
-
-    kept: list[str] = []
-    for ln in s.splitlines():
-        lns = ln.strip()
-        if not lns:
-            continue
-        if _is_cot_line(lns):
-            continue
-        kept.append(lns)
-
-    body = "\n".join(kept).strip()
-    if not body:
-        return "", True
-
-    # Short, already-compact replies (tests + simple summaries)
-    if len(body) <= 220 and body.count("\n") <= 2:
-        out = body if len(body) <= max_chars else body[: max_chars - 1].rstrip() + "…"
-        if _cron_vague_operational_claim_only(out):
-            return "", True
-        if _cron_suppress_meta_fluff(out):
-            return "", True
-        return out, False
-
-    out = _pick_delivery_paragraph(body, max_chars)
-    if not out.strip():
-        return "", True
-    if not _ALERT_HINTS.search(out) and len(out) > 120:
-        return "", True
-    if _cron_vague_operational_claim_only(out):
-        return "", True
-    if _cron_suppress_meta_fluff(out):
-        return "", True
-    return out, False
-
-
-def _cron_severity_suffix(body: str, success: bool) -> str:
-    """Compact status phrase inferred from delivery body (no extra LLM call)."""
-    if not success:
-        return "Run failed"
-    low = body.lower()
-    # Critical / needs action now
-    if any(
-        p in low
-        for p in (
-            "gateway down",
-            "no platforms",
-            "telegram: fatal",
-            "slack: fatal",
-            "fatal",
-            "start-limit",
-            "start limit",
-            "bridge disconnected",
-            "not connected",
-            "⚠️ cron job",
-        )
-    ):
-        return "Action needed"
-    if re.search(r"\bsev\s*0\b", low) or re.search(r"\bsev\s*1\b", low):
-        return "Action needed"
-    if re.search(r"\bdown\b", low) and "recovered" not in low and "restored" not in low:
-        return "Action needed"
-    # Elevated attention
-    if any(
-        p in low
-        for p in (
-            "sev2",
-            "sev 2",
-            "degraded",
-            "outstanding",
-            "intervention",
-            "warning",
-            "attention required",
-        )
-    ):
-        return "Review suggested"
-    # Healthy / cleared (before generic "alert" heuristic)
-    if any(
-        p in low
-        for p in (
-            "recovered",
-            "resolved",
-            "cleared",
-            "reconnected",
-            "restored",
-            "healthy",
-            "all_connected",
-            "connectivity restored",
-            "gateway recovered",
-            "platforms: whatsapp",
-            "ok all_connected",
-            "status ok",
-            "all clear",
-        )
-    ):
-        return "Nominal"
-    if re.search(r"\balert\b", low) and "false alert" not in low:
-        return "Review suggested"
-    return "Update"
-
-
-def _cron_headline_line(job: dict, body: str, success: bool) -> str:
-    """Single-line preview: job topic + inferred status (or per-job override)."""
-    custom = str(job.get("deliver_summary") or job.get("delivery_summary") or "").strip()
-    raw = str(job.get("name") or job.get("id") or "Scheduled job").strip()
-    topic = re.sub(r"[-_]+", " ", raw).strip().title()
-    if len(topic) > 44:
-        topic = topic[:41].rstrip() + "…"
-    if custom:
-        if success:
-            return custom[:120]
-        return f"{custom[:72]} — Run failed"[:120]
-    suffix = _cron_severity_suffix(body, success)
-    return f"{topic} — {suffix}"
-
-
-def format_cron_delivery_with_headline(job: dict, body: str, *, success: bool) -> str:
-    """Prefix messaging delivery with one short status line (no extra LLM)."""
-    body = (body or "").strip()
-    if not body:
-        return body
-    headline = _cron_headline_line(job, body, success).strip()
-    if body.startswith(headline):
-        return body
-    first_line = body.splitlines()[0].strip() if body else ""
-    if first_line == headline:
-        return body
-    return f"{headline}\n{body}"
-
-
-# Resolve Hermes home directory (respects HERMES_HOME override)
 _hermes_home = get_hermes_home()
-
-# File-based lock prevents concurrent ticks from gateway + daemon + systemd timer
 _LOCK_DIR = _hermes_home / "cron"
 _LOCK_FILE = _LOCK_DIR / ".tick.lock"
-
-
-def _resolve_origin(job: dict) -> Optional[dict]:
-    """Extract origin info from a job, preserving any extra routing metadata."""
-    origin = job.get("origin")
-    if not origin:
-        return None
-    platform = origin.get("platform")
-    chat_id = origin.get("chat_id")
-    if platform and chat_id:
-        return origin
-    return None
-
-
-def _resolve_delivery_target(job: dict) -> Optional[dict]:
-    """Resolve the concrete auto-delivery target for a cron job, if any."""
-    deliver = job.get("deliver", "local")
-    origin = _resolve_origin(job)
-
-    if deliver == "local":
-        return None
-
-    if deliver == "origin":
-        if not origin:
-            return None
-        return {
-            "platform": origin["platform"],
-            "chat_id": str(origin["chat_id"]),
-            "thread_id": origin.get("thread_id"),
-        }
-
-    if ":" in deliver:
-        platform_name, rest = deliver.split(":", 1)
-        # Check for thread_id suffix (e.g. "telegram:-1003724596514:17")
-        if ":" in rest:
-            chat_id, thread_id = rest.split(":", 1)
-        else:
-            chat_id, thread_id = rest, None
-
-        # Resolve human-friendly labels like "Alice (dm)" to real IDs.
-        # send_message(action="list") shows labels with display suffixes
-        # that aren't valid platform IDs (e.g. WhatsApp JIDs).
-        try:
-            from gateway.channel_directory import resolve_channel_name
-            target = chat_id
-            # Strip display suffix like " (dm)" or " (group)"
-            if target.endswith(")") and " (" in target:
-                target = target.rsplit(" (", 1)[0].strip()
-            resolved = resolve_channel_name(platform_name.lower(), target)
-            if resolved:
-                chat_id = resolved
-        except Exception:
-            pass
-
-        return {
-            "platform": platform_name,
-            "chat_id": chat_id,
-            "thread_id": thread_id,
-        }
-
-    platform_name = deliver
-    if origin and origin.get("platform") == platform_name:
-        return {
-            "platform": platform_name,
-            "chat_id": str(origin["chat_id"]),
-            "thread_id": origin.get("thread_id"),
-        }
-
-    chat_id = os.getenv(f"{platform_name.upper()}_HOME_CHANNEL", "")
-    if not chat_id:
-        return None
-
-    return {
-        "platform": platform_name,
-        "chat_id": chat_id,
-        "thread_id": None,
-    }
-
-
-def _deliver_result(job: dict, content: str) -> bool:
-    """
-    Deliver job output to the configured target (origin chat, specific platform, etc.).
-
-    Uses the standalone platform send functions from send_message_tool so delivery
-    works whether or not the gateway is running.
-
-    Returns:
-        True if a message was sent successfully; False if skipped, misconfigured, or failed.
-    """
-    target = _resolve_delivery_target(job)
-    if not target:
-        if job.get("deliver", "local") != "local":
-            logger.warning(
-                "Job '%s' deliver=%s but no concrete delivery target could be resolved",
-                job["id"],
-                job.get("deliver", "local"),
-            )
-        return False
-
-    platform_name = target["platform"]
-    chat_id = target["chat_id"]
-    thread_id = target.get("thread_id")
-
-    from tools.send_message_tool import _send_to_platform
-    from gateway.config import load_gateway_config, Platform
-
-    platform_map = {
-        "telegram": Platform.TELEGRAM,
-        "discord": Platform.DISCORD,
-        "slack": Platform.SLACK,
-        "whatsapp": Platform.WHATSAPP,
-        "signal": Platform.SIGNAL,
-        "matrix": Platform.MATRIX,
-        "mattermost": Platform.MATTERMOST,
-        "homeassistant": Platform.HOMEASSISTANT,
-        "dingtalk": Platform.DINGTALK,
-        "feishu": Platform.FEISHU,
-        "wecom": Platform.WECOM,
-        "email": Platform.EMAIL,
-        "sms": Platform.SMS,
-    }
-    platform = platform_map.get(platform_name.lower())
-    if not platform:
-        logger.warning("Job '%s': unknown platform '%s' for delivery", job["id"], platform_name)
-        return False
-
-    try:
-        config = load_gateway_config()
-    except Exception as e:
-        logger.error("Job '%s': failed to load gateway config for delivery: %s", job["id"], e)
-        return False
-
-    pconfig = config.platforms.get(platform)
-    if not pconfig or not pconfig.enabled:
-        logger.warning("Job '%s': platform '%s' not configured/enabled", job["id"], platform_name)
-        return False
-
-    # Optionally wrap the content with a header/footer so the user knows this
-    # is a cron delivery.  Wrapping is on by default; set cron.wrap_response: false
-    # in config.yaml for clean output.
-    wrap_response = True
-    try:
-        user_cfg = load_config()
-        wrap_response = user_cfg.get("cron", {}).get("wrap_response", True)
-    except Exception:
-        pass
-
-    if wrap_response:
-        task_name = job.get("name", job["id"])
-        delivery_content = (
-            f"Cronjob Response: {task_name}\n"
-            f"-------------\n\n"
-            f"{content}\n\n"
-            f"Note: The agent cannot see this message, and therefore cannot respond to it."
-        )
-    else:
-        delivery_content = content
-
-    # Run the async send in a fresh event loop (safe from any thread)
-    coro = _send_to_platform(platform, pconfig, chat_id, delivery_content, thread_id=thread_id)
-    try:
-        result = asyncio.run(coro)
-    except RuntimeError:
-        # asyncio.run() checks for a running loop before awaiting the coroutine;
-        # when it raises, the original coro was never started — close it to
-        # prevent "coroutine was never awaited" RuntimeWarning, then retry in a
-        # fresh thread that has no running loop.
-        coro.close()
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, delivery_content, thread_id=thread_id))
-            result = future.result(timeout=30)
-    except Exception as e:
-        logger.error("Job '%s': delivery to %s:%s failed: %s", job["id"], platform_name, chat_id, e)
-        return False
-
-    if result and result.get("error"):
-        logger.error("Job '%s': delivery error: %s", job["id"], result["error"])
-        return False
-    logger.info("Job '%s': delivered to %s:%s", job["id"], platform_name, chat_id)
-    return True
-
-
-def _build_job_prompt(job: dict) -> str:
-    """Build the effective prompt for a cron job, optionally loading one or more skills first."""
-    prompt = job.get("prompt", "")
-    skills = job.get("skills")
-
-    # Always prepend [SILENT] guidance so the cron agent can suppress
-    # delivery when it has nothing new or noteworthy to report.
-    silent_hint = (
-        "[SYSTEM: If you have a meaningful status report or findings, "
-        "send them — that is the whole point of this job. Only respond "
-        "with exactly \"[SILENT]\" (nothing else) when there is genuinely "
-        "nothing new to report. [SILENT] suppresses delivery to the user. "
-        "Never combine [SILENT] with content — either report your "
-        "findings normally, or say [SILENT] and nothing more. Do not write "
-        "“I will remain silent”, “the system remains silent”, or "
-        "“I will return exactly [SILENT]” — those still notify the user; "
-        "use the token [SILENT] alone instead.]\n\n"
-        "[SYSTEM — OUTPUT FORMAT (mandatory): Reply with ONLY the factual "
-        "information this job is supposed to surface (numbers, states, file "
-        "paths, command output, watchdog lines). Do not narrate, explain your "
-        "reasoning, describe sending a message, apologize, or say there is "
-        "nothing to say — if there is no factual delta, output exactly [SILENT] "
-        "alone. Never write meta lines like “I am sending…” or “here is another "
-        "message…”. At most four short lines and under 500 characters unless the "
-        "job explicitly requires pasting raw logs.]\n\n"
-    )
-    prompt = silent_hint + prompt
-    if skills is None:
-        legacy = job.get("skill")
-        skills = [legacy] if legacy else []
-
-    skill_names = [str(name).strip() for name in skills if str(name).strip()]
-    if not skill_names:
-        return prompt
-
-    from tools.skills_tool import skill_view
-
-    parts = []
-    skipped: list[str] = []
-    for skill_name in skill_names:
-        loaded = json.loads(skill_view(skill_name))
-        if not loaded.get("success"):
-            error = loaded.get("error") or f"Failed to load skill '{skill_name}'"
-            logger.warning("Cron job '%s': skill not found, skipping — %s", job.get("name", job.get("id")), error)
-            skipped.append(skill_name)
-            continue
-
-        content = str(loaded.get("content") or "").strip()
-        if parts:
-            parts.append("")
-        parts.extend(
-            [
-                f'[SYSTEM: The user has invoked the "{skill_name}" skill, indicating they want you to follow its instructions. The full skill content is loaded below.]',
-                "",
-                content,
-            ]
-        )
-
-    if skipped:
-        notice = (
-            f"[SYSTEM: The following skill(s) were listed for this job but could not be found "
-            f"and were skipped: {', '.join(skipped)}. "
-            f"Start your response with a brief notice so the user is aware, e.g.: "
-            f"'⚠️ Skill(s) not found and skipped: {', '.join(skipped)}']"
-        )
-        parts.insert(0, notice)
-
-    if prompt:
-        parts.extend(["", f"The user has provided the following instruction alongside the skill invocation: {prompt}"])
-    return "\n".join(parts)
 
 
 def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.
-    
+
     Returns:
         Tuple of (success, full_output_doc, final_response, error_message)
     """
     from run_agent import AIAgent
-    
-    # Initialize SQLite session store so cron job messages are persisted
-    # and discoverable via session_search (same pattern as gateway/run.py).
+
     _session_db = None
     try:
         from hermes_state import SessionDB
+
         _session_db = SessionDB()
     except Exception as e:
         logger.debug("Job '%s': SQLite session store not available: %s", job.get("id", "?"), e)
-    
+
     job_id = job["id"]
     job_name = job["name"]
     prompt = _build_job_prompt(job)
@@ -899,7 +90,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)
     logger.info("Prompt: %s", prompt[:100])
 
-    # Inject origin context so the agent's send_message tool knows the chat
     if origin:
         os.environ["HERMES_SESSION_PLATFORM"] = origin["platform"]
         os.environ["HERMES_SESSION_CHAT_ID"] = str(origin["chat_id"])
@@ -907,9 +97,8 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             os.environ["HERMES_SESSION_CHAT_NAME"] = origin["chat_name"]
 
     try:
-        # Re-read .env and config.yaml fresh every run so provider/key
-        # changes take effect without a gateway restart.
         from dotenv import load_dotenv
+
         try:
             load_dotenv(str(_hermes_home / ".env"), override=True, encoding="utf-8")
         except UnicodeDecodeError:
@@ -924,10 +113,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 
         model = job.get("model") or os.getenv("HERMES_MODEL") or ""
 
-        # Load config.yaml for model, reasoning, prefill, toolsets, provider routing
         _cfg = {}
         try:
             import yaml
+
             _cfg_path = str(_hermes_home / "config.yaml")
             if os.path.exists(_cfg_path):
                 with open(_cfg_path) as _f:
@@ -941,18 +130,18 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         except Exception as e:
             logger.warning("Job '%s': failed to load config.yaml, using defaults: %s", job_id, e)
 
-        # Reasoning config from env or config.yaml
         from hermes_constants import parse_reasoning_effort
+
         effort = os.getenv("HERMES_REASONING_EFFORT", "")
         if not effort:
             effort = str(_cfg.get("agent", {}).get("reasoning_effort", "")).strip()
         reasoning_config = parse_reasoning_effort(effort)
 
-        # Prefill messages from env or config.yaml
         prefill_messages = None
         prefill_file = os.getenv("HERMES_PREFILL_MESSAGES_FILE", "") or _cfg.get("prefill_messages_file", "")
         if prefill_file:
             import json as _json
+
             pfpath = Path(prefill_file).expanduser()
             if not pfpath.is_absolute():
                 pfpath = _hermes_home / pfpath
@@ -966,7 +155,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     logger.warning("Job '%s': failed to parse prefill messages file '%s': %s", job_id, pfpath, e)
                     prefill_messages = None
 
-        # Max iterations — cron jobs use a lower cap than interactive CLI
         _, cron_turn_cap = _cron_read_limits()
         global_max = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
         try:
@@ -975,14 +163,11 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             global_max = 90
         max_iterations = min(global_max, cron_turn_cap)
 
-        # Provider routing
         pr = _cfg.get("provider_routing", {})
         smart_routing = _cfg.get("smart_model_routing", {}) or {}
 
-        from hermes_cli.runtime_provider import (
-            resolve_runtime_provider,
-            format_runtime_provider_error,
-        )
+        from hermes_cli.runtime_provider import format_runtime_provider_error, resolve_runtime_provider
+
         try:
             runtime_kwargs = {
                 "requested": job.get("provider") or os.getenv("HERMES_INFERENCE_PROVIDER"),
@@ -995,6 +180,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             raise RuntimeError(message) from exc
 
         from agent.smart_model_routing import resolve_turn_route
+
         turn_route = resolve_turn_route(
             prompt,
             smart_routing,
@@ -1028,7 +214,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 "cronjob",
                 "messaging",
                 "clarify",
-                # Keep cron monitors cheap: no web/browser/MoA/RL/vision/image tools.
                 "web",
                 "search",
                 "browser",
@@ -1038,19 +223,17 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 "vision",
             ],
             quiet_mode=True,
-            skip_memory=True,  # Cron system prompts would corrupt user representations
+            skip_memory=True,
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,
         )
-        
+
         result = agent.run_conversation(prompt)
-        
+
         final_response = result.get("final_response", "") or ""
-        # Use a separate variable for log display; keep final_response clean
-        # for delivery logic (empty response = no delivery).
         logged_response = final_response if final_response else "(No response generated)"
-        
+
         output = f"""# Cron Job: {job_name}
 
 **Job ID:** {job_id}
@@ -1065,14 +248,14 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 
 {logged_response}
 """
-        
+
         logger.info("Job '%s' completed successfully", job_name)
         return True, output, final_response, None
-        
+
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
         logger.error("Job '%s' failed: %s", job_name, error_msg)
-        
+
         output = f"""# Cron Job: {job_name} (FAILED)
 
 **Job ID:** {job_id}
@@ -1094,7 +277,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         return False, output, "", error_msg
 
     finally:
-        # Clean up injected env vars so they don't leak to other jobs
         for key in (
             "HERMES_SESSION_PLATFORM",
             "HERMES_SESSION_CHAT_ID",
@@ -1118,19 +300,18 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 def tick(verbose: bool = True) -> int:
     """
     Check and run all due jobs.
-    
+
     Uses a file lock so only one tick runs at a time, even if the gateway's
     in-process ticker and a standalone daemon or manual tick overlap.
-    
+
     Args:
         verbose: Whether to print status messages
-    
+
     Returns:
         Number of jobs executed (0 if another tick is already running)
     """
     _LOCK_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Cross-platform file locking: fcntl on Unix, msvcrt on Windows
     lock_fd = None
     try:
         lock_fd = open(_LOCK_FILE, "w")
@@ -1148,19 +329,15 @@ def tick(verbose: bool = True) -> int:
         due_jobs = get_due_jobs()
 
         if verbose and not due_jobs:
-            logger.info("%s - No jobs due", _hermes_now().strftime('%H:%M:%S'))
+            logger.info("%s - No jobs due", _hermes_now().strftime("%H:%M:%S"))
             return 0
 
         if verbose:
-            logger.info("%s - %s job(s) due", _hermes_now().strftime('%H:%M:%S'), len(due_jobs))
+            logger.info("%s - %s job(s) due", _hermes_now().strftime("%H:%M:%S"), len(due_jobs))
 
         executed = 0
         for job in due_jobs:
             try:
-                # For recurring jobs (cron/interval), advance next_run_at to the
-                # next future occurrence BEFORE execution.  This way, if the
-                # process crashes mid-run, the job won't re-fire on restart.
-                # One-shot jobs are left alone so they can retry on restart.
                 advance_next_run(job["id"])
 
                 success, output, final_response, error = run_job(job)
@@ -1169,9 +346,6 @@ def tick(verbose: bool = True) -> int:
                 if verbose:
                     logger.info("Output saved to: %s", output_file)
 
-                # Deliver the final response to the origin/target chat.
-                # Sanitize successful replies (strip chain-of-thought; enforce
-                # silent / no-news). Output files still contain the full model text.
                 deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
                 should_deliver = bool(deliver_content)
                 max_chars, _ = _cron_read_limits()
@@ -1193,9 +367,7 @@ def tick(verbose: bool = True) -> int:
                     should_deliver = False
 
                 if should_deliver:
-                    deliver_content = format_cron_delivery_with_headline(
-                        job, deliver_content, success=success
-                    )
+                    deliver_content = format_cron_delivery_with_headline(job, deliver_content, success=success)
 
                 dedupe_on = _cron_delivery_dedupe_enabled()
                 fp_new: Optional[str] = None
@@ -1226,7 +398,7 @@ def tick(verbose: bool = True) -> int:
                 executed += 1
 
             except Exception as e:
-                logger.error("Error processing job %s: %s", job['id'], e)
+                logger.error("Error processing job %s: %s", job["id"], e)
                 mark_job_run(job["id"], False, str(e))
 
         return executed

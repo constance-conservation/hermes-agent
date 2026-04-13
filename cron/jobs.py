@@ -437,7 +437,7 @@ def create_job(
         model: Optional per-job model override
         provider: Optional per-job provider override
         base_url: Optional per-job base URL override
-        deliver_summary: Optional first-line label for messaging deliveries (see cron.scheduler)
+        deliver_summary: Optional first-line label for messaging deliveries (see cron.delivery)
 
     Returns:
         The created job dict
