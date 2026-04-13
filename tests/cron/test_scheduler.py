@@ -944,20 +944,64 @@ class TestSanitizeCronDeliverContent:
         _body, skip = sanitize_cron_deliver_content(raw, 600)
         assert skip is True
 
+    def test_delivery_envelope_only_lines_delivered(self):
+        raw = (
+            "Internal reasoning and web search fluff here.\n\n"
+            "###HERMES_CRON_DELIVERY_JSON\n"
+            '{"silent": false, "lines": ["ok all_connected=whatsapp", "gateway_state=running"]}\n'
+            "###END_HERMES_CRON_DELIVERY_JSON\n"
+        )
+        body, skip = sanitize_cron_deliver_content(raw, 600)
+        assert skip is False
+        assert body == "ok all_connected=whatsapp\ngateway_state=running"
+        assert "reasoning" not in body
+
+    def test_delivery_envelope_silent_skips(self):
+        raw = (
+            "Narrative\n###HERMES_CRON_DELIVERY_JSON\n"
+            '{"silent": true}\n'
+            "###END_HERMES_CRON_DELIVERY_JSON"
+        )
+        _body, skip = sanitize_cron_deliver_content(raw, 600)
+        assert skip is True
+
+    def test_delivery_envelope_json_in_code_fence(self):
+        raw = (
+            "###HERMES_CRON_DELIVERY_JSON\n"
+            "```json\n"
+            '{"silent": false, "lines": ["line a"]}\n'
+            "```\n"
+            "###END_HERMES_CRON_DELIVERY_JSON"
+        )
+        body, skip = sanitize_cron_deliver_content(raw, 600)
+        assert skip is False
+        assert body == "line a"
+
+    def test_strict_delivery_envelope_missing_block_suppresses(self):
+        raw = "Only prose, no envelope."
+        _body, skip = sanitize_cron_deliver_content(raw, 600, strict_delivery_envelope=True)
+        assert skip is True
+
+    def test_strict_delivery_envelope_invalid_json_suppresses(self):
+        raw = "###HERMES_CRON_DELIVERY_JSON\nnot json\n###END_HERMES_CRON_DELIVERY_JSON"
+        _body, skip = sanitize_cron_deliver_content(raw, 600, strict_delivery_envelope=True)
+        assert skip is True
+
 
 class TestBuildJobPromptSilentHint:
-    """Verify _build_job_prompt always injects [SILENT] guidance."""
+    """Verify _build_job_prompt always injects deterministic JSON envelope guidance."""
 
     def test_hint_always_present(self):
         job = {"prompt": "Check for updates"}
         result = _build_job_prompt(job)
-        assert "[SILENT]" in result
+        assert "HERMES_CRON_DELIVERY_JSON" in result
+        assert '"silent"' in result
         assert "Check for updates" in result
 
     def test_hint_present_even_without_prompt(self):
         job = {"prompt": ""}
         result = _build_job_prompt(job)
-        assert "[SILENT]" in result
+        assert "HERMES_CRON_DELIVERY_JSON" in result
 
 
 class TestBuildJobPromptMissingSkill:
@@ -982,7 +1026,7 @@ class TestBuildJobPromptMissingSkill:
 
     def test_missing_skill_logs_warning(self, caplog):
         """A warning is logged when a skill cannot be found."""
-        with caplog.at_level(logging.WARNING, logger="cron.scheduler"):
+        with caplog.at_level(logging.WARNING, logger="cron.job_prompt"):
             with patch("tools.skills_tool.skill_view", side_effect=self._missing_skill_view):
                 _build_job_prompt({"name": "My Job", "skills": ["ghost-skill"], "prompt": "do something"})
         assert any("ghost-skill" in record.message for record in caplog.records)

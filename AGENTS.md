@@ -85,7 +85,7 @@ hermes-agent/
 │   ├── session.py        # SessionStore — conversation persistence
 │   └── platforms/        # Adapters: telegram, discord, slack, whatsapp, homeassistant, signal
 ├── acp_adapter/          # ACP server (VS Code / Zed / JetBrains integration)
-├── cron/                 # Scheduler (jobs.py, scheduler.py)
+├── cron/                 # Scheduler (jobs.py, scheduler.py, delivery.py, delivery_envelope.py, job_prompt.py)
 ├── environments/         # RL training environments (Atropos)
 ├── tests/                # Pytest suite (~3000 tests)
 └── batch_runner.py       # Parallel batch processing

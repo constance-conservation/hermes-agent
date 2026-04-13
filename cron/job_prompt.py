@@ -6,34 +6,35 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_ENVELOPE_SPEC = (
+    "[SYSTEM — CRON DELIVERY (mandatory): The user only sees what you put in the JSON block "
+    "below. You may reason, use tools, and write drafts before it; that prose is NOT delivered.\n"
+    "End your reply with EXACTLY these markers and a single JSON object between them "
+    "(optionally wrapped in ```json … ```):\n"
+    "###HERMES_CRON_DELIVERY_JSON\n"
+    '{ "silent": true }\n'
+    "###END_HERMES_CRON_DELIVERY_JSON\n"
+    "If there is something to report, use non-empty lines (plain strings, no nested objects):\n"
+    "###HERMES_CRON_DELIVERY_JSON\n"
+    '{ "silent": false, "lines": ["watchdog-check: ok all_connected=whatsapp,telegram", "sev: 0"] }\n'
+    "###END_HERMES_CRON_DELIVERY_JSON\n"
+    "Rules: (1) Nothing after ###END_HERMES_CRON_DELIVERY_JSON. "
+    "(2) At most 16 lines; each line under ~280 characters; total size respects delivery_max_chars. "
+    "(3) Lines must be factual (states, numbers, paths, command output) — no narration, no "
+    "“I am sending…”, no web-search essay. "
+    "(4) Use {\"silent\": true} when there is no new factual delta since the last run. "
+    "(5) Do not use [SILENT], “[Silently …]”, or “I will respond with [SILENT]” — only the JSON block. "
+    "(6) If your profile sets cron.strict_delivery_envelope, missing or invalid JSON suppresses "
+    "messaging entirely.]\n\n"
+)
+
 
 def build_cron_job_prompt(job: dict[str, Any]) -> str:
     """Build the effective prompt for a cron job, optionally loading one or more skills first."""
     prompt = job.get("prompt", "")
     skills = job.get("skills")
 
-    silent_hint = (
-        "[SYSTEM: If you have a meaningful status report or findings, "
-        "send them — that is the whole point of this job. Only respond "
-        'with exactly "[SILENT]" (nothing else) when there is genuinely '
-        "nothing new to report. [SILENT] suppresses delivery to the user. "
-        "Never combine [SILENT] with content — either report your "
-        "findings normally, or say [SILENT] and nothing more. Do not write "
-        "“I will remain silent”, “the system remains silent”, or "
-        "“I will return exactly [SILENT]” — those still notify the user; "
-        "use the token [SILENT] alone instead. Do not use bracketed prose like "
-        "“[Silently no change]” or “[Silent — no alert]” — only the exact five "
-        "characters [SILENT] with nothing else.]\n\n"
-        "[SYSTEM — OUTPUT FORMAT (mandatory): Reply with ONLY the factual "
-        "information this job is supposed to surface (numbers, states, file "
-        "paths, command output, watchdog lines). Do not narrate, explain your "
-        "reasoning, describe sending a message, apologize, or say there is "
-        "nothing to say — if there is no factual delta, output exactly [SILENT] "
-        "alone. Never write meta lines like “I am sending…” or “here is another "
-        "message…”. At most four short lines and under 500 characters unless the "
-        "job explicitly requires pasting raw logs.]\n\n"
-    )
-    prompt = silent_hint + prompt
+    prompt = _ENVELOPE_SPEC + prompt
     if skills is None:
         legacy = job.get("skill")
         skills = [legacy] if legacy else []
@@ -73,8 +74,8 @@ def build_cron_job_prompt(job: dict[str, Any]) -> str:
         notice = (
             f"[SYSTEM: The following skill(s) were listed for this job but could not be found "
             f"and were skipped: {', '.join(skipped)}. "
-            f"Start your response with a brief notice so the user is aware, e.g.: "
-            f"'⚠️ Skill(s) not found and skipped: {', '.join(skipped)}']"
+            f"Include that in your JSON lines if the user should know, e.g. "
+            f'{{"silent": false, "lines": ["⚠️ Skills skipped: {", ".join(skipped)}"]}}]'
         )
         parts.insert(0, notice)
 

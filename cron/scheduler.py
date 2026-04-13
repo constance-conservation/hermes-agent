@@ -37,6 +37,7 @@ from hermes_time import now as _hermes_now
 from cron.delivery import (
     SILENT_MARKER,
     cron_delivery_dedupe_enabled,
+    cron_strict_delivery_envelope,
     deliver_cron_result,
     delivery_content_fingerprint,
     format_cron_delivery_with_headline,
@@ -350,10 +351,17 @@ def tick(verbose: bool = True) -> int:
                 should_deliver = bool(deliver_content)
                 max_chars, _ = _cron_read_limits()
                 if should_deliver and success:
-                    sanitized, skip_user = sanitize_cron_deliver_content(deliver_content, max_chars)
+                    strict_env = job.get("strict_delivery_envelope")
+                    if strict_env is None:
+                        strict_env = cron_strict_delivery_envelope()
+                    sanitized, skip_user = sanitize_cron_deliver_content(
+                        deliver_content,
+                        max_chars,
+                        strict_delivery_envelope=bool(strict_env),
+                    )
                     if skip_user or not (sanitized or "").strip():
                         logger.info(
-                            "Job '%s': delivery suppressed ([SILENT] rules or empty after sanitize)",
+                            "Job '%s': delivery suppressed (envelope / [SILENT] / sanitize)",
                             job["id"],
                         )
                         should_deliver = False

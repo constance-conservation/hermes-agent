@@ -732,6 +732,10 @@ DEFAULT_CONFIG = {
         "max_agent_turns": 12,
         # Max characters sent to messaging after stripping chain-of-thought.
         "delivery_max_chars": 600,
+        # When true, cron messaging requires a valid ###HERMES_CRON_DELIVERY_JSON block;
+        # missing/invalid JSON suppresses delivery (deterministic policy). Per-job override:
+        # job["strict_delivery_envelope"] in jobs.json.
+        "strict_delivery_envelope": False,
     },
 
     # Optional paths to cloned third-party repos for /paperclip and /autoresearch helpers.
@@ -742,7 +746,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 34,
+    "_config_version": 35,
 }
 
 # =============================================================================
@@ -2896,6 +2900,27 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v34 cron limits migration skipped: {e}")
             results["warnings"].append(f"v34 migration: {e}")
             merge_user_config_yaml({"_config_version": 34})
+
+    # ── Version 34 → 35: cron strict JSON delivery envelope (opt-in) ──
+    if current_ver < 35:
+        try:
+            merge_user_config_yaml(
+                {
+                    "_config_version": 35,
+                    "cron": {
+                        "strict_delivery_envelope": False,
+                    },
+                }
+            )
+            if not quiet:
+                print(
+                    "  ✓ v35: cron.strict_delivery_envelope (optional; require JSON block for messaging)"
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v35 cron envelope migration skipped: {e}")
+            results["warnings"].append(f"v35 migration: {e}")
+            merge_user_config_yaml({"_config_version": 35})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

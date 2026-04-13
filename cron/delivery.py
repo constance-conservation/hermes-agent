@@ -15,6 +15,8 @@ from typing import Optional
 
 from hermes_cli.config import load_config
 
+from cron.delivery_envelope import cron_strict_delivery_envelope, try_parse_cron_delivery_envelope
+
 logger = logging.getLogger(__name__)
 
 SILENT_MARKER = "[SILENT]"
@@ -58,6 +60,9 @@ def delivery_content_fingerprint(content: str) -> str:
 
 
 def cron_delivery_dedupe_enabled() -> bool:
+    raw = os.environ.get("HERMES_CRON_DELIVERY_DEDUPE", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
     try:
         cfg = load_config()
         return bool(cfg.get("cron", {}).get("delivery_dedupe", True))
@@ -443,14 +448,22 @@ def _pick_delivery_paragraph(body: str, max_chars: int) -> str:
     return joined.strip()
 
 
-def sanitize_cron_deliver_content(raw: str, max_chars: int) -> tuple[str, bool]:
+def sanitize_cron_deliver_content(
+    raw: str, max_chars: int, *, strict_delivery_envelope: bool = False
+) -> tuple[str, bool]:
     """
     Turn a model final_response into messaging-safe text.
+
+    If the response ends with ###HERMES_CRON_DELIVERY_JSON … ###END_HERMES_CRON_DELIVERY_JSON,
+    only the JSON ``lines`` are delivered (deterministic). Earlier prose is ignored.
 
     Returns:
         (text_to_send, skip_delivery) — skip_delivery True means do not notify the user.
     """
     raw = _normalize_silent_brackets(str(raw or "").strip())
+    env = try_parse_cron_delivery_envelope(raw, max_chars, strict=strict_delivery_envelope)
+    if env is not None:
+        return env
     if _response_means_silent(raw):
         return "", True
     s = raw.strip()
