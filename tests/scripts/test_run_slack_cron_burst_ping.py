@@ -80,3 +80,34 @@ def test_ping_job_prompt_sends_stored_prompt(
             body = send.call_args[0][1]
             assert "daily-slack-role-status-example-C111" in body
             assert "Slack-only daily status" in body
+
+
+def test_policy_checkin_sends_upward_summary_and_slug(
+    burst_main,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    home = tmp_path / ".hermes"
+    (home / "cron").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.chdir(REPO)
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+
+    jobs = [
+        {
+            "id": "z9",
+            "name": "daily-slack-role-status-org-mapper-hr-controller-C0ABC",
+            "deliver": "slack:C0ABC",
+            "prompt": "You are generating the **Slack-only daily status** for role `org-mapper-hr-controller`.",
+        },
+    ]
+    with patch("cron.jobs.load_jobs", return_value=jobs):
+        with patch("cron.delivery.deliver_cron_result", return_value=True) as send:
+            monkeypatch.setattr(sys, "argv", ["x", "--policy-checkin"])
+            assert burst_main() == 0
+            send.assert_called_once()
+            body = send.call_args[0][1]
+            assert "UPWARD SUMMARY" in body or "upward" in body.lower()
+            assert "org-mapper-hr-controller" in body
+            assert "Slack-only daily status" in body

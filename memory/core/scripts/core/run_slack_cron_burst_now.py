@@ -15,14 +15,62 @@ allowlist smoke test). Run once per ``HERMES_HOME`` profile that owns those jobs
 
 ``--ping-job-prompt`` posts each job's own ``prompt`` field (the scheduled policy text) so every
 channel shows what that role is asked to post.
+
+``--policy-checkin`` posts a *one-off* upward summary shaped like
+``chief-orchestrator-directive.md`` / ``unified-deployment-and-security.md`` (objective, status,
+evidence, blocker, next action, decision, memory recommendation), then the scheduled prompt excerpt
+so each delegated channel visibly matches org reporting policy plus the cron contract.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from pathlib import Path
+
+_SLACK_JOB_SLUG_SUFFIX = re.compile(r"-([CD][A-Z0-9]+)$")
+
+
+def _role_slug_from_slack_job_name(name: str) -> str:
+    """Parse role slug from ``daily-slack-role-status-<slug>-<channelId>`` (sync_slack_role_cron_jobs)."""
+    n = (name or "").strip()
+    if not n.startswith("daily-slack-role-status-"):
+        return n or "unknown-role"
+    body = n[len("daily-slack-role-status-") :]
+    m = _SLACK_JOB_SLUG_SUFFIX.search(body)
+    if m:
+        slug = body[: m.start()].strip()
+        return slug or "unknown-role"
+    return body or "unknown-role"
+
+
+def _build_policy_checkin_message(job: dict) -> str:
+    role = _role_slug_from_slack_job_name(str(job.get("name") or ""))
+    deliver = str(job.get("deliver", "")).strip()
+    jid = str(job.get("name") or job.get("id") or "")
+    raw_prompt = (job.get("prompt") or "").strip()
+    excerpt = raw_prompt if len(raw_prompt) <= 7000 else raw_prompt[:6900] + "\n…(truncated)"
+    return (
+        f"*Delegated agent check-in (one-off, policy-shaped)* — `{jid}`\n\n"
+        f"Role slug: `{role}` · Target: `{deliver}`\n\n"
+        "Per *chief-orchestrator-directive* (UPWARD SUMMARY PROTOCOL) and "
+        "*unified-deployment-and-security* (Agent Startup Bundle / reporting format), this channel "
+        "receives the standard upward structure:\n"
+        "• *objective:* Daily Slack-only status for this role remit (Australia/Sydney cadence per job spec).\n"
+        "• *current status:* Manual Hermes publish — no LLM turn for this message; confirms routing and visibility.\n"
+        "• *evidence:* Role alignment with `HERMES_HOME/policies/`; operational rules in the scheduled prompt below "
+        "(unique per channel, no cross-surface paste).\n"
+        "• *blocker:* None asserted in this one-off.\n"
+        "• *next action:* Normal staggered cron resumes; respond `[SILENT]` when there is no material delta.\n"
+        "• *requested decision:* None.\n"
+        "• *memory recommendation:* keep active\n\n"
+        "Channel architecture context: `policies/core/governance/standards/channel-architecture-policy.md` "
+        "(purpose-specific channels; summaries flow upward).\n\n"
+        "---\n*Scheduled job prompt (authoritative contract for daily copy):*\n\n"
+        f"{excerpt or '(no prompt stored for this job)'}"
+    )
 
 
 def main() -> int:
@@ -32,16 +80,22 @@ def main() -> int:
         action="store_true",
         help="Disable cron delivery fingerprint dedupe for this run (test / forced check-ins).",
     )
-    ap.add_argument(
+    mx = ap.add_mutually_exclusive_group()
+    mx.add_argument(
         "--ping",
         metavar="TEXT",
         default=None,
         help="Post TEXT to each slack:* cron target via gateway delivery (no LLM / no tick).",
     )
-    ap.add_argument(
+    mx.add_argument(
         "--ping-job-prompt",
         action="store_true",
         help="Post each job's stored prompt (policy text) to its slack:* target (no LLM / no tick).",
+    )
+    mx.add_argument(
+        "--policy-checkin",
+        action="store_true",
+        help="Post policy-shaped upward summary + scheduled prompt excerpt per slack job (no LLM / no tick).",
     )
     args = ap.parse_args()
     if args.no_dedupe:
@@ -69,17 +123,17 @@ def main() -> int:
         print("No slack:* deliver cron jobs in this profile.", file=sys.stderr)
         return 1
 
-    if args.ping_job_prompt and args.ping is not None:
-        print("Use either --ping or --ping-job-prompt, not both.", file=sys.stderr)
-        return 2
-
-    if args.ping_job_prompt or args.ping is not None:
+    if args.ping_job_prompt or args.policy_checkin or args.ping is not None:
         from cron.delivery import deliver_cron_result
 
         fails = 0
         for j in slack_jobs:
             target = str(j.get("deliver", ""))
-            if args.ping_job_prompt:
+            if args.policy_checkin:
+                text = _build_policy_checkin_message(j)
+                if len(text) > 35000:
+                    text = text[:34900] + "\n…(truncated)"
+            elif args.ping_job_prompt:
                 raw = (j.get("prompt") or "").strip()
                 text = (
                     f"*Scheduled Slack role policy (test)* — `{j.get('name', j.get('id'))}`\n\n"
