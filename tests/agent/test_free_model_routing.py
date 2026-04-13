@@ -278,7 +278,7 @@ def test_openrouter_last_resort_appended_by_default():
     assert ch[1]["provider"] == "openrouter"
     assert ch[1]["openrouter_last_resort"] is True
     assert ch[1]["only_rate_limit"] is True
-    assert "nano" in ch[1]["model"].lower()
+    assert ch[1]["model"] == "openrouter/free"
 
 
 def test_openrouter_last_resort_disabled():

@@ -415,3 +415,12 @@ def test_default_free_subprocess_prefers_canon_ladder_before_builtin_defaults(tm
         assert mid == "gpt-5.2"
     finally:
         invalidate_routing_canon_cache()
+
+
+def test_default_free_subprocess_non_opm_returns_openrouter_free(monkeypatch):
+    from agent import subprocess_governance as sg
+    from hermes_constants import OPENROUTER_FREE_SYNTHETIC
+
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+    mid = sg.default_free_subprocess_model_id(None)
+    assert mid == OPENROUTER_FREE_SYNTHETIC

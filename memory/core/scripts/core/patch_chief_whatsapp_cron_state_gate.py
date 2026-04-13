@@ -3,13 +3,13 @@
 Add ``state_skip_gate`` to stateful WhatsApp/monitor crons and normalize prompts.
 
 - Operator paths: ``/Users/operator/.hermes/cron-state/...`` (override with --cron-state-root).
-- WhatsApp ``deliver`` jobs: ensure OpenRouter ``openai/gpt-5.4-nano`` and
+- WhatsApp ``deliver`` jobs: ensure OpenRouter ``openrouter/free`` (synthetic free router) and
   ``--operator --chief-orchestrator`` prompt suffix.
 
 Run on the host that owns the profile (e.g. Mac mini):
 
   HERMES_HOME=~/.hermes/profiles/chief-orchestrator \\
-    ./venv/bin/python memory/core/scripts/core/patch_chief_whatsapp_cron_state_gate.py --apply
+    ./venv/bin/python scripts/core/patch_chief_whatsapp_cron_state_gate.py --apply
 
 Dry run (default): prints planned edits only.
 """

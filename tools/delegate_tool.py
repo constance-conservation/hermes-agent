@@ -35,6 +35,7 @@ from agent.openai_primary_mode import (
     resolve_openai_primary_mode_for_session_agent,
 )
 from agent.routing_trace import emit_routing_decision_trace
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 
 def _opm_delegation_target_model(parent_agent, goal_or_prompt_text: str) -> str:
@@ -1503,7 +1504,7 @@ def _resolve_delegation_credentials(
     if configured_model and model_id_contains_disallowed_family(str(configured_model)):
         # OPM must still see the disallowed id so it can uplift to native GPT; rewrite only when OPM is off.
         if not opm_enabled_for_session_agent(parent_agent):
-            configured_model = "openai/gpt-5.4-nano"
+            configured_model = OPENROUTER_FREE_SYNTHETIC
     # region agent log
     _dbg98(
         "H1",

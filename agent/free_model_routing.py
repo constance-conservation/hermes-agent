@@ -2,11 +2,11 @@
 
 Synthesized order (defaults):
 
-1. **Budget OpenRouter** — ``openai/gpt-5.4-nano`` (cheapest GPT-5.4 tier on the hub)
-   when ``budget_openrouter_fallback`` is enabled.
+1. **Budget OpenRouter** — ``openrouter/free`` (synthetic free-tier router) when
+   ``budget_openrouter_fallback`` is enabled.
 2. **Gemini tier router** (optional) — when ``kimi_router.router_model`` is set.
 3. **Optional Gemini** — rate-limit hop when ``optional_gemini`` is enabled.
-4. **OpenRouter last resort** — defaults to the same nano id unless overridden.
+4. **OpenRouter last resort** — defaults to ``openrouter/free`` unless overridden.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_GEMINI_NATIVE = frozenset({"gemini-2.5-flash"})
 _DEFAULT_FALLBACK_FREE_ROUTED = "gemini-2.5-flash"
-_DEFAULT_BUDGET_OPENROUTER_MODEL = "openai/gpt-5.4-nano"
+_DEFAULT_BUDGET_OPENROUTER_MODEL = "openrouter/free"
 
 
 def raw_free_model_routing_tiers(fmr: Optional[Dict[str, Any]]) -> Any:

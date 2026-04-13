@@ -223,9 +223,9 @@ def ensure_hermes_home():
 # =============================================================================
 
 DEFAULT_CONFIG = {
-    # Default when config.yaml omits model.default: cheapest GPT-5.4 hub tier on OpenRouter
-    # when OPENROUTER_API_KEY is set (aligns with token-governance tier A / cron-style tasks).
-    "model": {"default": "openai/gpt-5.4-nano"},
+    # Default primary: synthetic OpenRouter free-tier router (concrete :free slug per turn).
+    # Paid escalation: routing_canon openrouter_step_up_escalation, deliberation, OPM ladders.
+    "model": {"default": "openrouter/free"},
     "fallback_providers": None,
     "openai_primary_mode": {
         "enabled": False,
@@ -306,7 +306,7 @@ DEFAULT_CONFIG = {
         },
         "openrouter_last_resort": {
             "enabled": True,
-            "model": "openai/gpt-5.4-nano",
+            "model": "openrouter/free",
         },
     },
     "credential_pool_strategies": {},
@@ -624,8 +624,9 @@ DEFAULT_CONFIG = {
     # Uses the same runtime provider resolution as CLI/gateway startup, so all
     # configured providers (OpenRouter, Nous, Z.ai, Kimi, etc.) are supported.
     "delegation": {
-        "model": "",       # e.g. "google/gemini-3-flash-preview" (empty = inherit parent model)
-        "provider": "",    # e.g. "openrouter" (empty = inherit parent provider + credentials)
+        # Default child stack: free-tier OpenRouter router (set both empty to inherit parent).
+        "model": "openrouter/free",
+        "provider": "openrouter",
         "base_url": "",    # direct OpenAI-compatible endpoint for subagents
         "api_key": "",     # API key for delegation.base_url (falls back to OPENAI_API_KEY)
         "max_iterations": 50,  # per-subagent iteration cap (each subagent gets its own budget,
@@ -751,7 +752,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 37,
+    "_config_version": 38,
 }
 
 # =============================================================================
@@ -3005,6 +3006,46 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 print(f"  ⚠ v37 migration skipped: {e}")
             results["warnings"].append(f"v37 migration: {e}")
             merge_user_config_yaml({"_config_version": 37})
+
+    # ── Version 37 → 38: primary + delegation + last-resort → openrouter/free (automated default) ──
+    if current_ver < 38:
+        try:
+            cfg_now = load_config()
+            payload: dict = {"_config_version": 38}
+            mblock = cfg_now.get("model")
+            md = ""
+            if isinstance(mblock, dict):
+                md = str(mblock.get("default") or "").strip()
+            elif isinstance(mblock, str):
+                md = mblock.strip()
+            if md in ("", "openai/gpt-5.4-nano"):
+                payload["model"] = {"default": "openrouter/free"}
+            del_cfg = cfg_now.get("delegation") or {}
+            if not str(del_cfg.get("model") or "").strip() and not str(del_cfg.get("provider") or "").strip():
+                payload["delegation"] = {
+                    "model": "openrouter/free",
+                    "provider": "openrouter",
+                }
+            fmr = cfg_now.get("free_model_routing") or {}
+            olr = fmr.get("openrouter_last_resort") or {}
+            olr_m = str(olr.get("model") or "").strip().lower()
+            if olr_m in ("openai/gpt-5.4-nano", "gpt-5.4-nano"):
+                payload.setdefault("free_model_routing", {})["openrouter_last_resort"] = {
+                    "enabled": bool(olr.get("enabled", True)),
+                    "model": "openrouter/free",
+                }
+            merge_user_config_yaml(payload)
+            if not quiet:
+                print(
+                    "  ✓ v38: model.default → openrouter/free when unset or legacy nano; "
+                    "delegation defaults when empty; openrouter_last_resort nano → openrouter/free "
+                    "(paid escalation unchanged: step-up / deliberation / OPM)."
+                )
+        except Exception as e:
+            if not quiet:
+                print(f"  ⚠ v38 migration skipped: {e}")
+            results["warnings"].append(f"v38 migration: {e}")
+            merge_user_config_yaml({"_config_version": 38})
 
     if current_ver < latest_ver and not quiet:
         print(f"Config version: {current_ver} → {latest_ver}")

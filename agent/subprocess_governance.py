@@ -259,8 +259,8 @@ def is_free_subprocess_model(model_id: str) -> bool:
 def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     """Model id used when auto-falling back from a blocked paid subprocess model.
 
-    Reads ``free_model_routing.gemini_native_tier_models[0]`` from config when present,
-    else first ``gemini_native_tier_models`` entry from config.
+    Non-OPM: prefers ``openrouter/free`` when listed in ``budget_auto_approve_models``, then
+    ``free_model_routing.gemini_native_tier_models``, else ``openrouter/free``.
 
     When ``openai_primary_mode.enabled``, never returns a disallowed-family id (uses OPM defaults / auxiliary).
     """
@@ -276,8 +276,15 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
     try:
         from hermes_cli.config import load_config
 
-        cfg = load_config()
-        fmr = (cfg or {}).get("free_model_routing") or {}
+        cfg = load_config() or {}
+        sg = cfg.get("subprocess_governance") or {}
+        raw_ids = sg.get("budget_auto_approve_models")
+        if isinstance(raw_ids, list) and raw_ids:
+            for entry in raw_ids:
+                s = str(entry).strip()
+                if s == OPENROUTER_FREE_SYNTHETIC:
+                    return OPENROUTER_FREE_SYNTHETIC
+        fmr = cfg.get("free_model_routing") or {}
         gn = fmr.get("gemini_native_tier_models") or []
         if isinstance(gn, list) and gn:
             for entry in gn:
@@ -290,15 +297,15 @@ def default_free_subprocess_model_id(parent_agent: Any = None) -> str:
         try:
             return opm_auxiliary_model(parent_agent)
         except Exception:
-            return "openai/gpt-5.4-nano"
-    return "openai/gpt-5.4-nano"
+            return OPENROUTER_FREE_SYNTHETIC
+    return OPENROUTER_FREE_SYNTHETIC
 
 
 def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
     """Preferred cheap subprocess/delegate id when rewriting a blocked paid model.
 
     Uses ``openrouter/free`` first when listed in ``budget_auto_approve_models``, then the
-    first ``gpt-*-nano`` entry, else ``openai/gpt-5.4-nano``.
+    first ``gpt-*-nano`` entry, else ``openrouter/free``.
     """
     try:
         from hermes_cli.config import load_config
@@ -318,7 +325,7 @@ def default_budget_nano_subprocess_model_id(parent_agent: Any = None) -> str:
                 return _norm_subprocess_slug(s)
     except Exception:
         pass
-    return "openai/gpt-5.4-nano"
+    return OPENROUTER_FREE_SYNTHETIC
 
 
 def requires_operator_approval(model_id: str) -> bool:
