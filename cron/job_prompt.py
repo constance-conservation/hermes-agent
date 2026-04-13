@@ -25,7 +25,10 @@ _ENVELOPE_SPEC = (
     "(4) Use {\"silent\": true} when there is no new factual delta since the last run. "
     "(5) Do not use [SILENT], “[Silently …]”, or “I will respond with [SILENT]” — only the JSON block. "
     "(6) If your profile sets cron.strict_delivery_envelope, missing or invalid JSON suppresses "
-    "messaging entirely.]\n\n"
+    "messaging entirely. "
+    "(7) When the job surfaces a blocker you can fix with available tools (config, health checks, "
+    "documented service restarts), fix it in-run and add JSON lines reporting fixed status; only "
+    "escalate what remains impossible to automate safely.]\n\n"
 )
 
 

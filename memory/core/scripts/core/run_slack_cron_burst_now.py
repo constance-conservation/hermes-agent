@@ -12,6 +12,9 @@ when body fingerprints match the last successful delivery.
 
 ``--ping '…'`` skips the LLM and posts the same text to every ``slack:`` cron target (routing /
 allowlist smoke test). Run once per ``HERMES_HOME`` profile that owns those jobs.
+
+``--ping-job-prompt`` posts each job's own ``prompt`` field (the scheduled policy text) so every
+channel shows what that role is asked to post.
 """
 from __future__ import annotations
 
@@ -34,6 +37,11 @@ def main() -> int:
         metavar="TEXT",
         default=None,
         help="Post TEXT to each slack:* cron target via gateway delivery (no LLM / no tick).",
+    )
+    ap.add_argument(
+        "--ping-job-prompt",
+        action="store_true",
+        help="Post each job's stored prompt (policy text) to its slack:* target (no LLM / no tick).",
     )
     args = ap.parse_args()
     if args.no_dedupe:
@@ -61,13 +69,26 @@ def main() -> int:
         print("No slack:* deliver cron jobs in this profile.", file=sys.stderr)
         return 1
 
-    if args.ping is not None:
+    if args.ping_job_prompt and args.ping is not None:
+        print("Use either --ping or --ping-job-prompt, not both.", file=sys.stderr)
+        return 2
+
+    if args.ping_job_prompt or args.ping is not None:
         from cron.delivery import deliver_cron_result
 
-        text = str(args.ping).strip() or "(empty ping)"
         fails = 0
         for j in slack_jobs:
             target = str(j.get("deliver", ""))
+            if args.ping_job_prompt:
+                raw = (j.get("prompt") or "").strip()
+                text = (
+                    f"*Scheduled Slack role policy (test)* — `{j.get('name', j.get('id'))}`\n\n"
+                    f"{raw or '(no prompt stored for this job)'}"
+                )
+                if len(text) > 12000:
+                    text = text[:11900] + "\n…(truncated)"
+            else:
+                text = str(args.ping).strip() or "(empty ping)"
             ok = bool(deliver_cron_result(j, text))
             print(f"ping {j.get('name', j.get('id'))} {target} -> {'ok' if ok else 'FAIL'}", file=sys.stderr)
             if not ok:

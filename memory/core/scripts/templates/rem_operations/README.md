@@ -7,7 +7,7 @@ This directory holds **runtime registers** for the agentic-company / chief-orche
 | File | Purpose |
 |------|---------|
 | `ORG_REGISTRY.md` | Org chart / agent IDs |
-| `SECURITY_SUBAGENTS_REGISTER.md` | AG-004, AG-006–AG-013 + `ag-sec-*` profiles |
+| `SECURITY_SUBAGENTS_REGISTER.md` | AG-004, AG-006–AG-013 + `security-*` profiles |
 | `SECURITY_ALERT_REGISTER.md` | Session 11 warnings (W001–W004) |
 | `CHANNEL_ARCHITECTURE.md` | Allowlist IDs + env vars (Session 10) |
 | `MODEL_ROUTING_REGISTRY.md` | Tier / routing intent |
@@ -58,4 +58,4 @@ If you just ran **`REM_OPERATIONS_FORCE=1`** `materialize_rem_operations.sh`, ru
 ## Governance enforcement note
 
 - There is **no** `agent/governance.py` in core. **Model / turn caps** come from **`agent/token_governance_runtime.py`** reading `hermes_token_governance.runtime.yaml` (`max_agent_turns`). Logs: `Token governance: baseline …` and per-turn tier lines (gateway + CLI).
-- **HR / org auto-consultation:** optional `hr_consultation` block in the same YAML — chief delegates to `ag-org-hr` when keywords match; see `agent/hr_consultation.py`.
+- **HR / org auto-consultation:** optional `hr_consultation` block in the same YAML — chief delegates to `org-mapper-hr-controller` when keywords match; see `agent/hr_consultation.py`.

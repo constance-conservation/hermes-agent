@@ -310,12 +310,12 @@ class TestMergeRoleRoutingOverlay:
         overlay = {
             "enabled": True,
             "default_role": "chief_orchestrator",
-            "slack": {"channels": {"C1": "fd-engineering"}},
+            "slack": {"channels": {"C1": "engineering-director"}},
         }
         merged = _merge_role_routing_overlay(base, overlay)
         assert merged["enabled"] is True
         assert merged["default_role"] == "chief_orchestrator"
-        assert merged["slack"]["channels"] == {"C1": "fd-engineering"}
+        assert merged["slack"]["channels"] == {"C1": "engineering-director"}
         assert merged["slack"]["threads"] == {"T1": "x"}
 
     def test_overlay_adds_platform(self):

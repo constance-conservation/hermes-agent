@@ -3,7 +3,7 @@
 Configured under ``hr_consultation`` in
 ``HERMES_HOME/workspace/memory/runtime/operations/hermes_token_governance.runtime.yaml`` (same file as
 token governance). When enabled and triggers match the user message, Hermes runs
-``delegate_task`` against the named Hermes profile (default ``ag-org-hr``) and
+``delegate_task`` against the named Hermes profile (default ``org-mapper-hr-controller``) and
 appends the subagent summary to this turn's user message so the chief genuinely
 incorporates HR input in the same turn.
 
@@ -73,7 +73,7 @@ def maybe_append_hr_consultation(agent: Any, user_message: str, gov: Optional[Di
         logger.debug("hr_consultation: skip (subagent or no delegate_task)")
         return user_message
 
-    profile = str(cfg.get("hermes_profile") or "ag-org-hr").strip() or "ag-org-hr"
+    profile = str(cfg.get("hermes_profile") or "org-mapper-hr-controller").strip() or "org-mapper-hr-controller"
     goal = str(
         cfg.get("goal")
         or (

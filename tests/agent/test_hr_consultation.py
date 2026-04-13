@@ -59,7 +59,7 @@ class TestMaybeAppendHrConsultation(unittest.TestCase):
             "hr_consultation": {
                 "enabled": True,
                 "trigger_keywords": ["new agent"],
-                "hermes_profile": "ag-org-hr",
+                "hermes_profile": "org-mapper-hr-controller",
             }
         }
         out = maybe_append_hr_consultation(agent, "We need a new agent for ops", gov)
@@ -67,4 +67,4 @@ class TestMaybeAppendHrConsultation(unittest.TestCase):
         self.assertIn("We need a new agent", out)
         mock_delegate.assert_called_once()
         kw = mock_delegate.call_args.kwargs
-        self.assertEqual(kw.get("hermes_profile"), "ag-org-hr")
+        self.assertEqual(kw.get("hermes_profile"), "org-mapper-hr-controller")

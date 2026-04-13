@@ -2,7 +2,7 @@
 
 | AG-ID | Project slug | Status | Policy | Prompt |
 |-------|--------------|--------|--------|--------|
-| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `policies/core/governance/standards/project-lead-policy-template.md` | `policies/core/governance/role-prompts/project-lead-template.md` — Hermes profile **`ag-pl-agentic-company`** (manifest bootstrap) |
+| **AG-005** | `agentic-company` | **ACTIVE (registry)** | `policies/core/governance/standards/project-lead-policy-template.md` | `policies/core/governance/role-prompts/project-lead-template.md` — Hermes profile **`project-lead-agentic-company`** (manifest bootstrap) |
 
 ## Project brief (agentic-company)
 
@@ -16,7 +16,7 @@
 
 ## Delegation
 
-- Bootstrap profile: `./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py` → **`ag-pl-agentic-company`**. Chief calls `delegate_task(..., hermes_profile="ag-pl-agentic-company")` for project-lane work.
+- Bootstrap profile: `./venv/bin/python scripts/core/bootstrap_org_agent_profiles.py` → **`project-lead-agentic-company`**. Chief calls `delegate_task(..., hermes_profile="project-lead-agentic-company")` for project-lane work.
 
 ## Operator-owned
 

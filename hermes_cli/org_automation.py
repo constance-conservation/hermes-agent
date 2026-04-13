@@ -153,7 +153,9 @@ def workspace_org_automation_apply(
     manifest: Path | None,
 ) -> int:
     repo = _repo_root()
-    mpath = manifest or (repo / "scripts" / "core" / "org_agent_profiles_manifest.yaml")
+    mpath = manifest or (
+        repo / "memory" / "core" / "scripts" / "core" / "org_agent_profiles_manifest.yaml"
+    )
     if not mpath.is_file():
         print(f"Manifest not found: {mpath}", file=sys.stderr)
         return 1

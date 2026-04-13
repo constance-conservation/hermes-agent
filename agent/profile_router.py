@@ -227,7 +227,7 @@ def _keyword_route_project_lead(
     skip_current: bool,
     threshold: float,
 ) -> Optional[Tuple[str, float, str]]:
-    """Fast path: project / product lead status asks → ``ag-pl-*`` / ``fd-product`` (no HF call)."""
+    """Fast path: project / product lead status asks → ``project-lead-*`` / ``product-director`` (no HF call)."""
     low = (user_message or "").strip().lower()
     if len(low) < 12:
         return None
@@ -250,7 +250,7 @@ def _keyword_route_project_lead(
             score += 120
         if s.startswith("ag-pl-") or "-pl-" in s or "project-lead" in s:
             score += 60
-        if s == "fd-product" and ("product" in low or "lead" in low):
+        if s == "product-director" and ("product" in low or "lead" in low):
             score += 35
         if score > 0:
             scored.append((score, slug))
@@ -311,6 +311,7 @@ def _keyword_route_profile(
             or "compliance" in s
             or "infosec" in s
             or "ag-sec" in s
+            or s.startswith("security-")
             or s.startswith("sec-ops")
             or "sec-guard" in s
         )

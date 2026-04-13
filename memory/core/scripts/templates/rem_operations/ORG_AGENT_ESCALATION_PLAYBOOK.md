@@ -8,7 +8,7 @@
 
 1. **Worker / specialist** → **supervisor** (or project lead for project-scoped roles).
 2. **Supervisor / project lead** → **functional director** for the affected lane (product, engineering, operations, IT/security).
-3. **Directors** → **org / HR controller** (`ag-org-hr` profile and `org-mapper-hr-controller` prompt) for headcount / RACI / redundancy checks.
+3. **Directors** → **org / HR controller** (`org-mapper-hr-controller` profile and `org-mapper-hr-controller` prompt) for headcount / RACI / redundancy checks.
 4. **HR / org** → **chief orchestrator** with a **single consolidated packet**: approvals at each prior level, dissenting views, and a **binary recommendation** (proceed / do not proceed).
 
 ## Chief decision
@@ -19,7 +19,7 @@
 
 ## Automatic HR consultation (runtime)
 
-When enabled in `workspace/memory/runtime/operations/hermes_token_governance.runtime.yaml` under **`hr_consultation`**, the **chief** (parent agent with `delegate_task`, not subagents) automatically delegates once per matching user turn to **`hermes_profile`** (default `ag-org-hr`) and **appends** the subagent summary to the same turn’s user message. Tune **`trigger_keywords`** for your org. See `agent/hr_consultation.py` and the example block in `scripts/templates/hermes_token_governance.runtime.example.yaml`.
+When enabled in `workspace/memory/runtime/operations/hermes_token_governance.runtime.yaml` under **`hr_consultation`**, the **chief** (parent agent with `delegate_task`, not subagents) automatically delegates once per matching user turn to **`hermes_profile`** (default `org-mapper-hr-controller`) and **appends** the subagent summary to the same turn’s user message. Tune **`trigger_keywords`** for your org. See `agent/hr_consultation.py` and the example block in `scripts/templates/hermes_token_governance.runtime.example.yaml`.
 
 ## Non-goals
 

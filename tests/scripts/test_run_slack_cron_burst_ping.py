@@ -1,4 +1,4 @@
-"""--ping mode on run_slack_cron_burst_now (Slack delivery smoke, no LLM)."""
+"""Slack delivery smoke tests for run_slack_cron_burst_now (--ping / --ping-job-prompt)."""
 
 from __future__ import annotations
 
@@ -50,3 +50,33 @@ def test_ping_delivers_once_per_slack_job(
             assert send.call_count == 2
             send.assert_any_call(jobs[0], "hello test")
             send.assert_any_call(jobs[1], "hello test")
+
+
+def test_ping_job_prompt_sends_stored_prompt(
+    burst_main,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    home = tmp_path / ".hermes"
+    (home / "cron").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.chdir(REPO)
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+
+    jobs = [
+        {
+            "id": "a1",
+            "name": "daily-slack-role-status-example-C111",
+            "deliver": "slack:C111",
+            "prompt": "Use Australia/Sydney. You are the **Slack-only daily status** for role `example`.",
+        },
+    ]
+    with patch("cron.jobs.load_jobs", return_value=jobs):
+        with patch("cron.delivery.deliver_cron_result", return_value=True) as send:
+            monkeypatch.setattr(sys, "argv", ["x", "--ping-job-prompt"])
+            assert burst_main() == 0
+            send.assert_called_once()
+            body = send.call_args[0][1]
+            assert "daily-slack-role-status-example-C111" in body
+            assert "Slack-only daily status" in body

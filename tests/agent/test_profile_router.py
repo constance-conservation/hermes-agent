@@ -144,7 +144,7 @@ def test_classify_keyword_project_lead_skips_llm():
     with patch("agent.auxiliary_client.call_llm") as mock_call:
         t, conf, reason = classify_profile_for_prompt(
             "can i get a status update from the project lead for the agentic-company project?",
-            candidates=["chief-orchestrator", "ag-pl-agentic-company", "fd-product"],
+            candidates=["chief-orchestrator", "project-lead-agentic-company", "product-director"],
             current_profile="chief-orchestrator",
             router_cfg={
                 "only_when_current_profiles": ["chief-orchestrator"],
@@ -153,7 +153,7 @@ def test_classify_keyword_project_lead_skips_llm():
             },
         )
     assert mock_call.call_count == 0
-    assert t == "ag-pl-agentic-company"
+    assert t == "project-lead-agentic-company"
     assert conf >= 0.65
     assert "project-lead" in reason.lower()
 
@@ -164,7 +164,7 @@ def test_classify_keyword_security_skips_llm():
     with patch("agent.auxiliary_client.call_llm") as mock_call:
         t, conf, reason = classify_profile_for_prompt(
             "what is my security posture today?",
-            candidates=["ag-sec-preflight", "other-bot"],
+            candidates=["security-preflight", "other-bot"],
             current_profile="chief-orchestrator",
             router_cfg={
                 "only_when_current_profiles": ["chief-orchestrator"],
@@ -173,7 +173,7 @@ def test_classify_keyword_security_skips_llm():
             },
         )
     assert mock_call.call_count == 0
-    assert t == "ag-sec-preflight"
+    assert t == "security-preflight"
     assert conf >= 0.65
     assert "keyword" in reason.lower()
 

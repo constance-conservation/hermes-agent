@@ -159,7 +159,7 @@ class TestDelegateTask(unittest.TestCase):
     def test_hermes_profile_rejects_batch(self):
         parent = _make_mock_parent()
         result = json.loads(delegate_task(
-            hermes_profile="ag-sec-preflight",
+            hermes_profile="security-preflight",
             tasks=[{"goal": "A"}, {"goal": "B"}],
             parent_agent=parent,
         ))
@@ -180,11 +180,11 @@ class TestDelegateTask(unittest.TestCase):
         parent = _make_mock_parent()
         json.loads(delegate_task(
             goal="preflight check",
-            hermes_profile="ag-sec-preflight",
+            hermes_profile="security-preflight",
             parent_agent=parent,
         ))
         mock_profile_env.assert_called_once_with(
-            "ag-sec-preflight",
+            "security-preflight",
             parent_hermes_home_snapshot=ANY,
         )
 

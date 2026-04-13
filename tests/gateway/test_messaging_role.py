@@ -112,12 +112,12 @@ def test_load_role_allowed_toolsets(tmp_path):
     ops.mkdir(parents=True)
     doc = {
         "roles": {
-            "fd-engineering": {"allowed_toolsets": ["terminal", "file", "web"]},
+            "engineering-director": {"allowed_toolsets": ["terminal", "file", "web"]},
             "no_cap": {"display_name": "X"},
         },
     }
     (ops / "role_assignments.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    assert load_role_allowed_toolsets("fd-engineering", hermes_home=tmp_path) == [
+    assert load_role_allowed_toolsets("engineering-director", hermes_home=tmp_path) == [
         "terminal",
         "file",
         "web",

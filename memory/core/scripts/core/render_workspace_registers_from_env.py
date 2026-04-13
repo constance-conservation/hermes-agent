@@ -234,7 +234,7 @@ def merge_org_tool_policy_notes(home: Path) -> None:
     if data.get("org_tool_policy_notes"):
         return
     data["org_tool_policy_notes"] = (
-        "Security foundation profiles (ag-sec-*) use toolsets from scripts/core/org_agent_profiles_manifest.yaml "
+        "Security foundation profiles (security-*) use toolsets from scripts/core/org_agent_profiles_manifest.yaml "
         "after bootstrap; not duplicated in core. Default delegation uses chief tier_models; use consultant "
         "routing / tier E–F for incident or board-class work per MODEL_ROUTING_REGISTRY.md."
     )

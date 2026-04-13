@@ -18,7 +18,7 @@ Use this with the **chief-orchestrator** profile as the primary interactive + ga
 ## 3. Pipeline activation
 
 - Functional directors are **ACTIVE** in the register for org testing; the chief should **delegate** department-level work to `fd-*` profiles when policy calls for it.
-- Security rows map to `ag-sec-*` profiles and in-repo role prompt bundle `workspace/memory/governance/source/role-prompts/security-foundation-agents-role-prompts.md` (sections AG-004, AG-006–AG-013).
+- Security rows map to `security-*` profiles and in-repo role prompt bundle `workspace/memory/governance/source/role-prompts/security-foundation-agents-role-prompts.md` (sections AG-004, AG-006–AG-013).
 
 ## 4. HR / org structure changes
 

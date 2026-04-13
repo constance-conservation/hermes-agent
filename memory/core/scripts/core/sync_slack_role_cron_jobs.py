@@ -120,6 +120,10 @@ You are generating the **Slack-only daily status** for role `{role_slug}` in cha
 - Lead with a compact status headline, then bullets: what changed, blockers, next 24h.
 - Align with published policies under `HERMES_HOME/policies/` relevant to `{role_slug}` when applicable (do not paste large policy text).
 
+**Blockers, failures, and remediation**
+- If you detect a **fixable** issue for this channel or surface (e.g. Slack `is_archived`, missing allowlist entry, gateway platform disconnected, stale cron state), use tools in this same run to **resolve it** when policy and safety allow **without** asking a human for routine, low-risk fixes (config edits in `HERMES_HOME`, documented restarts, joining/unarchiving via supported automation).
+- When you fix something, state **what broke**, **what you changed**, and **verification** in the status lines. If still blocked after attempting remediation, say what remains and the minimum human action.
+
 **Closing**
 Append its own final line exactly: `{hermes_hop_tag} --{role_slug}` (Hermes hop from this host, then the role slug from config — not the orchestrator profile name)."""
 

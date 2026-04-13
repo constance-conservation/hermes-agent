@@ -23,8 +23,8 @@ defaults:
 # Explicit bindings: key = exact chat/channel id string from .env allowlist.
 # Value = role slug (must exist under role_assignments.yaml roles.*).
 slack_channels:
-  # "C01234567890": fd-engineering
-  # "C0ABCDEF": fd-product
+  # "C01234567890": engineering-director
+  # "C0ABCDEF": product-director
 
 telegram_chats:
   # "123456789": chief_orchestrator
@@ -37,5 +37,5 @@ discord_channels:
 
 # Optional Slack thread overrides (thread id / ts → role slug), e.g.:
 # slack_threads:
-#   "1740123456.000999": fd-engineering
+#   "1740123456.000999": engineering-director
 slack_threads: {}
