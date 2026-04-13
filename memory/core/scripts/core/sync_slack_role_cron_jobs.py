@@ -158,11 +158,21 @@ You are generating the **Slack-only daily status** for role `{role_slug}` in cha
 - Each channel must add **unique** information for this role remit; do not broadcast the same narrative to multiple channels.
 
 **Content** (only when not silent)
-- Lead with a compact status headline, then bullets: what changed, blockers, next 24h.
 - Align with published policies under `HERMES_HOME/policies/` relevant to `{role_slug}` when applicable (do not paste large policy text).
+- Return **Slack-ready final copy only**. Do **not** include tool traces, command transcripts, internal plans, or chain-of-thought.
+- Use this exact upward-summary structure from policy:
+  objective:
+  current status:
+  evidence:
+  blocker:
+  next action:
+  requested decision, if any:
+  memory recommendation: keep active / archive / close
 
 **Blockers, failures, and remediation**
-- If you detect a **fixable** issue for this channel or surface (e.g. Slack `is_archived`, missing allowlist entry, gateway platform disconnected, stale cron state), use tools in this same run to **resolve it** when policy and safety allow **without** asking a human for routine, low-risk fixes (config edits in `HERMES_HOME`, documented restarts, joining/unarchiving via supported automation).
+- Use at most a **small** amount of local inspection to ground the summary.
+- Only attempt remediation when the blocker is directly about this channel's deliverability or the current host's status signal for this role (for example Slack `is_archived`, missing allowlist entry, gateway platform disconnected, stale cron state).
+- Do **not** run unrelated maintenance, package upgrades, setup wizards, or broad repo changes just to compose a report.
 - When you fix something, state **what broke**, **what you changed**, and **verification** in the status lines. If still blocked after attempting remediation, say what remains and the minimum human action.
 
 **Closing**
