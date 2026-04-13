@@ -8,8 +8,14 @@
 #   - org.hermes.tailscale.sshd LaunchDaemon not running (sshd not listening on :52822 on TS IP)
 #   - macOS Application Firewall blocking inbound sshd on 52822
 #
-# Usage (on mini):
-#   bash operator_mini_ssh_tcp_diagnostic.sh
+# Usage (on mini — one command per line; do not paste "cd … # comment" as one broken line):
+#   cd "$HOME/hermes-agent" && bash scripts/core/operator_mini_ssh_tcp_diagnostic.sh
+#
+# If that directory does not exist, find the clone:
+#   find "$HOME" -maxdepth 5 -type d -name hermes-agent 2>/dev/null
+#
+# No git clone at all — download and run (read URL first if you prefer):
+#   curl -fsSL https://raw.githubusercontent.com/cc-org-au/hermes-agent/main/memory/core/scripts/core/operator_mini_ssh_tcp_diagnostic.sh | bash
 #
 set -euo pipefail
 
