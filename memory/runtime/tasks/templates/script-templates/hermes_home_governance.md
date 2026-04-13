@@ -9,11 +9,10 @@ This file lives at `HERMES_HOME/.hermes.md`. Hermes loads it **first** in projec
   - **Session / read order:** `{{WORKSPACE_ROOT}}/AGENTS.md`
   - **Layout index:** `{{WORKSPACE_ROOT}}/WORKSPACE.md`
   - **Operations registers:** `{{WORKSPACE_ROOT}}/operations/`
-  - **Optional — nested editable policy mirror (pipeline-only):** `{{WORKSPACE_ROOT}}/policies/` — only present if your **activation pipeline** materialized generated or editable policy copies here. **Do not assume this directory exists.** It is **not** the primary policy canon for typical Hermes profiles.
 
-- **Canonical policy bundle (read policies here):** `{{POLICY_ROOT}}`
+- **Canonical policy bundle (read policies here; includes generated subtrees when materialized):** `{{POLICY_ROOT}}`
 
-In **multi-profile** setups (e.g. `chief-orchestrator` + delegate profiles), **`POLICY_ROOT`** should resolve to **`$HERMES_HOME/policies/`** on each profile — usually a **symlink** to **`~/.hermes/profiles/chief-orchestrator/policies`** so every role reads the **same** markdown tree. **Do not** point operators at `workspace/policies/` as the canonical source when **`${HERMES_HOME}/policies/`** is already populated or symlinked.
+In **multi-profile** setups (e.g. `chief-orchestrator` + delegate profiles), **`POLICY_ROOT`** should resolve to **`$HERMES_HOME/policies/`** on each profile — usually a **symlink** to **`~/.hermes/profiles/chief-orchestrator/policies`** so every role reads the **same** markdown tree (including generated material under `…/policies/core/governance/generated/` when materialized).
 
 ## How to use this with Hermes
 

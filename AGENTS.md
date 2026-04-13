@@ -466,7 +466,7 @@ For **per-role tool and config isolation**, create named profiles from **`script
 
 **Single messaging gateway:** Delegate profiles are **not** separate long-lived `gateway run` instances. Platform traffic and **`gateway watchdog-check`** use the **orchestrator** profile that holds bot tokens (**typically `hermes -p chief-orchestrator gateway watchdog-check`**). Do not expect **`gateway_state.json`** under delegate-only profiles.
 
-**Policy paths:** Canonical org policies for delegates live under **`${HERMES_HOME}/policies/`** (often symlinked to **`~/.hermes/profiles/chief-orchestrator/policies`**). Treat **`workspace/policies/`** as an optional pipeline mirror only — not the primary canon when **`HERMES_HOME/policies`** is present.
+**Policy paths:** Canonical org policies (and generated/runtime-editable subtrees from `start_pipeline.py`) live under **`${HERMES_HOME}/policies/`** (often symlinked to **`~/.hermes/profiles/chief-orchestrator/policies`**). Do not use **`workspace/policies/`** as a second policy root.
 
 ### Rules for profile-safe code
 

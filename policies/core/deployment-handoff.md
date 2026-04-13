@@ -149,7 +149,7 @@ Tasks:
    - `operations/SECURITY_REMEDIATION_QUEUE.md`
    - `operations/INCIDENT_REGISTER.md`
 13. Ensure the pipeline output includes `AGENT_HOME/workspace/operations/projects/` and per-project `memory/archival/` trees for every active project slug.
-14. Ensure the pipeline output includes runtime-editable policy areas under `AGENT_HOME/workspace/policies/` (including `core/governance/generated/README.md` and subfolders) and all runtime agent files under `AGENT_HOME/workspace/policies/core/runtime/agent/`.
+14. Ensure the pipeline output includes runtime-editable policy areas under `AGENT_HOME/policies/` (including `core/governance/generated/README.md` and subfolders) and all runtime agent files under `AGENT_HOME/policies/core/runtime/agent/` (canonical policy root — not under `workspace/`).
 15. Create any supporting folders, registries, templates, and operational files required by the runbook, but do not clone or duplicate canonical policy documents into workspace-editable locations unless the file is intended for routine runtime editing.
 16. Do not activate agents yourself unless explicitly required by runtime design.
 17. Do not weaken any security or governance rule for convenience.
@@ -203,7 +203,7 @@ Use this exact load order:
 14. secondary supporting policy files in `policies/core/governance/standards/`
 15. secondary supporting role templates in `policies/core/governance/role-prompts/`
 16. `AGENT_HOME/workspace/operations/` registers and `AGENT_HOME/workspace/operations/projects/*/memory/archival/` as applicable
-17. `AGENT_HOME/workspace/policies/core/governance/generated/` index and governed additions
+17. `AGENT_HOME/policies/core/governance/generated/` index and governed additions
 
 Activation rules:
 1. Treat the canonical deployment pack as authoritative.
@@ -356,7 +356,7 @@ Use this order:
 14. `policies/core/governance/standards/*.md` supporting policies
 15. `policies/core/governance/role-prompts/*.md` supporting role templates
 16. `AGENT_HOME/workspace/operations/` registers and project memory trees
-17. `AGENT_HOME/workspace/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime editable policy tree)
+17. `AGENT_HOME/policies/core/governance/generated/` governed additions (indexed in `core/governance/generated/README.md` within the runtime policy tree)
 
 <!-- policy-read-order-nav:bottom -->
 > **Next step:** continue to [core/gateway-watchdog.md](gateway-watchdog.md) after this file is fully read and applied. Do not skip ahead unless a human operator explicitly directs a narrower scope.

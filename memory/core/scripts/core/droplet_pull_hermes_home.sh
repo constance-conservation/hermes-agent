@@ -14,8 +14,8 @@
 #
 # Slim mode (default): skips heavy trees (logs, sessions, caches, WhatsApp bridge data,
 # per-profile skills copies, sqlite session DB, etc.) but still pulls ``config.yaml``,
-# ``.env`` files, ``workspace/memory/**``, ``workspace/policies/**``, and top-level
-# ``policies/**``. Override defaults with:
+# ``.env`` files, ``workspace/memory/**``, per-profile ``policies/**`` (canonical policy
+# root; not ``workspace/policies``), and top-level ``policies/**``. Override defaults with:
 #   HERMES_DROPLET_PULL_SLIM=0   # same as --full
 #   HERMES_DROPLET_PULL_FULL=1   # same as --full
 #
@@ -121,7 +121,7 @@ ARCHIVE="${TMPDIR:-/tmp}/hermes-home-from-droplet.$$".tar.gz
 PW_B64=$(printf '%s' "$SSH_SUDO_PASSWORD" | base64 | tr -d '\n')
 # Live gateway may mutate files during archive; GNU tar otherwise exits 1 and breaks the SSH pipe.
 # Slim excludes use --wildcards so patterns like .hermes/profiles/*/logs match; they intentionally
-# avoid .hermes/profiles/*/workspace so workspace/memory and workspace/policies are included.
+# avoid excluding whole profile workspaces so ``workspace/memory/**`` and per-profile ``policies/**`` stay included.
 REMOTE_CMD="printf '%s' '${PW_B64}' | base64 -d | sudo -S tar czf - --warning=no-file-changed"
 if [[ "$SLIM" == "1" ]]; then
   REMOTE_CMD+=" --wildcards --wildcards-match-slash"
@@ -152,7 +152,7 @@ REMOTE_CMD+=" -C /home/hermesuser .hermes"
 if [[ "$DRY" == "1" ]]; then
   echo "Would backup ${HOME}/.hermes then stream remote tar to ${ARCHIVE} and extract to ${HOME}"
   if [[ "$SLIM" == "1" ]]; then
-    echo "(slim mode: heavy dirs excluded; workspace/memory and workspace/policies retained)"
+    echo "(slim mode: heavy dirs excluded; workspace/memory and per-profile policies/ retained)"
   else
     echo "(full mode: entire .hermes)"
   fi

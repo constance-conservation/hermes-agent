@@ -14,7 +14,7 @@ All scripts are orchestrated by **`start_pipeline.py`** (single entry point). Ru
 |---------|---------|
 | `python policies/core/scripts/start_pipeline.py` | Verify layout + **strict activation cues** on `policies/core/governance/standards/*.md`, regenerate `INDEX.md`, update `.pipeline_state/manifest.json`. |
 | `python policies/core/scripts/start_pipeline.py --dry-run` | Verification only; prints manifest diff; **writes no files** (safe CI gate). |
-| `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` | Full runtime materialization: canonical policy bundle outside workspace + runtime-editable policy/agent files and `operations/` inside workspace. |
+| `python policies/core/scripts/start_pipeline.py --workspace-root "$AGENT_HOME/workspace" --policy-root "$AGENT_HOME/policies"` | Full runtime materialization: canonical policy bundle **and** generated/runtime-agent subtrees under **`AGENT_HOME/policies/`** (not `workspace/policies/`) + `operations/` and workspace entry files under **`AGENT_HOME/workspace/`**. |
 | `python policies/core/scripts/start_pipeline.py --init-operations` | Legacy mode: same as full run, then create missing `operations/*.md` stubs only. |
 | `python policies/core/scripts/start_pipeline.py --no-strict` | Skip activation-cue checks (**not** for production). |
 | `./policies/start_pipeline.sh` | Shell wrapper (same arguments as above). |

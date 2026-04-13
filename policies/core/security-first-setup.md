@@ -29,7 +29,7 @@ After completing this file, the next file in the order of operations is:
 
 Then:
 
-- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the runtime artifact trees (`AGENT_HOME/workspace/operations/` and runtime-editable `.../workspace/policies/core/governance/generated/`).
+- `policies/core/deployment-handoff.md` — drives deployment of the canonical policies, prompts, runbooks, operational records, bootstrap/agent markdown pack, and the runtime artifact trees (`AGENT_HOME/workspace/operations/` and generated policy material under `AGENT_HOME/policies/core/governance/generated/`).
 
 ---
 
@@ -212,8 +212,7 @@ Before deploying any runtime policies or prompts, you should end up with:
   - `workspace/input`
   - `workspace/output`
   - `workspace/logs`
-- one **runtime policy root** under `AGENT_HOME/policies/` (canonical read-mostly policy bundle outside workspace)
-- one **workspace-editable policy area** under `AGENT_HOME/workspace/policies/` for policy files expected to change during operation (for example generated markdown and approved local working copies)
+- one **canonical runtime policy root** under `AGENT_HOME/policies/` (full policy bundle **and** generated / routine edits such as `core/governance/generated/` — **not** under `workspace/`)
 - one **dedicated browser profile** on the runtime host if a browser is used—only for the agent
 - **no** mounting workstation directories into the runtime workspace
 - **no** password manager or personal vault on the runtime host
@@ -351,8 +350,7 @@ Rules:
 - downloads should go into the workspace only
 - no broad filesystem roots
 - no mounted workstation paths
-- canonical policy files consumed by runtime should be staged under `AGENT_HOME/policies/` (outside workspace)
-- only runtime-editable policy material should be under `AGENT_HOME/workspace/policies/`
+- canonical policy files and routine runtime-editable policy material (including generated markdown) live under `AGENT_HOME/policies/` (outside `workspace/`)
 
 Make a note of the exact canonical path to this workspace.
 
@@ -533,7 +531,7 @@ If your workflow uses an **IDE** or similar **agent-assisted coding environment*
 
 ## Step 10 — Prepare the Deployment Entry Files
 
-Before activation, place these entry files where the builder and runtime can access them. In runtime deployments, stage canonical policy files under `AGENT_HOME/policies/` and keep only runtime-editable policy files under `AGENT_HOME/workspace/policies/`:
+Before activation, place these entry files where the builder and runtime can access them. In runtime deployments, stage the policy bundle and runtime-editable subtrees under **`AGENT_HOME/policies/`** (see `start_pipeline.py` with `--policy-root`):
 
 - `policies/core/security-first-setup.md`
 - `policies/core/unified-deployment-and-security.md`
@@ -603,8 +601,7 @@ Before allowing any runtime agent to activate, manually verify:
 - workspace exists with input/output/logs
 - no workstation mounts inside workspace
 - `operations/` exists under `AGENT_HOME/workspace/operations/`
-- canonical runtime policy bundle exists outside workspace under `AGENT_HOME/policies/`
-- only runtime-editable policy files are in `AGENT_HOME/workspace/policies/`
+- canonical runtime policy tree (including generated / editable subtrees) exists under `AGENT_HOME/policies/`
 
 ### Network posture
 
@@ -681,7 +678,7 @@ Rules:
 - Runtime file operations are constrained to workspace paths by policy.
 - Agent state/config directories are separated from task workspace directories.
 - Operational registers and project archival memory live under `AGENT_HOME/workspace/operations/`.
-- Runtime policy consumption defaults to `AGENT_HOME/policies/` (outside workspace), while runtime-editable policy content lives under `AGENT_HOME/workspace/policies/`.
+- Runtime policy consumption and routine editable/generated policy content both use **`AGENT_HOME/policies/`** (outside `workspace/`).
 
 ### 5) Host firewall posture (default-deny inbound and outbound)
 
