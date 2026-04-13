@@ -141,7 +141,10 @@ def main() -> int:
         "C0ARWCARRF1": "project-lead-agentic-company",
     }
     optional_channels = (
-        (("risk-and-incents", "risk-and-insights"), "risk-and-insights-director"),
+        (
+            ("risk-and-incidents", "risk-and-incident", "risk-and-incents", "risk-and-insights"),
+            "risk-and-insights-director",
+        ),
         (("org-registry",), "org-registry-coordinator"),
         (("executive-briefing", "executive-briefings"), "executive-briefing-lead"),
     )

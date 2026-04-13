@@ -14,10 +14,12 @@ Usage:
   HERMES_HOME=~/.hermes/profiles/chief-orchestrator \\
     ./venv/bin/python memory/core/scripts/core/sync_slack_role_cron_jobs.py [--apply]
 
-Each job prompt ends with ``--operator --<role_slug>`` by default (operator-facing Slack must
-never use ``--droplet`` unless you explicitly ask). Hop is ``--operator`` when ``--hermes-hop auto``
-(default). Use ``--hermes-hop droplet``, or set ``messaging.role_routing.slack.hermes_hop: droplet``,
-or env ``HERMES_SLACK_ROLE_HERMES_HOP=droplet``, only when prompts must name the VPS hop.
+Each job prompt ends with ``--<hop> --<profile>`` where *profile* is the active profile directory
+name (e.g. ``chief-orchestrator`` on the Mac, ``chief-orchestrator-droplet`` on the VPS) — **not** a
+department role slug, and never ``chief-orchestrator`` on a non-chief profile. Hop is ``--operator``
+or ``--droplet``: ``auto`` uses ``--droplet`` when ``HERMES_HOME`` is ``…/profiles/*-droplet``, else
+``--operator``. Override with ``messaging.role_routing.slack.hermes_hop`` or
+``HERMES_SLACK_ROLE_HERMES_HOP``.
 
 Without --apply, prints planned jobs only.
 """
@@ -29,8 +31,15 @@ import sys
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+def _repo_root() -> Path:
+    p = Path(__file__).resolve()
+    for anc in [p.parent, *p.parents]:
+        if (anc / "cron" / "jobs.py").is_file():
+            return anc
+    return p.parents[4]
+
+
+sys.path.insert(0, str(_repo_root()))
 
 
 def _effective_slack_role_channels(home: Path, cfg: dict) -> dict:
@@ -63,11 +72,26 @@ def _load_yaml(path: Path):
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _slack_prompt_profile_suffix(home: Path) -> str:
+    """Profile dirname for CLI ``-p`` token in the closing line (not department role slug)."""
+    try:
+        resolved = home.expanduser().resolve()
+        if resolved.parent.name == "profiles":
+            return resolved.name
+    except OSError:
+        pass
+    nm = home.name
+    if nm in (".hermes", "") or str(home).rstrip("/").endswith("/.hermes"):
+        return "chief-orchestrator"
+    return nm or "chief-orchestrator"
+
+
 def _infer_hermes_hop_tag(_home: Path, cfg: dict) -> str:
     """Return ``--droplet`` or ``--operator`` for the Hermes CLI hop (trailing argv token).
 
-    Default is always ``--operator`` so operator Slack channels never see ``--droplet`` from
-    auto-detection. Use config/env/``--hermes-hop droplet`` when a job must reference the VPS hop.
+    ``auto``: ``--droplet`` when ``HERMES_HOME`` resolves to ``…/profiles/<name>`` with
+    ``<name>`` ending in ``-droplet`` (e.g. VPS orchestrator clone); else ``--operator``.
+    Config / env override.
     """
     env = os.environ.get("HERMES_SLACK_ROLE_HERMES_HOP", "").strip().lower()
     if env in ("droplet", "operator"):
@@ -83,6 +107,12 @@ def _infer_hermes_hop_tag(_home: Path, cfg: dict) -> str:
                     h = hop.strip().lower()
                     if h in ("droplet", "operator"):
                         return f"--{h}"
+    try:
+        r = _home.expanduser().resolve()
+        if r.parent.name == "profiles" and r.name.endswith("-droplet"):
+            return "--droplet"
+    except OSError:
+        pass
     return "--operator"
 
 
@@ -111,7 +141,13 @@ def _resolve_hermes_hop_tag(
     return _infer_hermes_hop_tag(home, cfg)
 
 
-def _role_prompt(role_slug: str, channel_id: str, *, hermes_hop_tag: str) -> str:
+def _role_prompt(
+    role_slug: str,
+    channel_id: str,
+    *,
+    hermes_hop_tag: str,
+    profile_cli_suffix: str,
+) -> str:
     return f"""Use Australia/Sydney (Hermes timezone). Run once per day at the scheduled wall time.
 
 You are generating the **Slack-only daily status** for role `{role_slug}` in channel `{channel_id}`.
@@ -130,12 +166,17 @@ You are generating the **Slack-only daily status** for role `{role_slug}` in cha
 - When you fix something, state **what broke**, **what you changed**, and **verification** in the status lines. If still blocked after attempting remediation, say what remains and the minimum human action.
 
 **Closing**
-Append its own final line exactly: `{hermes_hop_tag} --{role_slug}` (Hermes hop from this host, then the role slug from config — not the orchestrator profile name)."""
+Append its own final line exactly: `{hermes_hop_tag} --{profile_cli_suffix}` (Hermes CLI trailing argv: hop token, then the **active profile** directory name such as `chief-orchestrator` or `chief-orchestrator-droplet` — not a department role slug and not a different profile name than the one running this job)."""
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true", help="Write jobs.json")
+    parser.add_argument(
+        "--refresh-prompts",
+        action="store_true",
+        help="With --apply: rewrite prompts on existing slack:* role jobs whose channel is in the merged map.",
+    )
     parser.add_argument("--base-hour", type=int, default=10, help="Local hour for first stagger (default 10)")
     parser.add_argument(
         "--base-minute",
@@ -148,7 +189,7 @@ def main() -> int:
         "--hermes-hop",
         choices=("auto", "droplet", "operator"),
         default="auto",
-        help="Closing-line CLI hop before --<role> (default auto: --operator; use droplet only if needed)",
+        help="Closing-line CLI hop before profile dirname (default auto: *-droplet profiles → --droplet)",
     )
     parser.add_argument(
         "--chief-tag",
@@ -184,14 +225,37 @@ def main() -> int:
     from cron.jobs import compute_next_run, load_jobs, save_jobs
 
     jobs = load_jobs()
-    existing_deliver = {str(j.get("deliver", "")) for j in jobs}
-
     hermes_hop_tag = _resolve_hermes_hop_tag(
         hermes_hop=args.hermes_hop,
         chief_tag=args.chief_tag,
         home=home,
         cfg=cfg,
     )
+    profile_cli_suffix = _slack_prompt_profile_suffix(home)
+
+    if args.refresh_prompts and args.apply:
+        updated = 0
+        for j in jobs:
+            deliver = str(j.get("deliver", ""))
+            if not deliver.startswith("slack:"):
+                continue
+            rest = deliver.split(":", 1)[1]
+            cid = rest.split(":", 1)[0].strip()
+            slug = slack.get(cid)
+            if not slug or str(slug).strip() == "chief_orchestrator":
+                continue
+            slug = str(slug).strip()
+            j["prompt"] = _role_prompt(
+                slug,
+                cid,
+                hermes_hop_tag=hermes_hop_tag,
+                profile_cli_suffix=profile_cli_suffix,
+            )
+            updated += 1
+        if updated:
+            print(f"refreshed prompts on {updated} existing job(s)", file=sys.stderr)
+
+    existing_deliver = {str(j.get("deliver", "")) for j in jobs}
 
     minute = args.base_minute
     planned = []
@@ -208,7 +272,12 @@ def main() -> int:
             continue
         expr = f"{minute} {args.base_hour} * * *"
         minute += args.stagger
-        prompt = _role_prompt(slug, cid, hermes_hop_tag=hermes_hop_tag)
+        prompt = _role_prompt(
+            slug,
+            cid,
+            hermes_hop_tag=hermes_hop_tag,
+            profile_cli_suffix=profile_cli_suffix,
+        )
         job = {
             "id": uuid.uuid4().hex[:12],
             "name": name,
@@ -237,6 +306,9 @@ def main() -> int:
         print(f"plan: {name} {expr} -> {deliver}")
 
     if not args.apply:
+        if args.refresh_prompts:
+            print("--refresh-prompts requires --apply", file=sys.stderr)
+            return 2
         print("\nDry run. Pass --apply to append to cron/jobs.json")
         return 0
 

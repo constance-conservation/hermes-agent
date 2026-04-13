@@ -27,7 +27,7 @@ def test_script_exists() -> None:
     ("profile", "cfg", "want"),
     [
         ("chief-orchestrator", {}, "--operator"),
-        ("chief-orchestrator-droplet", {}, "--operator"),
+        ("chief-orchestrator-droplet", {}, "--droplet"),
         (
             "chief-orchestrator",
             {"messaging": {"role_routing": {"slack": {"hermes_hop": "droplet"}}}},
@@ -110,10 +110,26 @@ def test_effective_slack_overlay_replaces_base_channels(tmp_path: Path) -> None:
     assert ch == {"C2": "from-overlay"}
 
 
-def test_role_prompt_uses_hop_and_slug() -> None:
+def test_role_prompt_uses_hop_and_profile_suffix() -> None:
     mod = _load_sync_mod()
-    text = mod._role_prompt("org-mapper-hr-controller", "C0123", hermes_hop_tag="--droplet")
-    assert text.endswith(
-        "Append its own final line exactly: `--droplet --org-mapper-hr-controller` "
-        "(Hermes hop from this host, then the role slug from config — not the orchestrator profile name)."
+    text = mod._role_prompt(
+        "org-mapper-hr-controller",
+        "C0123",
+        hermes_hop_tag="--droplet",
+        profile_cli_suffix="chief-orchestrator-droplet",
     )
+    assert "Append its own final line exactly: `--droplet --chief-orchestrator-droplet`" in text
+
+
+def test_slack_prompt_profile_suffix_under_profiles(tmp_path: Path) -> None:
+    mod = _load_sync_mod()
+    h = tmp_path / "profiles" / "chief-orchestrator-droplet"
+    h.mkdir(parents=True)
+    assert mod._slack_prompt_profile_suffix(h) == "chief-orchestrator-droplet"
+
+
+def test_slack_prompt_profile_suffix_default_hermes(tmp_path: Path) -> None:
+    mod = _load_sync_mod()
+    h = tmp_path / ".hermes"
+    h.mkdir(parents=True)
+    assert mod._slack_prompt_profile_suffix(h) == "chief-orchestrator"
