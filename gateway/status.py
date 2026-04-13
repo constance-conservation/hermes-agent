@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,17 +107,35 @@ def _get_process_start_time(pid: int) -> Optional[int]:
         return None
 
 
+def _read_process_cmdline_posix_ps(pid: int) -> Optional[str]:
+    """macOS/BSD: ``/proc/<pid>/cmdline`` is absent — use ps for argv (singleton dedupe)."""
+    try:
+        cp = subprocess.run(
+            ["/bin/ps", "-p", str(pid), "-ww", "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    cmd = (cp.stdout or "").strip()
+    return cmd if cmd else None
+
+
 def _read_process_cmdline(pid: int) -> Optional[str]:
     """Return the process command line as a space-separated string."""
     cmdline_path = Path(f"/proc/{pid}/cmdline")
     try:
         raw = cmdline_path.read_bytes()
     except (FileNotFoundError, PermissionError, OSError):
-        return None
+        raw = b""
 
-    if not raw:
-        return None
-    return raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
+    if raw:
+        return raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
+
+    if sys.platform == "darwin":
+        return _read_process_cmdline_posix_ps(pid)
+    return None
 
 
 def _looks_like_gateway_process(pid: int) -> bool:
@@ -331,26 +350,48 @@ def _read_hermes_home_from_pid_environ(pid: int) -> Optional[str]:
     """Return HERMES_HOME from ``/proc/<pid>/environ`` when available (Linux)."""
     path = Path(f"/proc/{pid}/environ")
     if not path.exists():
-        return None
+        return _read_hermes_home_from_macos_ps(pid) if sys.platform == "darwin" else None
     try:
         raw = path.read_bytes()
     except OSError:
-        return None
+        return _read_hermes_home_from_macos_ps(pid) if sys.platform == "darwin" else None
     for part in raw.split(b"\0"):
         if part.startswith(b"HERMES_HOME="):
             return part.split(b"=", 1)[1].decode("utf-8", errors="surrogateescape")
     return None
 
 
-def _gateway_profile_cli_token() -> Optional[str]:
-    """Profile name used with ``-p`` for the current HERMES_HOME, or None for default ``~/.hermes``."""
-    home = get_hermes_home().resolve()
+def _read_hermes_home_from_macos_ps(pid: int) -> Optional[str]:
+    """Best-effort ``HERMES_HOME`` for *pid* on Darwin (no ``/proc``). May fail under SIP."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        cp = subprocess.run(
+            ["ps", "-eww", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"(?:^|\s)HERMES_HOME=(\S+)", cp.stdout or "")
+    if not m:
+        return None
+    return m.group(1).strip().strip("\"'")
+
+
+def _profile_token_for_home(home: Path) -> Optional[str]:
+    """Profile slug if *home* is ``~/.hermes/profiles/<slug>``, else None for default ``~/.hermes``."""
+    try:
+        h = home.resolve()
+    except OSError:
+        return None
     default = (Path.home() / ".hermes").resolve()
-    if home == default:
+    if h == default:
         return None
     profiles_root = (default / "profiles").resolve()
     try:
-        rel = home.relative_to(profiles_root)
+        rel = h.relative_to(profiles_root)
         if len(rel.parts) == 1 and re.match(r"^[a-z0-9][a-z0-9_-]{0,63}$", rel.parts[0]):
             return rel.parts[0]
     except ValueError:
@@ -363,7 +404,10 @@ def _homes_for_gateway_kill_scope(home: Path) -> list[Path]:
 
     A stray ``gateway run`` may set only ``HERMES_HOME=~/.hermes`` while the supervised
     profile uses ``~/.hermes/profiles/<name>``. They compete for the same messaging
-    tokens; kill/dedupe must consider both paths as one fleet.
+    tokens on **this machine**; kill/dedupe must consider both paths as one fleet.
+
+    This does **not** couple separate physical hosts (operator vs droplet): each host has
+    its own processes, PID files, and (with ``HERMES_GATEWAY_LOCK_INSTANCE``) lock dirs.
     """
     try:
         h = home.resolve()
@@ -406,7 +450,7 @@ def _pid_belongs_to_this_hermes_home(pid: int, home: Path) -> bool:
         except OSError:
             return False
     cmd = _read_process_cmdline(pid) or ""
-    tok = _gateway_profile_cli_token()
+    tok = _profile_token_for_home(resolved)
     if tok is None:
         m = re.search(r"(?:^|\s)-p(?:=|\s+)(\S+)", cmd)
         if m:
@@ -430,7 +474,8 @@ def _pick_newest_gateway_pid(pids: list[int]) -> Optional[int]:
             scored.append((st, p))
     if scored:
         return max(scored, key=lambda t: t[0])[1]
-    return pids[-1]
+    # macOS / non-Linux: no /proc start time — higher PID is usually the later spawn.
+    return max(pids)
 
 
 def _looks_like_long_running_gateway_process(pid: int) -> bool:

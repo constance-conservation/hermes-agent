@@ -23,6 +23,8 @@ Type=simple
 Environment=HERMES_PROFILE_BASE=%h/.hermes
 Environment=HERMES_HOME=%h/.hermes/profiles/chief-orchestrator
 Environment=HERMES_AGENT_DIR=%h/hermes-agent
+# One gateway per HERMES_HOME on this host (dedupe before watchdog-check); set 0 to disable.
+Environment=HERMES_GATEWAY_WATCHDOG_ENFORCE_SINGLE=1
 ExecStart=%h/.hermes/bin/gateway-watchdog.sh
 Restart=on-failure
 RestartSec=60

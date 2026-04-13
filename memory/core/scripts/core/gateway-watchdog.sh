@@ -4,8 +4,10 @@
 # This loop invokes Hermes CLI + one lightweight Python call to
 # ``gateway.status.dedupe_gateway_processes_for_current_home`` each interval so
 # duplicate ``gateway run`` PIDs (token fights / flapping) are cleared **before**
-# ``watchdog-check``. Recovery still uses systemctl or ``gateway run --replace`` only —
-# no extra pkill/kill beyond that dedupe + systemd.
+# ``watchdog-check``. Dedupe is scoped to **this machine** and ``HERMES_HOME`` (plus
+# legacy ``~/.hermes`` when the profile is under ``profiles/<name>``); it does not
+# coordinate across operator vs droplet hosts. Recovery still uses systemctl or
+# ``gateway run --replace`` only — no extra pkill/kill beyond that dedupe + systemd.
 #
 # Recovery prefers the platform service manager: ``launchctl kickstart`` for the
 # gateway LaunchAgent on macOS, ``systemctl --user restart`` for

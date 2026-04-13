@@ -41,6 +41,7 @@ def test_generate_watchdog_launchd_plist_contains_bash_and_script(tmp_path, monk
     assert "/bin/bash" in plist
     assert str(prof / "bin" / "gateway-watchdog.sh") in plist
     assert "HERMES_HOME" in plist
+    assert "HERMES_GATEWAY_WATCHDOG_ENFORCE_SINGLE" in plist
     assert label in plist
     assert label == "ai.hermes.gateway-watchdog-chief-orchestrator"
 

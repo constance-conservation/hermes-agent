@@ -1249,6 +1249,8 @@ def generate_watchdog_launchd_plist() -> str:
         <string>{profile_base}</string>
         <key>HERMES_AGENT_DIR</key>
         <string>{working_dir}</string>
+        <key>HERMES_GATEWAY_WATCHDOG_ENFORCE_SINGLE</key>
+        <string>1</string>
 {_optional_gateway_lock_instance_plist_entries()}    </dict>
 
     <key>RunAtLoad</key>

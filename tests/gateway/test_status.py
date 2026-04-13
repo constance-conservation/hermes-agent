@@ -400,3 +400,44 @@ class TestRuntimeWatchdogRequireAllPlatforms:
         )
         assert ok is True
         assert "no messaging platforms" in reason
+
+
+class TestGatewayDedupeScoping:
+    def test_profile_token_for_default_and_profile(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        d = tmp_path / ".hermes"
+        chief = d / "profiles" / "chief"
+        assert status._profile_token_for_home(d) is None
+        assert status._profile_token_for_home(chief) == "chief"
+
+    def test_pid_belongs_default_home_no_profile_flag(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        home_default = tmp_path / ".hermes"
+        home_chief = tmp_path / ".hermes" / "profiles" / "chief"
+        cmd = "/venv/python -m hermes_cli.main gateway run --replace"
+        monkeypatch.setattr(status, "_read_process_cmdline", lambda pid: cmd)
+        monkeypatch.setattr(status, "_read_hermes_home_from_pid_environ", lambda pid: None)
+        assert status._pid_belongs_to_this_hermes_home(1, home_default) is True
+        assert status._pid_belongs_to_this_hermes_home(1, home_chief) is False
+
+    def test_pid_belongs_profile_home_with_minus_p(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        home_default = tmp_path / ".hermes"
+        home_chief = tmp_path / ".hermes" / "profiles" / "chief"
+        cmd = "/venv/python -m hermes_cli.main -p chief gateway run --replace"
+        monkeypatch.setattr(status, "_read_process_cmdline", lambda pid: cmd)
+        monkeypatch.setattr(status, "_read_hermes_home_from_pid_environ", lambda pid: None)
+        assert status._pid_belongs_to_this_hermes_home(1, home_chief) is True
+        assert status._pid_belongs_to_this_hermes_home(1, home_default) is False
+
+    def test_pick_newest_falls_back_to_max_pid(self, monkeypatch):
+        monkeypatch.setattr(status, "_get_process_start_time", lambda pid: None)
+        assert status._pick_newest_gateway_pid([100, 42, 99]) == 100
+
+    def test_read_process_cmdline_posix_ps(self, monkeypatch):
+        class _R:
+            stdout = "/bin/python -m hermes_cli.main gateway run --replace\n"
+
+        monkeypatch.setattr(status.subprocess, "run", lambda *a, **k: _R())
+        out = status._read_process_cmdline_posix_ps(12345)
+        assert "hermes_cli.main gateway" in (out or "")
