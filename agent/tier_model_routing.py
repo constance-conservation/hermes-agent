@@ -20,7 +20,8 @@ TIER_DYNAMIC_SENTINEL = "tier:dynamic"
 # ``memory/runtime/tasks/templates/script-templates/hermes_token_governance.runtime.example.yaml``.
 BUILTIN_TIER_MODELS: Dict[str, str] = {
     # Cheapest-first defaults when governance YAML is missing (override per profile).
-    "A": "openai/gpt-5-nano",
+    # Tier A: synthetic OpenRouter free-tier router (paid escalation via step-up / canon).
+    "A": "openrouter/free",
     "B": "openai/gpt-4.1-mini",
     "C": "openai/gpt-5.4-mini",
     "D": "openai/gpt-5.2",

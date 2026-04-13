@@ -29,6 +29,7 @@ from agent.openai_primary_mode import (
 )
 from agent.routing_trace import emit_routing_decision_trace
 from agent.trivial_prompt import trivial_message_skips_opm_tier_uplift
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,42 @@ def inherit_token_governance_from_parent(child: Any, parent: Any) -> None:
     child._last_opm_meta = _opm_meta
 
 
+def _openrouter_free_instead_of_budget_nano_tier(
+    agent: Any,
+    resolved_model: str,
+    tier_letter: str,
+) -> str:
+    """On OpenRouter runtimes, use ``openrouter/free`` for A/B/C when tier_models map to paid GPT nano.
+
+    Token governance tier tables often still list ``openai/gpt-*-nano`` for cheap tiers; that overrides
+    ``model.default: openrouter/free`` and shows up as paid Nano on OpenRouter usage dashboards.
+    Opt out: ``HERMES_OR_TIER_KEEP_BUDGET_NANO=1``.
+    """
+    t = (tier_letter or "").strip().upper()
+    if t not in ("A", "B", "C"):
+        return resolved_model
+    if os.environ.get("HERMES_OR_TIER_KEEP_BUDGET_NANO", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return resolved_model
+    try:
+        if not bool(getattr(agent, "_is_openrouter_url", lambda: False)()):
+            return resolved_model
+    except Exception:
+        return resolved_model
+    try:
+        from agent.subprocess_governance import _is_budget_gpt_nano_family
+
+        if not _is_budget_gpt_nano_family(resolved_model):
+            return resolved_model
+    except Exception:
+        return resolved_model
+    return OPENROUTER_FREE_SYNTHETIC
+
+
 def _opm_clamp_tier_resolved_model(
     agent: Any,
     mid: str,
@@ -338,6 +375,20 @@ def _opm_clamp_tier_resolved_model(
     if not mid or opm_manual_override_active(agent) or not opm_enabled(agent):
         return mid
     mlow = str(mid).lower()
+    if (mid or "").strip() == OPENROUTER_FREE_SYNTHETIC:
+        try:
+            if not bool(getattr(agent, "_is_openrouter_url", lambda: False)()):
+                opm_cfg, _ = resolve_openai_primary_mode(agent)
+                repl = str(opm_cfg.get("default_model") or "").strip()
+                if repl and not model_id_contains_disallowed_family(repl):
+                    logger.info(
+                        "openai_primary_mode: clamping tier-mapped model %r → %r (OPM, non-OpenRouter)",
+                        mid,
+                        repl,
+                    )
+                    return repl
+        except Exception:
+            logger.debug("openai_primary_mode: openrouter/free OPM clamp failed", exc_info=True)
     try:
         from agent.subprocess_governance import classify_model_cost
 
@@ -614,6 +665,7 @@ def apply_per_turn_tier_model(agent: Any, user_message: str) -> None:
     if not mid:
         return
     mid = _opm_clamp_tier_resolved_model(agent, str(mid), user_message, _opm_meta)
+    mid = _openrouter_free_instead_of_budget_nano_tier(agent, str(mid or ""), tier)
     if not mid:
         return
     changed = mid != agent.model

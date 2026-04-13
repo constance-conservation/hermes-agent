@@ -157,7 +157,7 @@ def test_resolve_tier_strings_without_runtime_file_uses_builtin_tiers(gov_env, m
     monkeypatch.delenv("HERMES_TOKEN_GOVERNANCE_DISABLE", raising=False)
     assert load_runtime_config() is None
     out = resolve_tier_strings_in_config({"model": {"default": "tier:D", "provider": "openrouter"}})
-    assert out["model"]["default"] == "anthropic/claude-sonnet-4-6"
+    assert out["model"]["default"] == "openai/gpt-5.2"
 
 
 def test_apply_runtime_resolves_tier_when_governance_disabled(gov_env, monkeypatch):
@@ -178,7 +178,7 @@ def test_apply_runtime_resolves_tier_when_governance_disabled(gov_env, monkeypat
 
     a = _A()
     apply_token_governance_runtime(a)
-    assert a.model == "anthropic/claude-sonnet-4-6"
+    assert a.model == "openai/gpt-5.2"
     assert getattr(a, "_token_governance_cfg", None) is None
 
 
@@ -332,6 +332,37 @@ def test_per_turn_applies_when_fallback_active_openrouter(gov_env):
 
     a = _A()
     a._token_governance_cfg = load_runtime_config()
+    apply_per_turn_tier_model(a, "summarize the following paragraph in three bullets")
+    assert a.model == "openrouter/free"
+
+
+def test_per_turn_openrouter_keeps_nano_when_env_opt_out(gov_env, monkeypatch):
+    monkeypatch.setenv("HERMES_OR_TIER_KEEP_BUDGET_NANO", "1")
+    p = gov_env / RUNTIME_FILENAME
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "enabled": True,
+                "dynamic_tier_routing": True,
+                "tier_models": {"B": "openai/gpt-5.4-nano", "D": "openai/gpt-5.4"},
+                "default_routing_tier": "D",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _A:
+        def __init__(self):
+            self.model = "openai/gpt-5.4"
+            self.api_mode = "chat_completions"
+            self._base_url_lower = "https://openrouter.ai/api/v1"
+
+        def _is_openrouter_url(self):
+            return True
+
+    a = _A()
+    a._token_governance_cfg = load_runtime_config()
+    a._model_is_tier_routed = True
     apply_per_turn_tier_model(a, "summarize the following paragraph in three bullets")
     assert a.model == "openai/gpt-5.4-nano"
 
@@ -598,7 +629,7 @@ def test_opm_clamp_trivial_message_prefers_cheapest_native_ladder_rung():
         out = tgr._opm_clamp_tier_resolved_model(
             agent, "google/gemini-2.5-flash", "ping", {"enabled": True}
         )
-    assert out == "gpt-5.4-nano"
+        assert out == "gpt-5-nano"
 
 
 def test_trivial_ping_skips_opm_uplift_and_clamps_gemini_to_cheapest(gov_env, monkeypatch):
@@ -651,7 +682,7 @@ def test_trivial_ping_skips_opm_uplift_and_clamps_gemini_to_cheapest(gov_env, mo
     a._token_governance_cfg = load_runtime_config()
     a._model_is_tier_routed = True
     apply_per_turn_tier_model(a, "ping")
-    assert a.model == "gpt-5.4-nano"
+    assert a.model == "gpt-5-nano"
 
 
 def test_enforce_opm_runtime_after_per_turn_routing_fixes_skipped_tier_path():
