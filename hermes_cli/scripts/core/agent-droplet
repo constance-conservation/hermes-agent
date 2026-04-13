@@ -3,7 +3,8 @@
 # Invoked by hermes_cli.main when argv ends with "droplet", or via: hermes droplet [args...]
 #
 # Reads workstation ~/.hermes/active_profile for remote -p (default: chief-orchestrator).
-# Override with AGENT_DROPLET_PROFILE. "droplet" is never a valid profile name.
+# Override with AGENT_DROPLET_PROFILE (use chief-orchestrator-droplet when the VPS uses an
+# isolated profile — see scripts/core/isolate_droplet_orchestrator.py). "droplet" is never a valid profile name.
 #
 set -euo pipefail
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

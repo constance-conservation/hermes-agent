@@ -73,6 +73,13 @@ def main() -> int:
         return 2
     home = Path(hh).expanduser()
     cfg = _load_yaml(home / "config.yaml")
+    _msg = cfg.get("messaging") or {}
+    if isinstance(_msg, dict) and _msg.get("slack_role_cron_leader") is False:
+        print(
+            "messaging.slack_role_cron_leader is false — this host does not run Slack role cron sync; skip.",
+            file=sys.stderr,
+        )
+        return 0
     rr = (cfg.get("messaging") or {}).get("role_routing") or {}
     slack = (rr.get("slack") or {}).get("channels") or {}
     if not isinstance(slack, dict) or not slack:
