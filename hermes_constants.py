@@ -223,6 +223,8 @@ def parse_reasoning_effort(effort: str) -> dict | None:
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODELS_URL = f"{OPENROUTER_BASE_URL}/models"
 OPENROUTER_CHAT_URL = f"{OPENROUTER_BASE_URL}/chat/completions"
+# Synthetic OpenRouter chat slug (Hermes-only; not in vendor /models). Kept here so hermes_cli never imports agent.*.
+OPENROUTER_FREE_SYNTHETIC = "openrouter/free"
 
 AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1"
 AI_GATEWAY_MODELS_URL = f"{AI_GATEWAY_BASE_URL}/models"

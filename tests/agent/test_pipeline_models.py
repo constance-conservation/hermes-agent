@@ -1,7 +1,5 @@
 """Tests for agent.pipeline_models.collect_pipeline_models."""
 
-from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
-
 from agent.pipeline_models import (
     MENU_ACTION_CHOOSE_ROUTER,
     MENU_ACTION_OPENROUTER_BROWSE,
@@ -12,6 +10,7 @@ from agent.pipeline_models import (
     collect_router_picker_model_rows,
     list_openrouter_picker_model_ids,
 )
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 
 def test_collect_pipeline_models_order_and_dedupe():

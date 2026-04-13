@@ -14,7 +14,7 @@ import urllib.error
 from difflib import get_close_matches
 from typing import Any, Optional
 
-from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_MODELS_URL = f"{COPILOT_BASE_URL}/models"

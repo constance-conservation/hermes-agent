@@ -1,5 +1,7 @@
 """Tests for the hermes_cli models module."""
 
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
+
 from hermes_cli.models import (
     OPENROUTER_MODELS,
     detect_provider_for_model,
@@ -7,7 +9,6 @@ from hermes_cli.models import (
     menu_labels,
     model_ids,
 )
-from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
 
 
 class TestModelIds:

@@ -10,8 +10,8 @@ from agent.free_model_routing import (
     raw_free_model_routing_tiers,
 )
 from agent.local_inference import filter_hub_model_ids_by_local_state
-from agent.openrouter_free_router import OPENROUTER_FREE_SYNTHETIC
 from agent.routing_model_blocklist import filter_blocklisted_models, is_routing_blocklisted
+from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 MENU_ACTION_OPENROUTER_BROWSE = "openrouter_browse"
 MENU_ACTION_CHOOSE_ROUTER = "choose_router"
