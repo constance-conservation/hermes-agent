@@ -745,7 +745,7 @@ DEFAULT_CONFIG = {
         "strict_delivery_envelope": True,
     },
 
-    # Optional paths to cloned third-party repos for /paperclip and /autoresearch helpers.
+    # Optional paths to cloned third-party repos for /paperclip and /autoresearch runtimes.
     # Override per-machine with HERMES_PAPERCLIP_REPO / HERMES_AUTORESEARCH_REPO.
     "integrations": {
         "paperclip": {"repo": ""},
@@ -793,7 +793,7 @@ REQUIRED_ENV_VARS = {}
 # Optional environment variables that enhance functionality
 OPTIONAL_ENV_VARS = {
     "HERMES_PAPERCLIP_REPO": {
-        "description": "Absolute path to a cloned cc-org-au/paperclip repo (shown in /paperclip hints).",
+        "description": "Absolute path to a cloned cc-org-au/paperclip repo (used by the /paperclip runtime).",
         "prompt": "Path to paperclip clone (optional)",
         "url": None,
         "password": False,
@@ -921,7 +921,7 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "MACMINI_SSH_TRY_LAN_FIRST": {
-        "description": "If 1/true, ssh_operator / ssh-operator-breakglass try MACMINI_SSH_LAN_IP before MACMINI_SSH_HOST when both are set. When **unset** in ~/.env/.env but LAN_IP differs from HOST, ssh_operator defaults to **LAN first** (same as breakglass). Set **0** for Tailscale-first when you are usually remote.",
+        "description": "If 1/true, ssh_operator / ssh-operator-breakglass try MACMINI_SSH_LAN_IP before MACMINI_SSH_HOST when both are set. When unset, order is Tailscale (HOST) first, then LAN — set **1** for LAN-first on the same subnet (e.g. TS down, Wi‑Fi works).",
         "prompt": "Try LAN before Tailscale for operator SSH (optional, 0/1)",
         "url": None,
         "password": False,
@@ -937,7 +937,7 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "HERMES_OPERATOR_SSH_VERBOSE_TRY": {
-        "description": "If 1, ssh_operator / breakglass print every host attempt; default is only fallback lines.",
+        "description": "Legacy: ssh_operator / breakglass always print the first target and fallbacks; this flag is ignored.",
         "prompt": "Operator SSH verbose try messages (optional, 0/1)",
         "url": None,
         "password": False,

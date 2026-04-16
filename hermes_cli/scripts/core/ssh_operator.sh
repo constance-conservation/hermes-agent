@@ -4,9 +4,10 @@
 # Credentials: HERMES_OPERATOR_ENV or ~/.env/.env (same file as droplet is fine):
 #   MACMINI_SSH_USER (default operator), MACMINI_SSH_HOST, MACMINI_SSH_PORT (default 52822),
 #   optional MACMINI_SSH_KEY in the env file (else SSH_KEY_FILE or ~/.env/.ssh_key)
-#   optional MACMINI_SSH_LAN_IP — when set (and differs from MACMINI_SSH_HOST), try LAN first by default
-#     with HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 8s), then Tailscale with
-#     HERMES_OPERATOR_SSH_CONNECT_TIMEOUT (default 30s). Set MACMINI_SSH_TRY_LAN_FIRST=0 for TS-first.
+#   optional MACMINI_SSH_LAN_IP — second hop when set (and differs from MACMINI_SSH_HOST). Default order is
+#     Tailscale (**MACMINI_SSH_HOST**) first, then LAN, unless MACMINI_SSH_TRY_LAN_FIRST=1 (home LAN-only path).
+#     Non-final hop: HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 8s); final:
+#     HERMES_OPERATOR_SSH_CONNECT_TIMEOUT (default 30s).
 #     If LAN shows "Permission denied (publickey)" but Tailscale works, the mini's ~/.ssh/authorized_keys
 #     may use from="…" that allows only Tailscale (100.x); widen CIDR or add a second pubkey line for LAN.
 #   optional HERMES_OPERATOR_REPO — absolute path on the mini (e.g. /Users/operator/hermes-agent)
@@ -39,7 +40,6 @@ _ALLOW_ENV_PASS_FROM_FILE=0
 _RAW_SSH_PASSPHRASE=""
 _MACMINI_LAN_IP_READ=""
 _TRY_LAN_FIRST_READ=""
-_TRY_LAN_FIRST_IN_FILE=0
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ssh_operator.sh: missing env file ${ENV_FILE} (set HERMES_OPERATOR_ENV)" >&2
@@ -69,7 +69,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     MACMINI_SSH_LAN_IP) _MACMINI_LAN_IP_READ="${val}" ;;
     MACMINI_SSH_TRY_LAN_FIRST)
       _TRY_LAN_FIRST_READ="${val}"
-      _TRY_LAN_FIRST_IN_FILE=1
       ;;
     HERMES_OPERATOR_REPO) HERMES_OPERATOR_REPO_REMOTE="${val}" ;;
     HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE)
@@ -95,9 +94,6 @@ fi
 
 # Shell env wins over file (same pattern as ssh-operator-breakglass.sh).
 MACMINI_SSH_LAN_IP="${MACMINI_SSH_LAN_IP:-${_MACMINI_LAN_IP_READ:-}}"
-if [[ -n "${MACMINI_SSH_LAN_IP}" && "${MACMINI_SSH_LAN_IP}" != "${MACMINI_HOST}" && "${_TRY_LAN_FIRST_IN_FILE}" -eq 0 && -z "${MACMINI_SSH_TRY_LAN_FIRST+x}" ]]; then
-  MACMINI_SSH_TRY_LAN_FIRST=1
-fi
 
 if [[ "${HERMES_OPERATOR_WORKSTATION_CLI:-0}" == "1" ]]; then
   _ALLOW_ENV_PASS_FROM_FILE=0
@@ -304,10 +300,10 @@ for ((_i = 0; _i < _n; _i++)); do
   else
     _cto="$CTO_FINAL"
   fi
-  if [[ "$_i" -gt 0 ]]; then
+  if [[ "$_i" -eq 0 ]]; then
+    echo "[ssh_operator] connecting ${MACMINI_USER}@${h} port ${MACMINI_PORT} (ConnectTimeout=${_cto}s) ..." >&2
+  else
     echo "[ssh_operator] fallback: probing ${MACMINI_USER}@${h} port ${MACMINI_PORT} (ConnectTimeout=${_cto}s) ..." >&2
-  elif [[ "${HERMES_OPERATOR_SSH_VERBOSE_TRY:-0}" == "1" ]]; then
-    echo "[ssh_operator] probing ${MACMINI_USER}@${h} port ${MACMINI_PORT} (ConnectTimeout=${_cto}s) ..." >&2
   fi
   if _op_probe_tcp "$h" "$_cto"; then
     _chosen="$h"

@@ -5,12 +5,10 @@
 # plus optional MACMINI_SSH_LAN_IP for same-LAN fallback when Tailscale is wedged after a
 # Wi‑Fi change (Screen Sharing still works via 192.168.x.x but TS SSH times out).
 #
-# Try order (deduped): when **MACMINI_SSH_LAN_IP** is set and **MACMINI_SSH_TRY_LAN_FIRST** is unset (env + file),
-# **LAN first** (same default as **ssh_operator.sh**). Otherwise Tailscale (**MACMINI_SSH_HOST**) then LAN unless
-# **MACMINI_SSH_TRY_LAN_FIRST=1** is set explicitly. Set **MACMINI_SSH_TRY_LAN_FIRST=0** in **~/.env/.env** for Tailscale-first.
+# Try order (deduped): **MACMINI_SSH_HOST** (Tailscale) first, then **MACMINI_SSH_LAN_IP** when set, unless
+# **MACMINI_SSH_TRY_LAN_FIRST=1** (LAN-first for same-subnet home use). Matches **ssh_operator.sh**.
 # With two targets: first hop uses **HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT** (default **8**);
-# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **20** here). **HERMES_OPERATOR_SSH_VERBOSE_TRY=1**
-# prints every attempt (default: only fallback).
+# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **20** here).
 # On the mini, run once (sudo): memory/core/scripts/core/operator_mini_add_lan_listenaddress_sshd.sh
 # so sshd actually listens on that LAN IP (Hermes default is loopback + TS only).
 #
@@ -31,7 +29,6 @@ _ef_port=""
 _ef_user=""
 _ef_lan=""
 _ef_try_lan_first=""
-_try_lan_key_seen_in_file=0
 if [[ -f "$ENV_FILE" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -55,7 +52,6 @@ if [[ -f "$ENV_FILE" ]]; then
       MACMINI_SSH_LAN_IP) _ef_lan="${val}" ;;
       MACMINI_SSH_TRY_LAN_FIRST)
         _ef_try_lan_first="${val}"
-        _try_lan_key_seen_in_file=1
         ;;
     esac
   done <"$ENV_FILE"
@@ -65,10 +61,6 @@ HOST="${OPERATOR_TAILSCALE_HOST:-${MACMINI_SSH_HOST:-${_ef_host:-100.67.17.9}}}"
 PORT="${OPERATOR_SSH_PORT:-${MACMINI_SSH_PORT:-${_ef_port:-52822}}}"
 USER_NAME="${OPERATOR_SSH_USER:-${MACMINI_SSH_USER:-${_ef_user:-operator}}}"
 LAN_IP="${MACMINI_SSH_LAN_IP:-${_ef_lan:-}}"
-
-if [[ -n "${LAN_IP}" && "${LAN_IP}" != "${HOST}" && "${_try_lan_key_seen_in_file}" -eq 0 && -z "${MACMINI_SSH_TRY_LAN_FIRST+x}" ]]; then
-  MACMINI_SSH_TRY_LAN_FIRST=1
-fi
 
 _resolve_breakglass_key() {
   local f
@@ -182,10 +174,10 @@ for ((_i = 0; _i < _n; _i++)); do
   else
     _breakglass_ssh_opts "$CTO_FINAL"
   fi
-  if [[ "$_i" -gt 0 ]]; then
+  if [[ "$_i" -eq 0 ]]; then
+    echo "[ssh-operator-breakglass] connecting ${USER_NAME}@${h} port ${PORT} ..." >&2
+  else
     echo "[ssh-operator-breakglass] fallback: trying ${USER_NAME}@${h} port ${PORT} ..." >&2
-  elif [[ "${HERMES_OPERATOR_SSH_VERBOSE_TRY:-0}" == "1" ]]; then
-    echo "[ssh-operator-breakglass] trying ${USER_NAME}@${h} port ${PORT} ..." >&2
   fi
   if ssh "${_SSH_BASE[@]}" "${USER_NAME}@${h}" "$@"; then
     exit 0
