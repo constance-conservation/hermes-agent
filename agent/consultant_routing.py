@@ -30,6 +30,7 @@ from utils import is_truthy_value
 logger = logging.getLogger(__name__)
 
 ENV_DISABLE = "HERMES_CONSULTANT_ROUTING_DISABLE"
+_CONSULTANT_TIERS = {"E", "F", "G"}
 
 # Substrings typical of multi-step activation / org-governance session prompts (case-insensitive).
 _DEFAULT_GOV_ACTIVATION_KW = (
@@ -130,11 +131,11 @@ def _normalize_tier_letter(ch: str, tier_models: Dict[str, str]) -> Optional[str
 
 
 def _tier_order() -> List[str]:
-    return ["A", "B", "C", "D", "E", "F"]
+    return ["A", "B", "C", "D", "E", "F", "G"]
 
 
 def _max_tier(a: str, b: str) -> str:
-    """Higher cost / later letter in A–F."""
+    """Higher cost / later letter in A–G."""
     order = _tier_order()
     ia = order.index(a) if a in order else 0
     ib = order.index(b) if b in order else 0
@@ -142,7 +143,7 @@ def _max_tier(a: str, b: str) -> str:
 
 
 def _min_tier_cost(a: str, b: str) -> str:
-    """Lower cost / earlier letter in A–F."""
+    """Lower cost / earlier letter in A–G."""
     order = _tier_order()
     ia = order.index(a) if a in order else 0
     ib = order.index(b) if b in order else 0
@@ -379,17 +380,13 @@ def resolve_consultant_tier(
         "pushback_signal": pushback_signal,
         "retry_count": retry_count,
     }
-
-    # Hard-escalate on push-back or repeated failure: skip LLM routing, go straight to E.
-    if (pushback_signal or retry_count >= 3) and deterministic_tier not in ("E", "F"):
-        forced = "E"
-        audit["forced_escalation"] = (
-            "pushback" if pushback_signal else f"retry_count={retry_count}"
-        )
-        logger.info(
-            "consultant_routing: hard-escalating to %s (%s)", forced, audit["forced_escalation"]
-        )
-        deterministic_tier = forced
+    escalation_signals = []
+    if pushback_signal:
+        escalation_signals.append("pushback")
+    if retry_count >= 3:
+        escalation_signals.append(f"retry_count={retry_count}")
+    if escalation_signals:
+        audit["consultant_signal"] = escalation_signals
 
     if mode == "deterministic":
         return deterministic_tier, audit
@@ -437,16 +434,19 @@ def resolve_consultant_tier(
         if pushback:
             pushback_hint = (
                 "\n\n[ESCALATION SIGNAL] The user has explicitly pushed back on the previous "
-                "response — they indicated it did not meet their requirements. This is a strong "
-                "signal to escalate to E or F. Set request_consultant_escalation=true and "
-                "recommend at least tier E unless the task is trivially simple."
+                "response — they indicated it did not meet their requirements. Re-evaluate "
+                "whether the current tier is insufficient, but keep the recommendation as low "
+                "as you can. Prefer D before E/F unless frontier reasoning or deep coding is "
+                "clearly required. Set request_consultant_escalation=true only when recommending "
+                "E, F, or G."
             )
         retry_hint = ""
         if retry_count >= 2:
             retry_hint = (
                 f"\n\n[RETRY LOOP SIGNAL] This task has failed or been rejected {retry_count} times. "
-                "The current tier is clearly insufficient. Escalate: recommend E or F and set "
-                "request_consultant_escalation=true."
+                "The current tier may be insufficient. Escalate gradually: prefer D before E/F "
+                "unless cheaper tiers are unlikely to succeed. Set request_consultant_escalation=true "
+                "only when recommending E, F, or G."
             )
         sys_router = (
             "You are an intelligent routing advisor for a multi-tier AI organization. "
@@ -454,7 +454,7 @@ def resolve_consultant_tier(
             "- Tier A: one-liners, trivial ack/lookup, pure formatting (low-cost Gemini via direct Google API)\n"
             "- Tier B: short/simple tasks, renames, single-file edits (low-cost Gemini via direct Google API)\n"
             "- Tier C: multi-step reasoning, moderate analysis, batch ops (low-cost Gemini Pro via direct Google API)\n"
-            "- Tier D: complex tasks, most consultations, writing, planning, debugging (claude-sonnet-4.6)\n"
+            "- Tier D: strong generalist work, planning, debugging, multi-file coordination when C is insufficient\n"
             "- Tier E: hardest non-coding reasoning, ambiguous multi-domain problems (gpt-5.4)\n"
             "- Tier F: deep engineering, architecture, refactors, complex code generation (gpt-5.3-codex)\n"
             "- Tier G: RARE — Claude Opus 4.6 consultant; only when the router believes Opus can route "
@@ -467,11 +467,11 @@ def resolve_consultant_tier(
             "Optimize for the lowest cost that delivers the performance the task requires. "
             "Only escalate to D for genuinely complex tasks. Only escalate to E/F for the hardest tasks "
             "or after repeated failures. Tier G is reserved for extraordinary cases.\n"
-            "CONSULTANT ESCALATION: When the task genuinely warrants D/E/F/G, set request_consultant_escalation=true "
-            "and the deliberation system (challenger + chief review) will run an agentic discussion before approving. "
-            "Do NOT suppress escalation — the deliberation system is the gatekeeping mechanism.\n"
-            "IMPORTANT: Set request_consultant_escalation=true whenever you recommend E, F, or G. "
-            "For coding/engineering tasks that warrant consultant escalation, prefer F over E."
+            "CONSULTANT ESCALATION: Tiers E/F/G are consultant-class proposals. Tier D is the normal "
+            "strong-generalist path and does NOT use request_consultant_escalation.\n"
+            "Set request_consultant_escalation=true ONLY when you recommend E, F, or G and can justify "
+            "why C/D are unlikely to suffice. If the task is ambiguous between D and E, choose D.\n"
+            "For coding/engineering tasks that truly warrant consultant escalation, prefer F over E."
         )
         _rcat = format_routing_catalog_digest()
         if _rcat:
@@ -484,8 +484,9 @@ def resolve_consultant_tier(
             hint = (
                 "\n\n[CLASSIFIER] This message matches org activation/governance session heuristics "
                 "(long structured brief with handoff, registry, or remediation-style tasks). "
-                "These sessions almost always benefit from E or F. Recommend E or F and set "
-                "request_consultant_escalation=true unless the task is genuinely trivial."
+                "These sessions can justify tier D and may occasionally justify consultant review, "
+                "but do not jump straight to E/F unless frontier reasoning or deep engineering is "
+                "clearly necessary."
             )
         user_router = (
             f"Deterministic baseline tier (from heuristics): {deterministic_tier}\n\n"
@@ -495,9 +496,8 @@ def resolve_consultant_tier(
             '{"recommended_tier":"B"|"C"|"D"|"E"|"F"|"G", '
             '"request_consultant_escalation": true or false, '
             '"rationale": "one short sentence"}\n'
-            "Rules: set request_consultant_escalation=true whenever recommended_tier is E, F, or G. "
-            "Actively recommend E/F for complex multi-step, architectural, security-sensitive, "
-            "or previously-failed tasks."
+            "Rules: request_consultant_escalation may be true ONLY when recommended_tier is E, F, or G. "
+            "Prefer D over E when the case is ambiguous. Recommend E/F only when C/D are unlikely to succeed."
         )
         # --- Unified routing engine (GPT-5.4 primary, Gemini Flash fallback) ---
         # Attempt routing_engine.route_prompt first for unified tier + free_model_brief.
@@ -520,7 +520,7 @@ def resolve_consultant_tier(
             )
             if _route.audit.get("parsed"):
                 rec = _normalize_tier_letter(_route.tier, tier_models)
-                esc = _route.tier in ("E", "F", "G")
+                esc = _route.tier in _CONSULTANT_TIERS
                 free_model_brief = _route.free_model_brief
                 coding_task_hint = _route.coding_task
                 audit["router"] = {
@@ -545,7 +545,7 @@ def resolve_consultant_tier(
                 )
                 parsed = _extract_json_object(raw_r) or {}
                 rec = _normalize_tier_letter(str(parsed.get("recommended_tier") or ""), tier_models)
-                esc = bool(parsed.get("request_consultant_escalation"))
+                esc = bool(parsed.get("request_consultant_escalation")) and rec in _CONSULTANT_TIERS
                 audit["router"] = {
                     "raw_excerpt": raw_r[:2000],
                     "recommended_tier": rec,
@@ -728,6 +728,7 @@ def resolve_consultant_tier(
         audit["deliberation"] = {
             "turn_id": turn_id,
             "session_id": session,
+            "requested_tier": merged,
             "challenger": ch_p,
             "chief_raw_excerpt": raw_cf[:2000],
             "chief": cf_p,
@@ -762,14 +763,18 @@ def format_status_line(audit: Dict[str, Any], final_tier: str, final_model: str)
     if not audit.get("deliberation"):
         if audit.get("router") and audit.get("final_without_deliberation"):
             return (
-                f"Consultant routing: router → Tier {audit['final_without_deliberation']} → {final_model}"
+                f"Consultant routing: kept Tier {audit['final_without_deliberation']} → {final_model}"
             )
         return ""
     d = audit.get("deliberation") or {}
     summ = ""
     if isinstance(d.get("chief"), dict):
         summ = str(d["chief"].get("decision_summary") or "")[:160]
-    base = f"Chief deliberation: Tier {final_tier} → {final_model}"
+    approved = bool(d.get("approved_consultant_tier"))
+    if approved:
+        base = f"Consultant proposal approved: Tier {final_tier} → {final_model}"
+    else:
+        base = f"Consultant proposal denied/capped: Tier {final_tier} → {final_model}"
     if summ:
         return f"{base} ({summ})"
     return base

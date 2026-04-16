@@ -1,7 +1,7 @@
 # Default routing / delegation canon (repo). Overlay: ${HERMES_HOME}/routing_canon.yaml
 # Merged with deep-merge; overlay keys override defaults.
 
-version: 8
+version: 9
 
 # Philosophy order (documentation; enforcement is in routing code paths):
 # 1) cost + compatibility  2) speed + efficiency  3) memory + usefulness
@@ -19,7 +19,8 @@ version: 8
 #   on quota (expensive→cheaper is the *downgrade* ladder; escalation across providers
 #   follows ``opm_cross_provider_quota_failover``).
 # - Consultant tiers (E/F/G): ``consultant_routing`` + ``operator_gate`` — deliberate
-#   escalation; hard jump to E only on pushback / repeated failure (see consultant_routing).
+#   escalation proposals. Pushback / repeated failure now bias the consultant router
+#   instead of directly jumping into a consultant tier.
 #
 # -----------------------------------------------------------------------------
 # Route DOWN (cheaper / simpler — lowest feasible first, then climb if inadequate)
@@ -31,8 +32,9 @@ version: 8
 # - Heuristics: ``tier_model_routing.select_tier_for_message`` narrows to B/C for short/simple
 #   prompts; OPM may uplift low tiers to E/F for coding/reasoning (token_governance_runtime).
 # - ``smart_model_routing`` optional cheap route for very short non-complex messages (config).
-# - If a down-tier answer is insufficient: user pushback / retries → ``resolve_consultant_tier``;
-#   on OpenRouter, ``[HERMES_ESCALATE]`` requests exactly one step up the hub ladder.
+# - If a down-tier answer is insufficient: user pushback / retries bias
+#   ``resolve_consultant_tier`` toward a fresh proposal; on OpenRouter,
+#   ``[HERMES_ESCALATE]`` requests exactly one step up the hub ladder.
 #
 # Quota / rate-limit failover order (OPM on, single run_conversation turn):
 #   1) Native api.openai.com model ladder (opm_native_quota_downgrade)
@@ -76,7 +78,9 @@ openai_primary_mode:
 
 consultant_escalation:
   # Merged into token-governance consultant_routing (overlay wins on leaf keys).
-  tiers_requiring_deliberation: ["D", "E", "F", "G"]
+  # Deliberation begins only once a consultant-class tier is proposed. Tier D stays
+  # on the normal strong-generalist path.
+  tiers_requiring_deliberation: ["E", "F", "G"]
   # Token caps for internal router/challenger/chief (advisory; code may clamp).
   router_max_tokens: 400
   challenger_max_tokens: 350
@@ -84,7 +88,7 @@ consultant_escalation:
 
 openrouter_auto:
   # When primary model is openrouter/auto, require deliberation for these tiers.
-  deliberation_tiers: ["D", "E", "F", "G"]
+  deliberation_tiers: ["E", "F", "G"]
   # Also force deliberation for tier G when model id contains "openrouter"
   openrouter_tier_g_always_deliberate: true
 

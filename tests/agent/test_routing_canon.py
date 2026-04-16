@@ -41,8 +41,8 @@ def test_home_overlay_overrides(hermes_home):
 def test_merge_into_consultant_routing(hermes_home):
     cr = {"enabled": True, "mode": "hybrid"}
     out = merge_canon_into_consultant_routing(cr)
-    assert "tiers_requiring_deliberation" in out
-    assert isinstance(out.get("openrouter_auto_deliberation_tiers"), list)
+    assert out.get("tiers_requiring_deliberation") == ["E", "F", "G"]
+    assert out.get("openrouter_auto_deliberation_tiers") == ["E", "F", "G"]
 
 
 def test_build_turn_routing_intent(hermes_home):

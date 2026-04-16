@@ -97,7 +97,7 @@ def openrouter_auto_deliberation_tiers(cr: Dict[str, Any]) -> set:
     raw = cr.get("openrouter_auto_deliberation_tiers")
     if isinstance(raw, list) and raw:
         return {str(x).strip().upper() for x in raw if x}
-    return {"D", "E", "F", "G"}
+    return {"E", "F", "G"}
 
 
 @dataclass(frozen=True)

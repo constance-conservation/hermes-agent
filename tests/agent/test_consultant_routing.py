@@ -48,6 +48,18 @@ def _gov_base():
     }
 
 
+def _route_fallback():
+    class _Route:
+        tier = "C"
+        profile = None
+        free_model_brief = None
+        coding_task = False
+        background_task = False
+        audit = {"parsed": False}
+
+    return _Route()
+
+
 def test_governance_activation_signal_session_style_prompt():
     cr = {}
     blob = """
@@ -122,6 +134,68 @@ def test_skip_router_when_deterministic_b(gov_env):
     )
     assert tier == "B"
     assert audit.get("skipped_router") == "deterministic_tier_in_skip_list"
+
+
+def test_pushback_signal_no_longer_hard_jumps_to_consultant(gov_env):
+    g = _gov_base()
+
+    def fake_call(task, system, user, max_tokens=512, *, agent=None):
+        if "routing advisor" in system.lower() or "cost-aware" in system.lower():
+            return json.dumps(
+                {
+                    "recommended_tier": "D",
+                    "request_consultant_escalation": False,
+                    "rationale": "retry with the strong generalist tier first",
+                }
+            )
+        raise AssertionError("consultant deliberation should not run for tier D")
+
+    with (
+        patch("agent.routing_engine.route_prompt", return_value=_route_fallback()),
+        patch("agent.consultant_routing._call_aux_task", side_effect=fake_call),
+    ):
+        tier, audit = resolve_consultant_tier(
+            "Still not right, please fix it properly.",
+            g,
+            "C",
+            g["tier_models"],
+            pushback_signal=True,
+            retry_count=1,
+        )
+    assert tier == "D"
+    assert audit.get("consultant_signal") == ["pushback"]
+    assert audit.get("final_without_deliberation") == "D"
+    assert audit.get("deliberation") is None
+
+
+def test_legacy_d_flag_does_not_trigger_consultant_deliberation(gov_env):
+    g = _gov_base()
+
+    def fake_call(task, system, user, max_tokens=512, *, agent=None):
+        if "routing advisor" in system.lower() or "cost-aware" in system.lower():
+            return json.dumps(
+                {
+                    "recommended_tier": "D",
+                    "request_consultant_escalation": True,
+                    "rationale": "legacy router tried to over-escalate",
+                }
+            )
+        raise AssertionError("consultant deliberation should not run for tier D")
+
+    with (
+        patch("agent.routing_engine.route_prompt", return_value=_route_fallback()),
+        patch("agent.consultant_routing._call_aux_task", side_effect=fake_call),
+    ):
+        tier, audit = resolve_consultant_tier(
+            "Do a solid architecture review without using frontier models unless necessary.",
+            g,
+            "C",
+            g["tier_models"],
+        )
+    assert tier == "D"
+    assert audit.get("router", {}).get("request_consultant_escalation") is False
+    assert audit.get("final_without_deliberation") == "D"
+    assert audit.get("deliberation") is None
 
 
 def test_hybrid_router_escalation_triggers_deliberation(gov_env):
