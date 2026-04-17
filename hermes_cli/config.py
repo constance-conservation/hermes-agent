@@ -808,6 +808,19 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
         "advanced": True,
     },
+    "HERMES_WORKSPACE_MEMORY_EXTRAS": {
+        "description": (
+            "When using ``HERMES_HOME/workspace/memory/`` root anchors, optionally inject conditional "
+            "files from the same directory: comma-separated keys "
+            "``state`` (STATE.md), ``tools`` (TOOLS.md), ``skills`` (SKILLS.md), ``bootstrap`` (BOOTSTRAP.md). "
+            "Default is empty — only the always-on anchors load; use file tools for deeper paths."
+        ),
+        "prompt": "Workspace memory extras (optional, e.g. state,tools)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
     "HERMES_TURN_DONE_NOTIFY_URL": {
         "description": (
             "Optional HTTP URL Hermes GETs (fire-and-forget) when a root agent turn finishes — "

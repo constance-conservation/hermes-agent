@@ -19,6 +19,7 @@ from agent.prompt_builder import (
     build_skills_system_prompt,
     build_nous_subscription_prompt,
     build_context_files_prompt,
+    load_soul_md,
     CONTEXT_FILE_MAX_CHARS,
     DEFAULT_AGENT_IDENTITY,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
@@ -710,6 +711,84 @@ class TestBuildContextFilesPrompt:
         (ws / "AGENTS.md").write_text("Agents once.")
         result = build_context_files_prompt(cwd=str(ws))
         assert result.count("Agents once.") == 1
+
+    def test_workspace_memory_anchor_pack(self, tmp_path, monkeypatch):
+        """workspace/memory/ named anchors load; no directory walk."""
+        hh = tmp_path / "hh"
+        mem = hh / "workspace" / "memory"
+        mem.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (mem / "AGENTS.md").write_text("Anchor routing.")
+        (mem / "MEMORY.md").write_text("Gateway body.")
+        (mem / "USER.md").write_text("User directives.")
+        (mem / "ATTENTION.md").write_text("Attention frame.")
+        (mem / "INDEX.md").write_text("Index selectors.")
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        result = build_context_files_prompt(cwd=str(proj))
+        assert "Anchor routing." in result
+        assert "Gateway body." in result
+        assert "User directives." in result
+        assert "Attention frame." in result
+        assert "Index selectors." in result
+
+    def test_workspace_memory_pack_wins_over_legacy_workspace_files(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        ws = hh / "workspace"
+        mem = ws / "memory"
+        hh.mkdir()
+        ws.mkdir()
+        mem.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (ws / "BOOTSTRAP.md").write_text("legacy bootstrap")
+        (ws / "AGENTS.md").write_text("legacy workspace agents")
+        (mem / "AGENTS.md").write_text("memory-tree agents")
+        (mem / "MEMORY.md").write_text("memory-tree gateway")
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        result = build_context_files_prompt(cwd=str(proj))
+        assert "memory-tree agents" in result
+        assert "memory-tree gateway" in result
+        assert "legacy bootstrap" not in result
+        assert "legacy workspace agents" not in result
+
+    def test_workspace_memory_conditional_state_via_env(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        mem = hh / "workspace" / "memory"
+        mem.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        monkeypatch.setenv("HERMES_WORKSPACE_MEMORY_EXTRAS", "state")
+        (mem / "AGENTS.md").write_text("routing")
+        (mem / "MEMORY.md").write_text("gw")
+        (mem / "STATE.md").write_text("live blocker here")
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        result = build_context_files_prompt(cwd=str(proj))
+        assert "live blocker here" in result
+        monkeypatch.delenv("HERMES_WORKSPACE_MEMORY_EXTRAS", raising=False)
+        result2 = build_context_files_prompt(cwd=str(proj))
+        assert "live blocker here" not in result2
+
+    def test_load_soul_md_prefers_workspace_memory_file(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        mem = hh / "workspace" / "memory"
+        mem.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (hh / "SOUL.md").write_text("profile soul")
+        (mem / "SOUL.md").write_text("workspace memory soul")
+        assert load_soul_md() == "workspace memory soul"
+
+    def test_cwd_under_workspace_memory_skips_duplicate_agents(self, tmp_path, monkeypatch):
+        hh = tmp_path / "hh"
+        mem = hh / "workspace" / "memory"
+        nested = mem / "nested"
+        nested.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(hh))
+        (mem / "AGENTS.md").write_text("once from memory tree")
+        (mem / "MEMORY.md").write_text("gw")
+        (nested / "note.md").write_text("deep")
+        result = build_context_files_prompt(cwd=str(nested))
+        assert result.count("once from memory tree") == 1
 
     def test_cursorrules_loads_when_only_option(self, tmp_path):
         """Cursorrules still loads when no higher-priority files exist."""

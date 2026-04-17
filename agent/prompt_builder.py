@@ -777,11 +777,15 @@ def _truncate_content(content: str, filename: str, max_chars: int = CONTEXT_FILE
 
 
 def load_soul_md() -> Optional[str]:
-    """Load SOUL.md from HERMES_HOME and return its content, or None.
+    """Load SOUL.md for the agent identity (slot #1 in the system prompt).
 
-    Used as the agent identity (slot #1 in the system prompt).  When this
-    returns content, ``build_context_files_prompt`` should be called with
-    ``skip_soul=True`` so SOUL.md isn't injected twice.
+    Preference order:
+
+    1. ``HERMES_HOME/workspace/memory/SOUL.md`` — workspace memory-tree posture
+    2. ``HERMES_HOME/SOUL.md`` — classic profile identity
+
+    When this returns content, ``build_context_files_prompt`` should be called with
+    ``skip_soul=True`` so SOUL.md isn't injected twice in the project-context block.
     """
     try:
         from hermes_cli.config import ensure_hermes_home
@@ -789,27 +793,98 @@ def load_soul_md() -> Optional[str]:
     except Exception as e:
         logger.debug("Could not ensure HERMES_HOME before loading SOUL.md: %s", e)
 
-    soul_path = get_hermes_home() / "SOUL.md"
-    if not soul_path.exists():
+    home = get_hermes_home()
+    for soul_path in (home / "workspace" / "memory" / "SOUL.md", home / "SOUL.md"):
+        if not soul_path.is_file():
+            continue
+        try:
+            content = soul_path.read_text(encoding="utf-8").strip()
+            if not content:
+                continue
+            label = "SOUL.md"
+            content = _scan_context_content(content, label)
+            content = _truncate_content(content, label)
+            return content
+        except Exception as e:
+            logger.debug("Could not read SOUL.md from %s: %s", soul_path, e)
+    return None
+
+
+def _read_workspace_memory_anchor_file(mem_root: Path, name: str, section_label: str) -> Optional[str]:
+    """Read one markdown file under workspace/memory with scanning + truncation."""
+    path = mem_root / name
+    if not path.is_file():
         return None
     try:
-        content = soul_path.read_text(encoding="utf-8").strip()
+        content = path.read_text(encoding="utf-8").strip()
         if not content:
             return None
-        content = _scan_context_content(content, "SOUL.md")
-        content = _truncate_content(content, "SOUL.md")
-        return content
+        content = _strip_yaml_frontmatter(content)
+        content = _scan_context_content(content, name)
+        body = f"## {section_label}\n\n{content}"
+        return _truncate_content(body, name)
     except Exception as e:
-        logger.debug("Could not read SOUL.md from %s: %s", soul_path, e)
+        logger.debug("Could not read workspace memory file %s: %s", path, e)
         return None
 
 
-def _load_hermes_workspace_runtime_pack() -> str:
-    """BOOTSTRAP.md + AGENTS.md from ``HERMES_HOME/workspace/`` (materialized pack).
+def _workspace_memory_extras_from_env() -> set[str]:
+    """Parse ``HERMES_WORKSPACE_MEMORY_EXTRAS`` (comma/semicolon, case-insensitive)."""
+    raw = (os.environ.get("HERMES_WORKSPACE_MEMORY_EXTRAS") or "").strip().lower()
+    if not raw:
+        return set()
+    parts = raw.replace(";", ",").split(",")
+    return {p.strip() for p in parts if p.strip()}
 
-    Loaded after ``HERMES_HOME/.hermes.md`` so the agent receives bootstrap and
-    session order when the policy pipeline has populated the workspace root.
+
+def _load_workspace_memory_anchor_pack() -> str:
+    """Concise root anchors under ``HERMES_HOME/workspace/memory/``.
+
+    Loads only named files (no directory walks): AGENTS, MEMORY, USER, ATTENTION,
+    INDEX. Optional STATE, TOOLS, SKILLS, BOOTSTRAP when
+    ``HERMES_WORKSPACE_MEMORY_EXTRAS`` lists ``state`` / ``tools`` / ``skills`` /
+    ``bootstrap`` (for continuity, tool routing, skills, or bootstrap tasks).
+
+    If ``AGENTS.md`` is missing, the directory is not treated as this protocol
+    tree (caller falls back to legacy ``workspace/{BOOTSTRAP,AGENTS}.md``).
     """
+    mem_root = get_hermes_home() / "workspace" / "memory"
+    if not mem_root.is_dir():
+        return ""
+    if not (mem_root / "AGENTS.md").is_file():
+        return ""
+
+    parts: list[str] = []
+    for name in ("AGENTS.md", "MEMORY.md", "USER.md", "ATTENTION.md", "INDEX.md"):
+        block = _read_workspace_memory_anchor_file(
+            mem_root, name, f"{name} (HERMES_HOME/workspace/memory)"
+        )
+        if block:
+            parts.append(block)
+
+    extras = _workspace_memory_extras_from_env()
+    conditional = (
+        ("state", "STATE.md"),
+        ("tools", "TOOLS.md"),
+        ("skills", "SKILLS.md"),
+        ("bootstrap", "BOOTSTRAP.md"),
+    )
+    for key, fname in conditional:
+        if key in extras:
+            block = _read_workspace_memory_anchor_file(
+                mem_root, fname, f"{fname} (HERMES_HOME/workspace/memory, conditional)"
+            )
+            if block:
+                parts.append(block)
+
+    if not parts:
+        return ""
+    combined = "\n\n".join(parts)
+    return _truncate_content(combined, "workspace-memory-anchors")
+
+
+def _load_legacy_workspace_runtime_pack() -> str:
+    """Legacy: BOOTSTRAP.md + AGENTS.md directly under ``HERMES_HOME/workspace/``."""
     workspace_root = get_hermes_home() / "workspace"
     parts: list[str] = []
     for name in ("BOOTSTRAP.md", "AGENTS.md"):
@@ -830,6 +905,18 @@ def _load_hermes_workspace_runtime_pack() -> str:
         return ""
     combined = "\n\n".join(parts)
     return _truncate_content(combined, "workspace-runtime-pack")
+
+
+def _load_hermes_workspace_runtime_pack() -> str:
+    """Workspace context: prefer ``workspace/memory/`` anchors, else legacy pack.
+
+    The memory-tree layout keeps default prompt context lean (named root files
+    only); deeper retrieval is via file tools and ``INDEX.md`` routing.
+    """
+    anchor = _load_workspace_memory_anchor_pack()
+    if anchor:
+        return anchor
+    return _load_legacy_workspace_runtime_pack()
 
 
 def _load_hermes_home_governance_md() -> str:
@@ -946,7 +1033,17 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
     """Discover and load context files for the system prompt.
 
     ``HERMES_HOME/.hermes.md`` (if present) is loaded first as governance context.
-    ``HERMES_HOME/workspace/{BOOTSTRAP,AGENTS}.md`` (if present) are loaded next.
+
+    Workspace pack (next):
+
+    - If ``HERMES_HOME/workspace/memory/AGENTS.md`` exists, load only the named
+      root anchors from ``workspace/memory/`` (AGENTS, MEMORY, USER, ATTENTION,
+      INDEX — no broad folder walks). Optional ``STATE``, ``TOOLS``, ``SKILLS``,
+      ``BOOTSTRAP`` in that directory load only when listed in
+      ``HERMES_WORKSPACE_MEMORY_EXTRAS`` (comma-separated:
+      ``state``, ``tools``, ``skills``, ``bootstrap``).
+    - Else load legacy ``HERMES_HOME/workspace/{BOOTSTRAP,AGENTS}.md`` when present.
+
     Then cwd-based project files apply as below.
 
     Priority for *project* context (first found wins — only ONE type loaded):
@@ -955,11 +1052,11 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
       3. CLAUDE.md / claude.md   (cwd only)
       4. .cursorrules / .cursor/rules/*.mdc  (cwd only)
 
-    SOUL.md from HERMES_HOME is independent and always included when present.
-    Each context source is capped at 20,000 chars.
+    Identity uses ``load_soul_md()``: ``workspace/memory/SOUL.md`` if present,
+    else ``HERMES_HOME/SOUL.md``. When *skip_soul* is True, SOUL is omitted from
+    this block (already used as the identity slot).
 
-    When *skip_soul* is True, SOUL.md is not included here (it was already
-    loaded via ``load_soul_md()`` for the identity slot).
+    Each context source is capped at 20,000 chars per file.
     """
     if cwd is None:
         cwd = os.getcwd()
@@ -985,7 +1082,19 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
         pass
 
     workspace_root = get_hermes_home() / "workspace"
-    in_materialized_workspace = cwd_path == workspace_root.resolve()
+    mem_root = workspace_root / "memory"
+    try:
+        wr = workspace_root.resolve()
+        cwd_r = cwd_path.resolve()
+        in_materialized_workspace = cwd_r == wr
+        if not in_materialized_workspace and mem_root.is_dir():
+            try:
+                mr = mem_root.resolve()
+                in_materialized_workspace = cwd_r == mr or cwd_r.is_relative_to(mr)
+            except (OSError, ValueError):
+                pass
+    except (OSError, ValueError):
+        in_materialized_workspace = cwd_path == workspace_root.resolve()
 
     # Priority-based project context: first match wins
     project_context = (
