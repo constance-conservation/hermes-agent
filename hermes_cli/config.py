@@ -929,8 +929,16 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT": {
-        "description": "When two SSH targets are configured, ssh_operator / breakglass use this ConnectTimeout (seconds) for non-final hops (default 8).",
+        "description": "When two SSH targets are configured, ssh_operator / breakglass use this ConnectTimeout (seconds) for non-final hops (default 20). Lower for faster failover to LAN when Tailscale is down.",
         "prompt": "Operator SSH primary-try timeout seconds (optional)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+        "advanced": True,
+    },
+    "HERMES_OPERATOR_SSH_CONNECT_TIMEOUT": {
+        "description": "ssh_operator / breakglass ConnectTimeout (seconds) for single-host SSH and the final hop when two targets are set (default 45).",
+        "prompt": "Operator SSH connect timeout seconds (optional)",
         "url": None,
         "password": False,
         "category": "setting",

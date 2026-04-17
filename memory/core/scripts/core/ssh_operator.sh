@@ -6,8 +6,8 @@
 #   optional MACMINI_SSH_KEY in the env file (else SSH_KEY_FILE or ~/.env/.ssh_key)
 #   optional MACMINI_SSH_LAN_IP — second hop when set (and differs from MACMINI_SSH_HOST). Default order is
 #     Tailscale (**MACMINI_SSH_HOST**) first, then LAN, unless MACMINI_SSH_TRY_LAN_FIRST=1 (home LAN-only path).
-#     Non-final hop: HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 8s); final:
-#     HERMES_OPERATOR_SSH_CONNECT_TIMEOUT (default 30s).
+#     Non-final hop: HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 20s); final:
+#     HERMES_OPERATOR_SSH_CONNECT_TIMEOUT (default 45s). Lower the former if you need faster failover to LAN.
 #     If LAN shows "Permission denied (publickey)" but Tailscale works, the mini's ~/.ssh/authorized_keys
 #     may use from="…" that allows only Tailscale (100.x); widen CIDR or add a second pubkey line for LAN.
 #   optional HERMES_OPERATOR_REPO — absolute path on the mini (e.g. /Users/operator/hermes-agent)
@@ -40,6 +40,8 @@ _ALLOW_ENV_PASS_FROM_FILE=0
 _RAW_SSH_PASSPHRASE=""
 _MACMINI_LAN_IP_READ=""
 _TRY_LAN_FIRST_READ=""
+_EF_CTO_FINAL=""
+_EF_CTO_QUICK=""
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ssh_operator.sh: missing env file ${ENV_FILE} (set HERMES_OPERATOR_ENV)" >&2
@@ -79,6 +81,8 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
       ;;
     SSH_PASSPHRASE) _RAW_SSH_PASSPHRASE="${val}" ;;
+    HERMES_OPERATOR_SSH_CONNECT_TIMEOUT) _EF_CTO_FINAL="${val}" ;;
+    HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT) _EF_CTO_QUICK="${val}" ;;
   esac
 done <"$ENV_FILE"
 
@@ -127,8 +131,9 @@ if [[ "${HERMES_OPERATOR_SSH_NO_TTY:-0}" == "1" ]]; then
   _USE_TT=0
 fi
 
-CTO_FINAL="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-30}"
-CTO_QUICK="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-8}"
+# Shell env wins over env file (same idea as MACMINI_SSH_LAN_IP).
+CTO_FINAL="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-${_EF_CTO_FINAL:-45}}"
+CTO_QUICK="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-${_EF_CTO_QUICK:-20}}"
 
 _SSH_FLAGS_COMMON=(
   -4

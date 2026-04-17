@@ -7,8 +7,8 @@
 #
 # Try order (deduped): **MACMINI_SSH_HOST** (Tailscale) first, then **MACMINI_SSH_LAN_IP** when set, unless
 # **MACMINI_SSH_TRY_LAN_FIRST=1** (LAN-first for same-subnet home use). Matches **ssh_operator.sh**.
-# With two targets: first hop uses **HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT** (default **8**);
-# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **20** here).
+# With two targets: first hop uses **HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT** (default **20**);
+# last hop uses **HERMES_OPERATOR_SSH_CONNECT_TIMEOUT** (default **45**, same as **ssh_operator.sh**).
 # On the mini, run once (sudo): memory/core/scripts/core/operator_mini_add_lan_listenaddress_sshd.sh
 # so sshd actually listens on that LAN IP (Hermes default is loopback + TS only).
 #
@@ -29,6 +29,8 @@ _ef_port=""
 _ef_user=""
 _ef_lan=""
 _ef_try_lan_first=""
+_ef_cto_final=""
+_ef_cto_quick=""
 if [[ -f "$ENV_FILE" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -53,6 +55,8 @@ if [[ -f "$ENV_FILE" ]]; then
       MACMINI_SSH_TRY_LAN_FIRST)
         _ef_try_lan_first="${val}"
         ;;
+      HERMES_OPERATOR_SSH_CONNECT_TIMEOUT) _ef_cto_final="${val}" ;;
+      HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT) _ef_cto_quick="${val}" ;;
     esac
   done <"$ENV_FILE"
 fi
@@ -107,8 +111,8 @@ if [[ -z "$KEY" ]]; then
   exit 1
 fi
 
-CTO_FINAL="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-20}"
-CTO_QUICK="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-8}"
+CTO_FINAL="${HERMES_OPERATOR_SSH_CONNECT_TIMEOUT:-${_ef_cto_final:-45}}"
+CTO_QUICK="${HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT:-${_ef_cto_quick:-20}}"
 
 _breakglass_ssh_opts() {
   local cto="$1"
