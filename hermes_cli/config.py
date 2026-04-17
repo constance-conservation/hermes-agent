@@ -199,22 +199,31 @@ def _secure_file(path):
 
 def _ensure_default_soul_md(home: Path) -> None:
     """Seed a default SOUL.md into HERMES_HOME if the user doesn't have one yet."""
+    home = Path(home).expanduser()
+    # Materialize the profile root even if callers skipped ``ensure_hermes_home`` (defensive).
+    home.mkdir(parents=True, exist_ok=True)
     soul_path = home / "SOUL.md"
     if soul_path.exists():
         return
+    # ``write_text`` raises ENOENT if *home* vanished, is a broken symlink target, or was never created.
+    soul_path.parent.mkdir(parents=True, exist_ok=True)
     soul_path.write_text(DEFAULT_SOUL_MD, encoding="utf-8")
     _secure_file(soul_path)
 
 
 def ensure_hermes_home():
     """Ensure ~/.hermes directory structure exists with secure permissions."""
-    home = get_hermes_home()
+    home = Path(get_hermes_home()).expanduser()
     home.mkdir(parents=True, exist_ok=True)
     _secure_dir(home)
     for subdir in ("cron", "sessions", "logs", "memories"):
         d = home / subdir
         d.mkdir(parents=True, exist_ok=True)
         _secure_dir(d)
+    # Root anchors and memory tooling expect this tree under nested HERMES_HOME (e.g. profiles/chief-orchestrator).
+    ws_mem = home / "workspace" / "memory"
+    ws_mem.mkdir(parents=True, exist_ok=True)
+    _secure_dir(ws_mem)
     _ensure_default_soul_md(home)
 
 

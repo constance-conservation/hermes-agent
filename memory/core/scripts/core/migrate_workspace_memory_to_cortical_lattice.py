@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -203,6 +204,11 @@ def main() -> int:
     ap.add_argument("--hermes-home", required=True, help="Profile HERMES_HOME (e.g. ~/.hermes/profiles/chief-orchestrator).")
     ap.add_argument("--no-copy", action="store_true", help="Archive legacy tree but do not copy curated subsets into new layers.")
     ap.add_argument("--stamp", default="", help="Override UTC stamp (testing).")
+    ap.add_argument(
+        "--semantic-integrate",
+        action="store_true",
+        help="After migration, run semantic_integrate_cortical_lattice_memory.py to promote the archive into active lattice paths (recommended).",
+    )
     args = ap.parse_args()
 
     hermes_home = Path(args.hermes_home).expanduser().resolve()
@@ -442,6 +448,12 @@ Use `INFRASTRUCTURE.md` for the authoritative pre/post inventories and mapping t
         "post_inventory_files": len(post_inventory),
     }
     print(json.dumps(receipt, indent=2, sort_keys=True))
+
+    if args.semantic_integrate:
+        script = Path(__file__).resolve().parent / "semantic_integrate_cortical_lattice_memory.py"
+        cmd = [sys.executable, str(script), "--hermes-home", str(hermes_home)]
+        subprocess.run(cmd, check=True)
+
     return 0
 
 

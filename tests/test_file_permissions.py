@@ -118,6 +118,10 @@ class TestConfigFilePermissions(unittest.TestCase):
                 subdir_mode = stat.S_IMODE(os.stat(home / subdir).st_mode)
                 self.assertEqual(subdir_mode, 0o700, f"{subdir} should be 0700")
 
+            ws = home / "workspace" / "memory"
+            self.assertTrue(ws.is_dir())
+            self.assertEqual(stat.S_IMODE(os.stat(ws).st_mode), 0o700)
+
 
 class TestSecureHelpers(unittest.TestCase):
     """Test the _secure_file and _secure_dir helpers."""

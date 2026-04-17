@@ -43,6 +43,17 @@ class TestEnsureHermesHome:
             assert (tmp_path / "sessions").is_dir()
             assert (tmp_path / "logs").is_dir()
             assert (tmp_path / "memories").is_dir()
+            assert (tmp_path / "workspace" / "memory").is_dir()
+
+    def test_nested_profile_hermes_home_materializes(self, tmp_path):
+        """HERMES_HOME may point at ~/.hermes/profiles/<profile>; all parents must exist before SOUL.md."""
+        profile = tmp_path / "profiles" / "chief-orchestrator"
+        assert not profile.exists()
+        with patch.dict(os.environ, {"HERMES_HOME": str(profile)}):
+            ensure_hermes_home()
+        assert profile.is_dir()
+        assert (profile / "SOUL.md").is_file()
+        assert (profile / "workspace" / "memory").is_dir()
 
     def test_creates_default_soul_md_if_missing(self, tmp_path):
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
