@@ -16,8 +16,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from hermes_constants import get_hermes_home
 
@@ -68,7 +72,7 @@ def _letta_key() -> str:
 
 
 # ---------------------------------------------------------------------------
-# LangMem — process-local LangGraph InMemoryStore (singleton)
+# LangMem — durable BaseStore backed by SQLite (singleton)
 # ---------------------------------------------------------------------------
 
 _LANGMEM_STORE = None
@@ -76,13 +80,190 @@ _LANGMEM_MANAGE = None
 _LANGMEM_SEARCH = None
 
 
+class HermesLangMemSQLiteStore:
+    """Minimal LangGraph BaseStore-compatible adapter with on-disk durability.
+
+    LangMem's tools require a LangGraph BaseStore. We implement a pragmatic subset:
+    - put/get/delete: store memory documents by uuid
+    - search: simple FTS5 if available, else LIKE fallback
+
+    This is not embedding-based semantic search; Mem0 remains the primary semantic+rerank store.
+    """
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        con = sqlite3.connect(str(self.db_path))
+        con.row_factory = sqlite3.Row
+        return con
+
+    def _init_db(self) -> None:
+        con = self._connect()
+        try:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS langmem_items (
+                  id TEXT PRIMARY KEY,
+                  namespace TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  created_at REAL NOT NULL
+                );
+                """
+            )
+            # Best-effort FTS index (optional)
+            try:
+                con.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS langmem_items_fts
+                    USING fts5(id, namespace, content, content='langmem_items', content_rowid='rowid');
+                    """
+                )
+                con.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS langmem_items_ai AFTER INSERT ON langmem_items BEGIN
+                      INSERT INTO langmem_items_fts(rowid, id, namespace, content) VALUES (new.rowid, new.id, new.namespace, new.content);
+                    END;
+                    """
+                )
+                con.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS langmem_items_ad AFTER DELETE ON langmem_items BEGIN
+                      INSERT INTO langmem_items_fts(langmem_items_fts, rowid, id, namespace, content) VALUES('delete', old.rowid, old.id, old.namespace, old.content);
+                    END;
+                    """
+                )
+                con.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS langmem_items_au AFTER UPDATE ON langmem_items BEGIN
+                      INSERT INTO langmem_items_fts(langmem_items_fts, rowid, id, namespace, content) VALUES('delete', old.rowid, old.id, old.namespace, old.content);
+                      INSERT INTO langmem_items_fts(rowid, id, namespace, content) VALUES (new.rowid, new.id, new.namespace, new.content);
+                    END;
+                    """
+                )
+            except Exception:
+                pass
+            con.commit()
+        finally:
+            con.close()
+
+    # --- BaseStore-ish API used by LangMem tools --------------------------
+    # langgraph.store.base.BaseStore defines: put/get/delete/search + batch variants.
+    # LangMem tools call the sync methods directly.
+
+    def put(self, namespace: Tuple[str, ...], key: str, value: dict) -> None:
+        content = (value or {}).get("content") or ""
+        ns = "/".join(namespace)
+        con = self._connect()
+        try:
+            con.execute(
+                "INSERT OR REPLACE INTO langmem_items(id, namespace, content, created_at) VALUES(?,?,?,?)",
+                (key, ns, str(content), time.time()),
+            )
+            con.commit()
+        finally:
+            con.close()
+
+    def get(self, namespace: Tuple[str, ...], key: str):
+        ns = "/".join(namespace)
+        con = self._connect()
+        try:
+            row = con.execute(
+                "SELECT id, namespace, content, created_at FROM langmem_items WHERE id=? AND namespace=?",
+                (key, ns),
+            ).fetchone()
+            if not row:
+                return None
+            from langgraph.store.base import Item
+
+            dt = datetime.fromtimestamp(float(row["created_at"]), tz=timezone.utc)
+            return Item(
+                key=row["id"],
+                namespace=tuple(str(row["namespace"]).split("/")) if row["namespace"] else tuple(),
+                value={"content": row["content"]},
+                created_at=dt,
+                updated_at=dt,
+            )
+        finally:
+            con.close()
+
+    def delete(self, namespace: Tuple[str, ...], key: str) -> None:
+        ns = "/".join(namespace)
+        con = self._connect()
+        try:
+            con.execute("DELETE FROM langmem_items WHERE id=? AND namespace=?", (key, ns))
+            con.commit()
+        finally:
+            con.close()
+
+    def search(
+        self,
+        namespace_prefix: Tuple[str, ...],
+        query: str,
+        limit: int = 10,
+        offset: int = 0,
+        filter: dict | None = None,
+    ):
+        ns_prefix = "/".join(namespace_prefix)
+        q = (query or "").strip()
+        con = self._connect()
+        try:
+            # Prefer FTS if present
+            try:
+                rows = con.execute(
+                    """
+                    SELECT i.id, i.namespace, i.content, i.created_at
+                    FROM langmem_items_fts f
+                    JOIN langmem_items i ON i.rowid = f.rowid
+                    WHERE f.content MATCH ? AND i.namespace LIKE ?
+                    ORDER BY rank
+                    LIMIT ? OFFSET ?
+                    """,
+                    (q, ns_prefix + "%", int(limit), int(offset)),
+                ).fetchall()
+            except Exception:
+                rows = con.execute(
+                    """
+                    SELECT id, namespace, content, created_at
+                    FROM langmem_items
+                    WHERE namespace LIKE ? AND content LIKE ?
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (ns_prefix + "%", f"%{q}%", int(limit), int(offset)),
+                ).fetchall()
+            from langgraph.store.base import Item
+
+            out: List[Item] = []
+            for r in rows:
+                dt = datetime.fromtimestamp(float(r["created_at"]), tz=timezone.utc)
+                out.append(
+                    Item(
+                        key=r["id"],
+                        namespace=tuple(str(r["namespace"]).split("/")) if r["namespace"] else tuple(),
+                        value={"content": r["content"]},
+                        created_at=dt,
+                        updated_at=dt,
+                    )
+                )
+            return out
+        finally:
+            con.close()
+
+
+def _langmem_store_path() -> Path:
+    return get_hermes_home() / "runtime" / "langmem.sqlite3"
+
+
 def _get_langmem_tools():
     global _LANGMEM_STORE, _LANGMEM_MANAGE, _LANGMEM_SEARCH
     if _LANGMEM_STORE is None:
-        from langgraph.store.memory import InMemoryStore
         from langmem import create_manage_memory_tool, create_search_memory_tool
 
-        _LANGMEM_STORE = InMemoryStore()
+        # Durable store per profile
+        _LANGMEM_STORE = HermesLangMemSQLiteStore(_langmem_store_path())
         ns = ("hermes", "langmem", str(get_hermes_home()))
         _LANGMEM_MANAGE = create_manage_memory_tool(
             ns,
@@ -148,13 +329,16 @@ def _langsmith_workspace_info(_: str, **kw: Any) -> str:
         from langsmith import Client
 
         c = Client(api_key=key)
-        # list_projects is available on Client
-        projects = list(c.list_projects(limit=20))
-        out = [
-            {"name": getattr(p, "name", str(p)), "id": getattr(p, "id", None)}
-            for p in projects
-        ]
-        return json.dumps({"success": True, "projects": out, "tracing_hint": "Set LANGCHAIN_TRACING_V2=true and LANGSMITH_TRACING=true for traces."})
+        # Use Client.info (does not require sessions/projects permissions).
+        info = getattr(c, "info", None)
+        payload = info if isinstance(info, dict) else (info() if callable(info) else {})
+        return json.dumps(
+            {
+                "success": True,
+                "info": payload,
+                "tracing_hint": "Set LANGCHAIN_TRACING_V2=true and LANGSMITH_TRACING=true for traces.",
+            }
+        )
     except Exception as e:
         logger.exception("langsmith_workspace_info")
         return json.dumps({"success": False, "error": str(e)})
