@@ -119,6 +119,22 @@ def format_autoresearch_live_log_shell_command(log_path: Path) -> str:
     return f"tail -n 200 -f {shlex.quote(str(log_path.resolve()))}"
 
 
+def format_autoresearch_live_log_follow_instructions(log_path: Path) -> str:
+    """Copy-paste block: runnable shell command + what the log file is (CLI + gateway)."""
+    cmd = format_autoresearch_live_log_shell_command(log_path)
+    display = _expand_path(log_path.resolve())
+    return "\n".join(
+        [
+            "Second terminal on this host — paste this entire line and press Enter (live stream; Ctrl+C to stop):",
+            "",
+            cmd,
+            "",
+            f"The path above is a plain-text log file ({display}), not an executable. "
+            "Use `tail -f` to watch it; do not run the file as a program.",
+        ]
+    )
+
+
 def parse_autoresearch_duration_minutes_reply(text: str) -> Tuple[bool, Optional[int], str]:
     """Parse step-2 duration reply.
 

@@ -8,9 +8,18 @@ from hermes_cli.autoresearch_flow import (
     append_autoresearch_instructions,
     build_autoresearch_worker_command,
     format_autoresearch_capture_prompt,
+    format_autoresearch_live_log_follow_instructions,
     prepare_autoresearch_background_run,
     resolve_autoresearch_program_path,
 )
+
+
+def test_live_log_follow_instructions_includes_tail_command(tmp_path):
+    log = tmp_path / "run.log"
+    text = format_autoresearch_live_log_follow_instructions(log)
+    assert "tail -n 200 -f" in text
+    assert str(log.resolve()) in text or "run.log" in text
+    assert "plain-text" in text.lower() or "executable" in text.lower()
 
 
 def test_resolve_autoresearch_program_path_defaults_to_profile_skill_repo(monkeypatch, tmp_path):

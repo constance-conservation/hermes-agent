@@ -4083,7 +4083,7 @@ class GatewayRunner:
     ) -> str:
         from hermes_cli.autoresearch_flow import (
             build_autoresearch_worker_command,
-            format_autoresearch_live_log_shell_command,
+            format_autoresearch_live_log_follow_instructions,
             resolve_hermes_repo_root,
         )
         from tools.process_registry import process_registry
@@ -4126,7 +4126,7 @@ class GatewayRunner:
             if prepared.wall_clock_override_minutes is not None
             else "from program.md / default resolver"
         )
-        _tail = format_autoresearch_live_log_shell_command(prepared.log_path)
+        _follow = format_autoresearch_live_log_follow_instructions(prepared.log_path)
         return "\n".join(
             [
                 "Autoresearch background run started.",
@@ -4134,9 +4134,9 @@ class GatewayRunner:
                 f"Job ID: {prepared.job_id}",
                 f"Process session: {proc_session.id}",
                 f"Program file updated: {prepared.program_path}",
-                f"Live log (gateway host): {prepared.log_path}",
-                "On the machine running this gateway, follow output in another shell:",
-                f"  {_tail}",
+                "",
+                _follow,
+                "",
                 "Progress snippets post here every ~5s when the log grows (notification mode: all).",
                 "You can close this chat; the worker keeps running on the host.",
             ]

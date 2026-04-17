@@ -5144,7 +5144,7 @@ class HermesCLI:
         from hermes_cli.autoresearch_flow import (
             prepare_autoresearch_background_run,
             resolve_hermes_repo_root,
-            format_autoresearch_live_log_shell_command,
+            format_autoresearch_live_log_follow_instructions,
         )
 
         try:
@@ -5186,16 +5186,14 @@ class HermesCLI:
         _cprint(f"  Job ID: {prepared.job_id}")
         _cprint(f"  Program file updated: {prepared.program_path}")
         _cprint(f"  Prompt file: {prepared.prompt_path}")
-        _cprint(f"  Live log: {prepared.log_path}")
         _ws = prepared.wall_clock_seconds
         _cprint(
             f"  Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s "
             f"({'step-2 override' if wall_clock_override_minutes is not None else 'from program.md / default'})"
         )
-        _cprint(
-            "  On this host, follow the worker in another terminal:"
+        self._print_plain_notice(
+            format_autoresearch_live_log_follow_instructions(prepared.log_path)
         )
-        _cprint(f"    {format_autoresearch_live_log_shell_command(prepared.log_path)}")
         _cprint(
             "  Tool and terminal activity streams into that log (Hermes worker output)."
         )
