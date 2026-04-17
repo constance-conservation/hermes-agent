@@ -142,7 +142,7 @@ def _append_infra(
 Runtime code pointers:
 - `agent/prompt_builder.py` — loads workspace memory anchors
 - `run_agent.py` — retrieval + writeback orchestration (Cortical Lattice integration)
-- `tools/memory_tool.py` — built-in persistent `memories/{MEMORY,USER}.md` (compact)
+- `tools/memory_tool.py` — built-in persistent `memories/{{MEMORY,USER}}.md` (compact)
 - `hermes_cli/config.py` — feature flags / config for memory compiler/planner
 
 ## E) Diagrams
