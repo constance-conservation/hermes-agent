@@ -2,10 +2,13 @@
 
 | Asset | Purpose |
 |--------|--------|
-| [hermes-memory-architecture.md](hermes-memory-architecture.md) | All three diagrams in one Markdown file (renders on GitHub, VS Code, many static site generators). |
-| [hermes-memory-turn-flow.mmd](hermes-memory-turn-flow.mmd) | Diagram A only — Mermaid source. |
-| [hermes-memory-cortical-lattice.mmd](hermes-memory-cortical-lattice.mmd) | Diagram B only. |
-| [hermes-memory-external-products.mmd](hermes-memory-external-products.mmd) | Diagram C only. |
+| [hermes-memory-architecture.md](hermes-memory-architecture.md) | All three diagrams in one Markdown file; **embeds PNG** and includes Mermaid source. |
+| `*.png` / `*.svg` | **Pre-rendered images** for each diagram (open directly or embed). |
+| [hermes-memory-turn-flow.mmd](hermes-memory-turn-flow.mmd) | Diagram A — Mermaid source. |
+| [hermes-memory-cortical-lattice.mmd](hermes-memory-cortical-lattice.mmd) | Diagram B — Mermaid source. |
+| [hermes-memory-external-products.mmd](hermes-memory-external-products.mmd) | Diagram C — Mermaid source. |
+
+**Image files:** `hermes-memory-turn-flow.{png,svg}`, `hermes-memory-cortical-lattice.{png,svg}`, `hermes-memory-external-products.{png,svg}`.
 
 ## Export to SVG or PNG (Mermaid CLI)
 

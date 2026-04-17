@@ -2,11 +2,21 @@
 
 Conceptual view of how Hermes assembles context and tools around the LLM call path: **model routing** (for example OpenRouter) is the inference API path; **memory** is what feeds the prompt or is invoked as tools—local Cortical Lattice markdown, built-in `MEMORY.md` / `USER.md`, optional **Mem0** as the single pluggable memory provider, and **Zep / Letta / LangMem / LangSmith** as explicit tools in `tools/cloud_memory_tool.py`. Routing intent for backends is also described in workspace `constitution/memory-routing.md` (when present).
 
-**Export:** See [README.md](README.md) in this folder for SVG, PNG, and PDF export using the Mermaid CLI.
+**Pre-rendered images** (committed in this folder): PNG for quick viewing; SVG for lossless zoom. See [README.md](README.md) to regenerate.
+
+| Diagram | PNG | SVG |
+|---------|-----|-----|
+| A — Full turn | [hermes-memory-turn-flow.png](hermes-memory-turn-flow.png) | [hermes-memory-turn-flow.svg](hermes-memory-turn-flow.svg) |
+| B — Cortical lattice | [hermes-memory-cortical-lattice.png](hermes-memory-cortical-lattice.png) | [hermes-memory-cortical-lattice.svg](hermes-memory-cortical-lattice.svg) |
+| C — External products | [hermes-memory-external-products.png](hermes-memory-external-products.png) | [hermes-memory-external-products.svg](hermes-memory-external-products.svg) |
 
 ---
 
 ## Diagram A — One full turn (from message to memory side effects)
+
+![Diagram A — one full turn from message to memory side effects](hermes-memory-turn-flow.png)
+
+*Vector:* [hermes-memory-turn-flow.svg](hermes-memory-turn-flow.svg)
 
 ```mermaid
 flowchart TB
@@ -83,6 +93,10 @@ Standalone Mermaid source: [hermes-memory-turn-flow.mmd](hermes-memory-turn-flow
 
 Folders of markdown under workspace memory, not separate servers.
 
+![Diagram B — cortical lattice layers](hermes-memory-cortical-lattice.png)
+
+*Vector:* [hermes-memory-cortical-lattice.svg](hermes-memory-cortical-lattice.svg)
+
 ```mermaid
 flowchart LR
   subgraph pinned [Pinned rules and routing]
@@ -130,6 +144,10 @@ Standalone Mermaid source: [hermes-memory-cortical-lattice.mmd](hermes-memory-co
 ## Diagram C — External memory products versus local files
 
 Who is a plugin, who is tools-only, and where routing intent is written.
+
+![Diagram C — external memory products vs local files](hermes-memory-external-products.png)
+
+*Vector:* [hermes-memory-external-products.svg](hermes-memory-external-products.svg)
 
 ```mermaid
 flowchart TB
