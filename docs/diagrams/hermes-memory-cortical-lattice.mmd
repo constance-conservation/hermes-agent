@@ -1,0 +1,39 @@
+%% Hermes memory architecture — Diagram B: cortical lattice layers
+%% Export: npx -y @mermaid-js/mermaid-cli -i hermes-memory-cortical-lattice.mmd -o hermes-memory-cortical-lattice.svg
+flowchart LR
+  subgraph pinned [Pinned rules and routing]
+    Constitution[Constitution pinned rules and contracts]
+    RoutingHints[Routing and activation hints]
+  end
+
+  subgraph liveState [Live and near term]
+    WorkingMem[Working memory current focus blockers next steps]
+    Prospective[Prospective memory commitments and open loops]
+  end
+
+  subgraph durableKnowledge [Durable knowledge]
+    Semantic[Semantic graph facts domains references]
+    Doctrine[Reflective doctrine policies and lessons]
+    Social[Social and role memory persona org registers]
+  end
+
+  subgraph timeAndCases [History and reuse]
+    Episodic[Episodic ledger what happened over time]
+    Cases[Case memory reusable problem solution patterns]
+    Skills[Skill atlas procedures and promoted skills]
+  end
+
+  subgraph riskAndOps [Risk and visibility]
+    Hazard[Hazard memory failures and do not repeat]
+    Observability[Observability audits traces registers]
+    Bootstrap[Bootstrap init scripts and templates]
+  end
+
+  Constitution --> RoutingHints
+  RoutingHints --> Semantic
+  WorkingMem --> Episodic
+  Episodic --> Cases
+  Cases --> Skills
+  Doctrine --> Semantic
+  Hazard --> Cases
+  Observability --> Episodic

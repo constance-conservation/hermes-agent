@@ -1,0 +1,66 @@
+%% Hermes memory architecture — Diagram A: one full turn
+%% Export: npx -y @mermaid-js/mermaid-cli -i hermes-memory-turn-flow.mmd -o hermes-memory-turn-flow.svg
+flowchart TB
+  subgraph startTurn [Start of turn]
+    UserMsg[User message]
+    ChanCtx[Channel or chat context when applicable]
+  end
+
+  subgraph buildSystemPrompt [Building what the model sees as system context]
+    HomeGov[Profile governance file hermes dot md]
+    RootAnchors[Workspace memory root anchors AGENTS MEMORY USER ATTENTION INDEX]
+    SoulFile[Persona and values SOUL]
+    Extras[Optional extras from env STATE TOOLS SKILLS BOOTSTRAP]
+    CorticalPack[Per turn lattice pack working pages plus memory routing hint]
+    BuiltinProv[Always on builtin memory MEMORY dot md and USER dot md]
+    Mem0Prefetch[Optional Mem0 prefetch from last query]
+    Mem0Instructions[Optional Mem0 static instructions in system prompt]
+    MergeSys[Assembled system prompt string]
+    HomeGov --> MergeSys
+    RootAnchors --> MergeSys
+    SoulFile --> MergeSys
+    Extras --> MergeSys
+    CorticalPack --> MergeSys
+    BuiltinProv --> MergeSys
+    Mem0Prefetch --> MergeSys
+    Mem0Instructions --> MergeSys
+  end
+
+  subgraph modelConfig [Model choice separate from memory]
+    DefaultModel[Configured default such as OpenRouter free router]
+    FallbackChain[Provider fallbacks and budget rules when a call fails]
+    UpstreamApis[Upstream APIs OpenRouter OpenAI Anthropic Google etc]
+  end
+
+  subgraph inference [Inference call]
+    ApiCall[Chat completion request]
+    AssistantOut[Assistant text and tool calls]
+  end
+
+  subgraph toolSurface [Tools available during the turn]
+    BuiltinTools[Builtin memory read and write tools]
+    Mem0Tools[Mem0 search and profile tools when Mem0 is active]
+    CloudSuite[Cloud memory tools Zep Letta LangMem LangSmith]
+    OtherTools[All other Hermes tools filesystem web code etc]
+  end
+
+  subgraph afterTurn [After the assistant responds]
+    SyncBuiltin[Sync turn into builtin store]
+    SyncMem0[Sync turn into Mem0 when configured]
+    QueuePrefetch[Queue prefetch text for next turn]
+    WritebackLattice[Optional writeback into lattice layers and promotion]
+  end
+
+  MergeSys --> ApiCall
+  UserMsg --> ApiCall
+  ChanCtx --> ApiCall
+  DefaultModel --> ApiCall
+  FallbackChain --> ApiCall
+  ApiCall --> UpstreamApis
+  UpstreamApis --> AssistantOut
+  AssistantOut --> SyncBuiltin
+  AssistantOut --> SyncMem0
+  AssistantOut --> QueuePrefetch
+  AssistantOut --> WritebackLattice
+  ApiCall -. exposes tool list .-> toolSurface
+  AssistantOut -. may invoke .-> toolSurface
