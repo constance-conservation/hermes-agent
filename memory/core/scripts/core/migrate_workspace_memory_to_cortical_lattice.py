@@ -264,6 +264,8 @@ def main() -> int:
         spec = importlib.util.spec_from_file_location("_cortical_scaffold", scaffold_path)
         if spec and spec.loader:
             mod = importlib.util.module_from_spec(spec)
+            # Ensure dataclasses (and similar) can resolve cls.__module__ via sys.modules.
+            sys.modules[spec.name] = mod
             spec.loader.exec_module(mod)  # type: ignore[union-attr]
             try:
                 mod.scaffold(mem_root)  # type: ignore[attr-defined]
