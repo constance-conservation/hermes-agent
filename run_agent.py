@@ -8886,6 +8886,8 @@ class AIAgent:
             # They are initialized in __init__ and must persist across run_conversation
             # calls so that nudge logic accumulates correctly in CLI mode.
             self.iteration_budget = IterationBudget(self.max_iterations)
+            self._wall_clock_budget_exhausted = False
+            self._wall_clock_deadline_logged = False
         
             # Optional per-turn tier routing (workspace/memory/runtime/operations/hermes_token_governance.runtime.yaml)
             try:
@@ -9262,6 +9264,18 @@ class AIAgent:
                 (self.max_iterations <= 0 or api_call_count < self.max_iterations)
                 and self.iteration_budget.remaining > 0
             ):
+                # Hard wall-clock stop (e.g. Hermes /autoresearch outer runtime budget)
+                _wc_deadline = getattr(self, "_wall_clock_deadline_monotonic", None)
+                if _wc_deadline is not None and time.monotonic() >= _wc_deadline:
+                    self._wall_clock_budget_exhausted = True
+                    if not getattr(self, "_wall_clock_deadline_logged", False):
+                        self._wall_clock_deadline_logged = True
+                        self._emit_status(
+                            "Wall-clock budget for this autoresearch run is exhausted — stopping.",
+                            "lifecycle",
+                        )
+                    break
+
                 # Reset per-turn checkpoint dedup so each iteration can take one snapshot
                 self._checkpoint_mgr.new_turn()
         
@@ -11357,11 +11371,16 @@ class AIAgent:
                 if self.iteration_budget.remaining <= 0 and not self.quiet_mode:
                     print(f"\n⚠️  Iteration budget exhausted ({self.iteration_budget.used}/{self.iteration_budget.max_total} iterations used)")
                 final_response = self._handle_max_iterations(messages, api_call_count)
+
+            if getattr(self, "_wall_clock_budget_exhausted", False) and not final_response:
+                final_response = (
+                    "Wall-clock budget for this autoresearch run has been reached; stopping."
+                )
         
             # Determine if conversation completed successfully
             completed = final_response is not None and (
                 self.max_iterations <= 0 or api_call_count < self.max_iterations
-            )
+            ) and not getattr(self, "_wall_clock_budget_exhausted", False)
         
             # Summary review: lightweight alignment check using the free model.
             # Only runs once per turn (no loops) and only when the turn completed.
@@ -11443,6 +11462,9 @@ class AIAgent:
                 "completed": completed,
                 "partial": False,  # True only when stopped due to invalid tool calls
                 "interrupted": interrupted,
+                "wall_clock_exhausted": bool(
+                    getattr(self, "_wall_clock_budget_exhausted", False)
+                ),
                 "response_previewed": getattr(self, "_response_was_previewed", False),
                 "model": self.model,
                 "provider": self.provider,
@@ -11572,6 +11594,12 @@ class AIAgent:
             except Exception:
                 pass
             detach_opm_session_agent_for_turn()
+            try:
+                self._wall_clock_deadline_monotonic = None
+                self._wall_clock_budget_exhausted = False
+                self._wall_clock_deadline_logged = False
+            except Exception:
+                pass
 
     def chat(self, message: str, stream_callback: Optional[callable] = None) -> str:
         """

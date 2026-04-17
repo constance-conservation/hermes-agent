@@ -49,6 +49,8 @@ The user may specify a total outer runtime or wall-clock budget for the whole au
 - Keep this outer runtime separate from the per-run `train.py` budget enforced by the autoresearch repo itself.
 - Hermes `/autoresearch` background runs should bypass the normal Hermes max-iterations cap for this run. The outer runtime budget is the stop condition instead.
 
+**Engine enforcement:** After your brief is appended to `program.md`, the CLI reads that file and sets a **hard wall-clock deadline** (default **600 minutes** if you name no duration). The worker stops the tool loop when that deadline is reached, independent of model behavior. Iteration caps remain bypassed until then.
+
 ## Mission
 
 Your job is to improve Hermes Agent along these fixed axes:

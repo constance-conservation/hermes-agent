@@ -5142,6 +5142,7 @@ class HermesCLI:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["HERMES_AUTORESEARCH_JOB_ID"] = prepared.job_id
+            env["HERMES_AUTORESEARCH_WALL_SECONDS"] = str(prepared.wall_clock_seconds)
             proc = subprocess.Popen(
                 [
                     sys.executable,
@@ -5170,6 +5171,11 @@ class HermesCLI:
         _cprint(f"  Program file updated: {prepared.program_path}")
         _cprint(f"  Prompt file: {prepared.prompt_path}")
         _cprint(f"  Live log: {prepared.log_path}")
+        _ws = prepared.wall_clock_seconds
+        _cprint(
+            f"  Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s "
+            f"(from program.md / default 600 min)"
+        )
         _cprint(
             "  You can close this device now. The remote worker is detached and will keep running."
         )

@@ -38,7 +38,7 @@ def test_append_autoresearch_instructions_appends_managed_block(monkeypatch, tmp
     assert "Focus on better CPU throughput." in updated
     assert "HERMES_AUTORESEARCH_INSTRUCTIONS_START" in updated
     assert "Repository target: `efecanbasoz/autoresearch-cpu`" in updated
-    assert "default to 30 minutes total for the outer loop" in updated
+    assert "default to 600 minutes total for the outer loop" in updated
 
 
 def test_capture_prompt_mentions_program_path(monkeypatch, tmp_path):
@@ -51,7 +51,7 @@ def test_capture_prompt_mentions_program_path(monkeypatch, tmp_path):
     assert "only required interactive step" in text
     assert "will not ask again" in text
     assert "total outer runtime" in text
-    assert "default to 30 minutes total" in text
+    assert "default to 600 minutes total" in text
     assert "/autoresearch cancel" in text
 
 
@@ -118,7 +118,8 @@ Follow the repo instructions.
     assert prepared.log_path.name == "run.log"
     assert "only required interactive input" in prepared.prompt_text
     assert "parallel delegated subprocesses" in prepared.prompt_text
-    assert "default to 30 minutes total for the overall autoresearch loop" in prepared.prompt_text
+    assert "default to 600 minutes total for the overall autoresearch loop" in prepared.prompt_text
+    assert prepared.wall_clock_seconds == 600 * 60
 
 
 def test_build_worker_command_quotes_prompt_path(tmp_path):

@@ -4,10 +4,12 @@ import argparse
 import os
 from pathlib import Path
 import sys
+import time
 
 from cli import HermesCLI, _run_cleanup
 
 AUTORESEARCH_UNBOUNDED_ITERATIONS_ENV = "HERMES_AUTORESEARCH_UNBOUNDED_ITERATIONS"
+AUTORESEARCH_WALL_SECONDS_ENV = "HERMES_AUTORESEARCH_WALL_SECONDS"
 
 
 def _emit(message: str) -> None:
@@ -98,6 +100,28 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
         cli.agent.thinking_callback = lambda _text: None
         cli.agent._print_fn = lambda *args, **kwargs: print(*args, flush=True, **kwargs)
 
+        _wall_raw = (os.environ.get(AUTORESEARCH_WALL_SECONDS_ENV) or "").strip()
+        try:
+            _wall_sec = max(1, int(_wall_raw)) if _wall_raw else 0
+        except ValueError:
+            _wall_sec = 0
+        if _wall_sec <= 0:
+            from hermes_cli.autoresearch_wall_clock import DEFAULT_OUTER_RUNTIME_SECONDS
+
+            _wall_sec = DEFAULT_OUTER_RUNTIME_SECONDS
+            _emit(
+                f"[autoresearch][warn] Missing/invalid {AUTORESEARCH_WALL_SECONDS_ENV}; "
+                f"using default outer runtime { _wall_sec // 60 } minutes."
+            )
+        cli.agent._wall_clock_deadline_monotonic = time.monotonic() + float(_wall_sec)
+        _h = _wall_sec // 3600
+        _m = (_wall_sec % 3600) // 60
+        _s = _wall_sec % 60
+        _emit(
+            f"[autoresearch] Hard wall-clock budget: {_h}h {_m}m {_s}s "
+            f"({AUTORESEARCH_WALL_SECONDS_ENV}={_wall_sec})"
+        )
+
         _emit(f"[autoresearch] Session ID: {cli.session_id}")
         _emit("[autoresearch] Iteration cap override: unbounded for this autoresearch run.")
         _emit("[autoresearch] Agent run started.")
@@ -113,14 +137,19 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
             else str(result or "")
         )
         failed = bool(isinstance(result, dict) and result.get("failed"))
+        wall_ex = bool(isinstance(result, dict) and result.get("wall_clock_exhausted"))
 
         _emit("[autoresearch] Agent run finished.")
+        if wall_ex:
+            _emit("[autoresearch] Stop reason: wall-clock budget reached (outer runtime).")
         if response:
             _emit("[autoresearch][final] Final response follows.")
             print(response, flush=True)
         else:
             _emit("[autoresearch][final] No final response was produced.")
 
+        if wall_ex:
+            return 0
         return 1 if failed else 0
     finally:
         try:

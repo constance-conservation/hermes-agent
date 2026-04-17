@@ -4050,6 +4050,10 @@ class GatewayRunner:
             cwd=str(resolve_hermes_repo_root()),
             task_id=prepared.job_id,
             session_key=session_key,
+            env_vars={
+                "HERMES_AUTORESEARCH_WALL_SECONDS": str(prepared.wall_clock_seconds),
+                "HERMES_AUTORESEARCH_JOB_ID": prepared.job_id,
+            },
         )
 
         watcher = {

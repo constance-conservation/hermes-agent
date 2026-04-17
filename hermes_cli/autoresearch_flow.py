@@ -30,6 +30,7 @@ class AutoresearchPreparedRun:
     job_dir: Path
     prompt_path: Path
     log_path: Path
+    wall_clock_seconds: int
 
 
 def _expand_path(path: Path) -> str:
@@ -74,7 +75,7 @@ def format_autoresearch_capture_prompt(config: Optional[Mapping[str, Any]] = Non
             "- any hard requirements about what Hermes must or must not change",
             "",
             "If you leave run-tag or branch details out, Hermes will choose deterministic defaults and will not ask again.",
-            "If you leave total outer runtime out, Hermes will default to 30 minutes total for the overall autoresearch loop.",
+            "If you leave total outer runtime out, Hermes will default to 600 minutes total for the overall autoresearch loop.",
             "",
             f"After that one reply, Hermes will append it to: {_expand_path(program_path)}",
             f"Autoresearch repo: {_expand_path(repo_path)}",
@@ -94,7 +95,7 @@ def format_autoresearch_target_message(config: Optional[Mapping[str, Any]] = Non
             f"Program file: {_expand_path(program_path)}",
             "When ready, run /autoresearch and then send one complete follow-up message with all instructions.",
             "That follow-up message is the only required interactive step.",
-            "If you omit total outer runtime, Hermes defaults to 30 minutes total for the outer loop.",
+            "If you omit total outer runtime, Hermes defaults to 600 minutes total for the outer loop.",
         ]
     )
 
@@ -114,7 +115,7 @@ def _build_managed_block(user_instructions: str) -> str:
         "- Repository target: `efecanbasoz/autoresearch-cpu`\n"
         "- Prefer editing `train.py` unless the user explicitly asks for changes elsewhere.\n"
         "- Treat `prepare.py` as one-time data/tokenizer prep unless the user explicitly asks to change it.\n"
-        "- If this block specifies a total outer runtime or wall-clock budget for the overall autoresearch loop, Hermes should treat it as a hard stop for the full run. If no outer runtime is specified, default to 30 minutes total for the outer loop rather than running indefinitely.\n"
+        "- If this block specifies a total outer runtime or wall-clock budget for the overall autoresearch loop, Hermes should treat it as a hard stop for the full run. If no outer runtime is specified, default to 600 minutes total for the outer loop rather than running indefinitely.\n"
         "- Hermes `/autoresearch` background workers bypass the normal Hermes max-iterations cap for this run; outer runtime is the stop condition instead.\n"
         "<!-- HERMES_AUTORESEARCH_INSTRUCTIONS_END -->\n"
     )
@@ -128,7 +129,7 @@ def _build_autoresearch_runtime_brief() -> str:
             "Do not ask follow-up questions about run tags, branch tags, branch names, naming conventions, or similar setup trivia.",
             "If a run tag, branch name, artifact name, or similar identifier is needed, choose a deterministic default yourself and continue.",
             "If `program.md` or the newest Hermes Runtime Instructions block specifies a total outer runtime or wall-clock budget for the full autoresearch loop, treat that as a hard stop for the overall run.",
-            "If no total outer runtime is specified, default to 30 minutes total for the overall autoresearch loop instead of running indefinitely.",
+            "If no total outer runtime is specified, default to 600 minutes total for the overall autoresearch loop instead of running indefinitely.",
             "Keep the outer-loop runtime budget separate from any per-run `train.py` budget that the autoresearch repo already enforces.",
             "For Hermes `/autoresearch` background runs, bypass the normal Hermes max-iterations cap and let the outer runtime budget stop the run instead.",
             "Start the work immediately.",
@@ -193,6 +194,11 @@ def prepare_autoresearch_background_run(
     prompt_path.write_text(prompt_text, encoding="utf-8")
     log_path = job_dir / "run.log"
 
+    from hermes_cli.autoresearch_wall_clock import resolve_autoresearch_wall_clock_seconds
+
+    _prog_text = result.program_path.read_text(encoding="utf-8")
+    wall_clock_seconds = resolve_autoresearch_wall_clock_seconds(_prog_text)
+
     return AutoresearchPreparedRun(
         repo_path=result.repo_path,
         program_path=result.program_path,
@@ -201,6 +207,7 @@ def prepare_autoresearch_background_run(
         job_dir=job_dir,
         prompt_path=prompt_path,
         log_path=log_path,
+        wall_clock_seconds=wall_clock_seconds,
     )
 
 
