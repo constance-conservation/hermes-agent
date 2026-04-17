@@ -1946,24 +1946,70 @@ class GatewayRunner:
                     return self._apply_parsed_blocking_approval(_quick_key, _nl)
 
         if _quick_key in self._pending_autoresearch and not event.is_command():
-            try:
-                from hermes_cli.autoresearch_flow import (
-                    prepare_autoresearch_background_run,
-                )
+            pend = self._pending_autoresearch.get(_quick_key) or {}
+            phase = pend.get("phase")
+            if phase is None:
+                phase = "await_instructions"
+                pend["phase"] = phase
+                self._pending_autoresearch[_quick_key] = pend
 
-                prepared = prepare_autoresearch_background_run(
-                    user_instructions=event.text or "",
-                    task_id=_quick_key,
-                )
-                self._pending_autoresearch.pop(_quick_key, None)
-                return await self._start_autoresearch_background_run(
-                    event,
-                    prepared,
-                    _quick_key,
-                )
-            except Exception as e:
-                self._pending_autoresearch.pop(_quick_key, None)
-                return f"Autoresearch setup failed: {e}"
+            from hermes_cli.autoresearch_flow import (
+                format_autoresearch_duration_prompt,
+                parse_autoresearch_duration_minutes_reply,
+                prepare_autoresearch_background_run,
+            )
+            from hermes_cli.config import load_config
+
+            try:
+                gw_config = load_config()
+            except Exception:
+                gw_config = None
+
+            text = (event.text or "").strip()
+
+            if phase == "await_instructions":
+                if not text:
+                    return (
+                        "Instructions cannot be empty. Send your run brief, or use "
+                        "/autoresearch cancel."
+                    )
+                pend["instructions"] = event.text or ""
+                pend["phase"] = "await_duration"
+                self._pending_autoresearch[_quick_key] = pend
+                return format_autoresearch_duration_prompt(gw_config)
+
+            if phase == "await_duration":
+                ok, mins, err = parse_autoresearch_duration_minutes_reply(event.text or "")
+                if not ok:
+                    return f"{err}\nExamples: `default` or `600` (minutes)."
+                instr = (pend.get("instructions") or "").strip()
+                if not instr:
+                    self._pending_autoresearch.pop(_quick_key, None)
+                    return (
+                        "Missing instructions. Use /autoresearch cancel and start again."
+                    )
+                try:
+                    prepared = prepare_autoresearch_background_run(
+                        user_instructions=instr,
+                        task_id=_quick_key,
+                        config=gw_config,
+                        wall_clock_override_minutes=mins,
+                    )
+                    self._pending_autoresearch.pop(_quick_key, None)
+                    return await self._start_autoresearch_background_run(
+                        event,
+                        prepared,
+                        _quick_key,
+                    )
+                except Exception as e:
+                    self._pending_autoresearch.pop(_quick_key, None)
+                    return f"Autoresearch setup failed: {e}"
+
+            self._pending_autoresearch.pop(_quick_key, None)
+            return (
+                f"Autoresearch state error (phase={phase!r}). "
+                "Use /autoresearch cancel."
+            )
 
         if _quick_key in self._running_agents:
             if event.get_command() == "status":
@@ -3990,44 +4036,44 @@ class GatewayRunner:
                 return "Voice mode disabled."
 
     async def _handle_autoresearch_command(self, event: MessageEvent) -> str | None:
-        """Handle /autoresearch — capture program.md instructions, then load the skill."""
+        """Handle /autoresearch — two-step capture (instructions, duration), then worker."""
         from hermes_cli.autoresearch_flow import (
             format_autoresearch_capture_prompt,
+            format_autoresearch_duration_prompt,
             format_autoresearch_target_message,
-            prepare_autoresearch_background_run,
         )
+        from hermes_cli.config import load_config
+
+        try:
+            gw_config = load_config()
+        except Exception:
+            gw_config = None
 
         session_key = self._session_key_for_source(event.source)
         user_arg = event.get_command_args().strip()
         lowered = user_arg.lower()
 
         if not user_arg:
-            self._pending_autoresearch[session_key] = {"started": time.time()}
-            return format_autoresearch_capture_prompt()
+            self._pending_autoresearch[session_key] = {
+                "phase": "await_instructions",
+                "started": time.time(),
+            }
+            return format_autoresearch_capture_prompt(gw_config)
 
         if lowered in {"cancel", "abort", "stop"}:
             if self._pending_autoresearch.pop(session_key, None) is not None:
-                return "Autoresearch instruction capture cancelled."
-            return "No pending /autoresearch instruction capture."
+                return "Autoresearch capture cancelled."
+            return "No pending /autoresearch capture."
 
         if lowered in {"show", "path"}:
-            return format_autoresearch_target_message()
+            return format_autoresearch_target_message(gw_config)
 
-        try:
-            prepared = prepare_autoresearch_background_run(
-                user_instructions=user_arg,
-                task_id=session_key,
-            )
-        except Exception as e:
-            self._pending_autoresearch.pop(session_key, None)
-            return f"Autoresearch setup failed: {e}"
-
-        self._pending_autoresearch.pop(session_key, None)
-        return await self._start_autoresearch_background_run(
-            event,
-            prepared,
-            session_key,
-        )
+        self._pending_autoresearch[session_key] = {
+            "phase": "await_duration",
+            "instructions": user_arg,
+            "started": time.time(),
+        }
+        return format_autoresearch_duration_prompt(gw_config)
 
     async def _start_autoresearch_background_run(
         self,
@@ -4037,6 +4083,7 @@ class GatewayRunner:
     ) -> str:
         from hermes_cli.autoresearch_flow import (
             build_autoresearch_worker_command,
+            format_autoresearch_live_log_shell_command,
             resolve_hermes_repo_root,
         )
         from tools.process_registry import process_registry
@@ -4058,7 +4105,7 @@ class GatewayRunner:
 
         watcher = {
             "session_id": proc_session.id,
-            "check_interval": 20,
+            "check_interval": 5,
             "session_key": session_key,
             "platform": event.source.platform.value,
             "chat_id": event.source.chat_id,
@@ -4073,16 +4120,25 @@ class GatewayRunner:
         self._background_tasks.add(_task)
         _task.add_done_callback(self._background_tasks.discard)
 
+        _ws = prepared.wall_clock_seconds
+        _src = (
+            "step-2 minutes override"
+            if prepared.wall_clock_override_minutes is not None
+            else "from program.md / default resolver"
+        )
+        _tail = format_autoresearch_live_log_shell_command(prepared.log_path)
         return "\n".join(
             [
                 "Autoresearch background run started.",
-                "Your last message was the only required interactive step.",
+                f"Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s ({_src}).",
                 f"Job ID: {prepared.job_id}",
                 f"Process session: {proc_session.id}",
                 f"Program file updated: {prepared.program_path}",
-                f"Live log: {prepared.log_path}",
-                "Progress updates will be posted here automatically.",
-                "You can close your device now. The VPS job will keep running.",
+                f"Live log (gateway host): {prepared.log_path}",
+                "On the machine running this gateway, follow output in another shell:",
+                f"  {_tail}",
+                "Progress snippets post here every ~5s when the log grows (notification mode: all).",
+                "You can close this chat; the worker keeps running on the host.",
             ]
         )
 

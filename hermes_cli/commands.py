@@ -155,7 +155,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     ),
     CommandDef(
         "autoresearch",
-        "Autoresearch runtime flow: capture program.md instructions, then launch the installed skill",
+        "Autoresearch: (1) instructions, (2) total runtime (`default` or minutes), then background worker",
         "Tools & Skills",
         args_hint="[show|cancel|<instructions>]",
         subcommands=("show", "cancel"),

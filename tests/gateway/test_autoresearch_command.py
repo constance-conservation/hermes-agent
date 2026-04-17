@@ -1,9 +1,7 @@
 """Tests for the gateway /autoresearch command flow."""
 
 import asyncio
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from gateway.config import Platform
 from gateway.platforms.base import MessageEvent
@@ -37,18 +35,17 @@ def _make_runner():
 
 
 class TestGatewayAutoresearchCommand:
-    def test_no_args_returns_clear_single_step_prompt(self):
+    def test_no_args_returns_step1_prompt(self):
         runner = _make_runner()
         event = _make_event(text="/autoresearch")
 
         result = asyncio.run(runner._handle_autoresearch_command(event))
 
-        assert "only required interactive step" in result
+        assert "step 1 of 2" in result.lower()
         assert "very next message" in result
-        assert "will not ask again" in result
-        assert "sess_autoresearch" in runner._pending_autoresearch
+        assert runner._pending_autoresearch["sess_autoresearch"]["phase"] == "await_instructions"
 
-    def test_show_returns_plain_paths(self):
+    def test_show_returns_paths(self):
         runner = _make_runner()
         event = _make_event(text="/autoresearch show")
 
@@ -56,32 +53,15 @@ class TestGatewayAutoresearchCommand:
 
         assert "Autoresearch repo:" in result
         assert "Program file:" in result
-        assert "`" not in result
+        assert "two-step" in result.lower()
 
-    def test_inline_instructions_launch_background_run(self):
+    def test_inline_instructions_sets_await_duration(self):
         runner = _make_runner()
         event = _make_event(text="/autoresearch improve safety")
-        prepared = SimpleNamespace(
-            job_id="autoresearch_123",
-            program_path=Path("/tmp/program.md"),
-            prompt_path=Path("/tmp/prompt.txt"),
-            log_path=Path("/tmp/run.log"),
-        )
 
-        with patch(
-            "hermes_cli.autoresearch_flow.prepare_autoresearch_background_run",
-            return_value=prepared,
-        ) as prepare_mock, patch.object(
-            runner,
-            "_start_autoresearch_background_run",
-            AsyncMock(return_value="Autoresearch background run started."),
-        ) as start_mock:
-            result = asyncio.run(runner._handle_autoresearch_command(event))
+        result = asyncio.run(runner._handle_autoresearch_command(event))
 
-        assert result == "Autoresearch background run started."
-        prepare_mock.assert_called_once()
-        start_mock.assert_awaited_once_with(
-            event,
-            prepared,
-            "sess_autoresearch",
-        )
+        assert "step 2 of 2" in result.lower()
+        pend = runner._pending_autoresearch["sess_autoresearch"]
+        assert pend["phase"] == "await_duration"
+        assert pend["instructions"] == "improve safety"

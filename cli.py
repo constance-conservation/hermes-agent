@@ -1202,7 +1202,7 @@ class HermesCLI:
         self._reasoning_stream_started = False  # True once live reasoning starts streaming
         self._reasoning_preview_buf = ""  # Coalesce tiny reasoning chunks for [thinking] output
         self._pending_edit_snapshots = {}
-        self._pending_autoresearch = None
+        self._pending_autoresearch = None  # None | dict: phase await_instructions | await_duration
         
         # Configuration - priority: CLI args > env vars > config file
         # Model comes from: CLI arg or config.yaml (single source of truth).
@@ -5049,10 +5049,11 @@ class HermesCLI:
             self.console.print("[bold red]Plan mode unavailable: input queue not initialized[/]")
 
     def _handle_autoresearch_command(self, cmd: str):
-        """Handle /autoresearch — collect program.md instructions, then load the skill."""
+        """Handle /autoresearch — two-step capture (instructions, then duration), then launch."""
         from hermes_cli.autoresearch_flow import (
             format_autoresearch_target_message,
             format_autoresearch_capture_prompt,
+            format_autoresearch_duration_prompt,
         )
 
         parts = cmd.strip().split(maxsplit=1)
@@ -5060,7 +5061,10 @@ class HermesCLI:
         lowered = user_arg.lower()
 
         if not user_arg:
-            self._pending_autoresearch = {"started": time.time()}
+            self._pending_autoresearch = {
+                "phase": "await_instructions",
+                "started": time.time(),
+            }
             self._print_plain_notice(
                 format_autoresearch_capture_prompt(load_cli_config())
             )
@@ -5069,9 +5073,9 @@ class HermesCLI:
         if lowered in {"cancel", "abort", "stop"}:
             if getattr(self, "_pending_autoresearch", None):
                 self._pending_autoresearch = None
-                _cprint("  🧪 Autoresearch instruction capture cancelled.")
+                _cprint("  🧪 Autoresearch capture cancelled.")
             else:
-                _cprint("  No pending /autoresearch instruction capture.")
+                _cprint("  No pending /autoresearch capture.")
             return
 
         if lowered in {"show", "path"}:
@@ -5080,7 +5084,13 @@ class HermesCLI:
             )
             return
 
-        self._launch_autoresearch_background_run(user_arg)
+        # Inline instructions: go straight to step 2 (duration).
+        self._pending_autoresearch = {
+            "phase": "await_duration",
+            "instructions": user_arg,
+            "started": time.time(),
+        }
+        self._print_plain_notice(format_autoresearch_duration_prompt(load_cli_config()))
 
     def _handle_paperclip_command(self, cmd: str):
         """Handle /paperclip — load the installed Paperclip skill."""
@@ -5125,10 +5135,16 @@ class HermesCLI:
             else:
                 _cprint("")
 
-    def _launch_autoresearch_background_run(self, user_instructions: str) -> None:
+    def _launch_autoresearch_background_run(
+        self,
+        user_instructions: str,
+        *,
+        wall_clock_override_minutes: int | None = None,
+    ) -> None:
         from hermes_cli.autoresearch_flow import (
             prepare_autoresearch_background_run,
             resolve_hermes_repo_root,
+            format_autoresearch_live_log_shell_command,
         )
 
         try:
@@ -5136,6 +5152,7 @@ class HermesCLI:
                 user_instructions=user_instructions,
                 task_id=self.session_id,
                 config=load_cli_config(),
+                wall_clock_override_minutes=wall_clock_override_minutes,
             )
             prepared.log_path.parent.mkdir(parents=True, exist_ok=True)
             log_handle = prepared.log_path.open("a", encoding="utf-8")
@@ -5165,8 +5182,7 @@ class HermesCLI:
             return
 
         self._pending_autoresearch = None
-        _cprint("  🧪 Autoresearch launched in the background.")
-        _cprint("  This was the only required interactive step.")
+        _cprint("  🧪 Autoresearch launched in the background (steps 1–2 complete).")
         _cprint(f"  Job ID: {prepared.job_id}")
         _cprint(f"  Program file updated: {prepared.program_path}")
         _cprint(f"  Prompt file: {prepared.prompt_path}")
@@ -5174,13 +5190,20 @@ class HermesCLI:
         _ws = prepared.wall_clock_seconds
         _cprint(
             f"  Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s "
-            f"(from program.md / default 600 min)"
+            f"({'step-2 override' if wall_clock_override_minutes is not None else 'from program.md / default'})"
         )
         _cprint(
-            "  You can close this device now. The remote worker is detached and will keep running."
+            "  On this host, follow the worker in another terminal:"
+        )
+        _cprint(f"    {format_autoresearch_live_log_shell_command(prepared.log_path)}")
+        _cprint(
+            "  Tool and terminal activity streams into that log (Hermes worker output)."
         )
         _cprint(
-            "  While this session stays open, Hermes will stream the worker log here."
+            "  You can close this SSH session; the worker keeps running."
+        )
+        _cprint(
+            "  While this TUI stays open, Hermes streams the log below (0.5s refresh + heartbeats if idle)."
         )
         self._start_autoresearch_log_follower(prepared.log_path, proc.pid)
 
@@ -5188,6 +5211,10 @@ class HermesCLI:
         def _follow() -> None:
             last_pos = 0
             idle_polls = 0
+            last_activity = time.monotonic()
+            last_heartbeat = time.monotonic()
+            poll_s = 0.5
+            heartbeat_every = 25.0
             while True:
                 try:
                     if log_path.exists():
@@ -5197,6 +5224,7 @@ class HermesCLI:
                             last_pos = fh.tell()
                         if chunk:
                             idle_polls = 0
+                            last_activity = time.monotonic()
                             for line in chunk.splitlines():
                                 text = line.rstrip()
                                 if text:
@@ -5212,9 +5240,25 @@ class HermesCLI:
                     except OSError:
                         alive = False
 
+                    now = time.monotonic()
+                    if (
+                        alive
+                        and (now - last_activity) >= heartbeat_every
+                        and (now - last_heartbeat) >= heartbeat_every
+                    ):
+                        last_heartbeat = now
+                        try:
+                            sz = log_path.stat().st_size if log_path.exists() else 0
+                        except OSError:
+                            sz = 0
+                        _cprint(
+                            f"  [autoresearch] Worker still running (pid {pid}, log ~{sz} bytes). "
+                            f"Waiting for more output…"
+                        )
+
                     if not alive and idle_polls >= 3:
                         break
-                    time.sleep(2)
+                    time.sleep(poll_s)
                 except Exception:
                     break
 
@@ -5223,7 +5267,46 @@ class HermesCLI:
             daemon=True,
             name=f"autoresearch-log-{pid}",
         ).start()
-    
+
+    def _consume_autoresearch_multistep_input(self, user_input: str) -> bool:
+        """Handle /autoresearch step 1 or 2. Returns True if the line was consumed."""
+        pend = getattr(self, "_pending_autoresearch", None)
+        if not isinstance(pend, dict) or not pend:
+            return False
+        text = (user_input or "").strip()
+        if text.startswith("/"):
+            return False
+        from hermes_cli.autoresearch_flow import (
+            format_autoresearch_duration_prompt,
+            parse_autoresearch_duration_minutes_reply,
+        )
+
+        phase = pend.get("phase")
+        if phase == "await_instructions":
+            pend["instructions"] = user_input
+            pend["phase"] = "await_duration"
+            self._print_plain_notice(format_autoresearch_duration_prompt(load_cli_config()))
+            return True
+        if phase == "await_duration":
+            ok, mins, err = parse_autoresearch_duration_minutes_reply(user_input)
+            if not ok:
+                _cprint(f"  {err}")
+                _cprint("  Examples: `default` or `600` (minutes).")
+                return True
+            instr = (pend.get("instructions") or "").strip()
+            if not instr:
+                _cprint(
+                    "  [error] Missing instructions. Use /autoresearch cancel and start again."
+                )
+                self._pending_autoresearch = None
+                return True
+            self._launch_autoresearch_background_run(
+                instr,
+                wall_clock_override_minutes=mins,
+            )
+            return True
+        return False
+
     def _handle_background_command(self, cmd: str):
         """Handle /background <prompt> — run a prompt in a separate background session.
 
@@ -9067,8 +9150,8 @@ class HermesCLI:
                     if isinstance(user_input, str) and getattr(self, "_pending_autoresearch", None):
                         stripped_input = user_input.strip()
                         if stripped_input and not stripped_input.startswith("/"):
-                            self._launch_autoresearch_background_run(user_input)
-                            continue
+                            if self._consume_autoresearch_multistep_input(user_input):
+                                continue
                     
                     # Check for commands — but detect dragged/pasted file paths first.
                     # See _detect_file_drop() for details.

@@ -48,10 +48,10 @@ def test_capture_prompt_mentions_program_path(monkeypatch, tmp_path):
     text = format_autoresearch_capture_prompt()
 
     assert "program.md" in text
-    assert "only required interactive step" in text
-    assert "will not ask again" in text
+    assert "step 1 of 2" in text.lower()
+    assert "very next message" in text
     assert "total outer runtime" in text
-    assert "default to 600 minutes total" in text
+    assert "step 2" in text.lower()
     assert "/autoresearch cancel" in text
 
 

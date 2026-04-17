@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import shlex
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Tuple
 import uuid
 
 from hermes_constants import get_hermes_home
@@ -31,6 +32,7 @@ class AutoresearchPreparedRun:
     prompt_path: Path
     log_path: Path
     wall_clock_seconds: int
+    wall_clock_override_minutes: int | None = None
 
 
 def _expand_path(path: Path) -> str:
@@ -64,24 +66,38 @@ def format_autoresearch_capture_prompt(config: Optional[Mapping[str, Any]] = Non
     repo_path = resolve_autoresearch_repo_path(config)
     return "\n".join(
         [
-            "Autoresearch is waiting for your run brief.",
+            "Autoresearch — step 1 of 2: run brief.",
             "",
             "Reply with your full instructions in your very next message.",
-            "That next message is the only required interactive step.",
             "",
             "Include everything Hermes should use for this run:",
             "- your full program.md content or the exact additions you want appended",
             "- any preferred run tag, branch naming, total outer runtime, budget, model, or test constraints",
             "- any hard requirements about what Hermes must or must not change",
             "",
-            "If you leave run-tag or branch details out, Hermes will choose deterministic defaults and will not ask again.",
-            "If you leave total outer runtime out, Hermes will default to 600 minutes total for the overall autoresearch loop.",
+            "If you leave run-tag or branch details out, Hermes will choose deterministic defaults.",
+            "You can name an outer runtime in this message; step 2 still lets you override it with a hard cap in minutes.",
             "",
-            f"After that one reply, Hermes will append it to: {_expand_path(program_path)}",
+            f"After step 2, Hermes will append your brief to: {_expand_path(program_path)}",
             f"Autoresearch repo: {_expand_path(repo_path)}",
-            "Then Hermes will launch the run in the background and continue without more setup questions.",
             "",
             "Use /autoresearch cancel to abort or /autoresearch show to print the repo/program paths again.",
+        ]
+    )
+
+
+def format_autoresearch_duration_prompt(config: Optional[Mapping[str, Any]] = None) -> str:
+    program_path = resolve_autoresearch_program_path(config)
+    return "\n".join(
+        [
+            "Autoresearch — step 2 of 2: total wall-clock runtime for this Hermes worker.",
+            "",
+            "Reply with ONE of:",
+            '- `default` — use the duration implied by your instructions (and program.md / doc default 600 min if none).',
+            "- a positive integer — **minutes** only for the hard cap (e.g. `600` for 10 hours, `120` for 2 hours).",
+            "",
+            f"Your instructions are ready to append to: {_expand_path(program_path)}",
+            "Use /autoresearch cancel to abort.",
         ]
     )
 
@@ -93,11 +109,69 @@ def format_autoresearch_target_message(config: Optional[Mapping[str, Any]] = Non
         [
             f"Autoresearch repo: {_expand_path(repo_path)}",
             f"Program file: {_expand_path(program_path)}",
-            "When ready, run /autoresearch and then send one complete follow-up message with all instructions.",
-            "That follow-up message is the only required interactive step.",
-            "If you omit total outer runtime, Hermes defaults to 600 minutes total for the outer loop.",
+            "Run /autoresearch for a two-step capture: (1) instructions, (2) total runtime in minutes or `default`.",
         ]
     )
+
+
+def format_autoresearch_live_log_shell_command(log_path: Path) -> str:
+    """Single line safe to paste in a terminal on the host where the worker runs."""
+    return f"tail -n 200 -f {shlex.quote(str(log_path.resolve()))}"
+
+
+def parse_autoresearch_duration_minutes_reply(text: str) -> Tuple[bool, Optional[int], str]:
+    """Parse step-2 duration reply.
+
+    Returns:
+        (True, None, "") — use default / resolve from program.md
+        (True, minutes, "") — hard cap in minutes
+        (False, None, err) — invalid
+    """
+    s = (text or "").strip()
+    if not s:
+        return True, None, ""
+    low = s.lower()
+    if low in (
+        "default",
+        "def",
+        "auto",
+        "program",
+        "instructions",
+        "doc",
+        "docs",
+    ):
+        return True, None, ""
+    m = re.fullmatch(r"(\d+)\s*m", low)
+    if m:
+        s = m.group(1)
+    elif not re.fullmatch(r"\d+", s):
+        return (
+            False,
+            None,
+            "Expected `default` or a whole number of minutes (e.g. `600`).",
+        )
+    try:
+        minutes = int(s)
+    except ValueError:
+        return False, None, "Invalid number."
+    if minutes < 1:
+        return False, None, "Minutes must be at least 1."
+    if minutes > 10080:
+        return False, None, "Maximum is 10080 minutes (7 days)."
+    return True, minutes, ""
+
+
+def append_outer_runtime_step2_minutes(program_path: Path, minutes: int) -> None:
+    """Record step-2 override in program.md for humans and for future parses."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    block = (
+        f"\n\n<!-- HERMES_AUTORESEARCH_STEP2_RUNTIME {ts} -->\n"
+        f"### Outer runtime (Hermes /autoresearch step 2)\n\n"
+        f"**Total outer runtime for this run:** {minutes} minutes "
+        f"(hard cap enforced by the autoresearch worker).\n"
+    )
+    existing = program_path.read_text(encoding="utf-8")
+    program_path.write_text(existing.rstrip() + block + "\n", encoding="utf-8")
 
 
 def _build_managed_block(user_instructions: str) -> str:
@@ -180,11 +254,17 @@ def prepare_autoresearch_background_run(
     user_instructions: str,
     task_id: str | None = None,
     config: Optional[Mapping[str, Any]] = None,
+    wall_clock_override_minutes: int | None = None,
 ) -> AutoresearchPreparedRun:
     result = append_autoresearch_instructions(
         user_instructions=user_instructions,
         config=config,
     )
+    if wall_clock_override_minutes is not None:
+        append_outer_runtime_step2_minutes(
+            result.program_path, wall_clock_override_minutes
+        )
+
     prompt_text = _build_autoresearch_skill_message(result, task_id=task_id)
 
     job_id = _new_autoresearch_job_id()
@@ -196,8 +276,11 @@ def prepare_autoresearch_background_run(
 
     from hermes_cli.autoresearch_wall_clock import resolve_autoresearch_wall_clock_seconds
 
-    _prog_text = result.program_path.read_text(encoding="utf-8")
-    wall_clock_seconds = resolve_autoresearch_wall_clock_seconds(_prog_text)
+    if wall_clock_override_minutes is not None:
+        wall_clock_seconds = max(60, int(wall_clock_override_minutes) * 60)
+    else:
+        _prog_text = result.program_path.read_text(encoding="utf-8")
+        wall_clock_seconds = resolve_autoresearch_wall_clock_seconds(_prog_text)
 
     return AutoresearchPreparedRun(
         repo_path=result.repo_path,
@@ -208,6 +291,7 @@ def prepare_autoresearch_background_run(
         prompt_path=prompt_path,
         log_path=log_path,
         wall_clock_seconds=wall_clock_seconds,
+        wall_clock_override_minutes=wall_clock_override_minutes,
     )
 
 
