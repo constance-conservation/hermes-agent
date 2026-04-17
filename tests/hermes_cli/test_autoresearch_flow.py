@@ -9,9 +9,18 @@ from hermes_cli.autoresearch_flow import (
     build_autoresearch_worker_command,
     format_autoresearch_capture_prompt,
     format_autoresearch_live_log_follow_instructions,
+    format_gateway_autoresearch_step_banner,
     prepare_autoresearch_background_run,
     resolve_autoresearch_program_path,
 )
+
+
+def test_gateway_step_banner_wraps_body():
+    wrapped = format_gateway_autoresearch_step_banner(1, "hello")
+    assert "STEP 1/2" in wrapped
+    assert "hello" in wrapped
+    w2 = format_gateway_autoresearch_step_banner(2, "time")
+    assert "STEP 2/2" in w2
 
 
 def test_live_log_follow_instructions_includes_tail_command(tmp_path):

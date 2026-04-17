@@ -5065,8 +5065,9 @@ class HermesCLI:
                 "phase": "await_instructions",
                 "started": time.time(),
             }
-            self._print_plain_notice(
-                format_autoresearch_capture_prompt(load_cli_config())
+            self._print_autoresearch_operator_guide(
+                format_autoresearch_capture_prompt(load_cli_config()),
+                tone="step1",
             )
             return
 
@@ -5079,8 +5080,9 @@ class HermesCLI:
             return
 
         if lowered in {"show", "path"}:
-            self._print_plain_notice(
-                format_autoresearch_target_message(load_cli_config())
+            self._print_autoresearch_operator_guide(
+                format_autoresearch_target_message(load_cli_config()),
+                tone="info",
             )
             return
 
@@ -5090,7 +5092,10 @@ class HermesCLI:
             "instructions": user_arg,
             "started": time.time(),
         }
-        self._print_plain_notice(format_autoresearch_duration_prompt(load_cli_config()))
+        self._print_autoresearch_operator_guide(
+            format_autoresearch_duration_prompt(load_cli_config()),
+            tone="step2",
+        )
 
     def _handle_paperclip_command(self, cmd: str):
         """Handle /paperclip — load the installed Paperclip skill."""
@@ -5134,6 +5139,28 @@ class HermesCLI:
                 _cprint(f"  {line}")
             else:
                 _cprint("")
+
+    def _print_autoresearch_operator_guide(self, text: str, *, tone: str) -> None:
+        """Color-coded /autoresearch prompts: step1 cyan, step2 yellow, shell green, info blue."""
+        from rich.markup import escape
+
+        tones: dict[str, tuple[str, str]] = {
+            "step1": ("bold cyan", "cyan"),
+            "step2": ("bold yellow", "yellow"),
+            "shell": ("bold green", "green"),
+            "info": ("bold bright_blue", "bright_blue"),
+        }
+        bold_style, body_style = tones.get(tone, ("bold white", "white"))
+        self.console.print()
+        first_nonempty = True
+        for line in str(text or "").splitlines():
+            if not line.strip():
+                self.console.print()
+                continue
+            e = escape(line)
+            style = bold_style if first_nonempty else body_style
+            first_nonempty = False
+            self.console.print(f"  [{style}]{e}[/{style}]")
 
     def _launch_autoresearch_background_run(
         self,
@@ -5191,72 +5218,94 @@ class HermesCLI:
             f"  Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s "
             f"({'step-2 override' if wall_clock_override_minutes is not None else 'from program.md / default'})"
         )
-        self._print_plain_notice(
-            format_autoresearch_live_log_follow_instructions(prepared.log_path)
+        self._print_autoresearch_operator_guide(
+            format_autoresearch_live_log_follow_instructions(prepared.log_path),
+            tone="shell",
         )
-        _cprint(
-            "  Tool and terminal activity streams into that log (Hermes worker output)."
-        )
-        _cprint(
-            "  You can close this SSH session; the worker keeps running."
-        )
-        _cprint(
-            "  While this TUI stays open, Hermes streams the log below (0.5s refresh + heartbeats if idle)."
+        self.console.print(
+            "  [dim]Full training/tool detail is written to that log file. "
+            "Below: short digests every ~30s (not the full stream). "
+            "You can close SSH; the worker keeps running.[/dim]"
         )
         self._start_autoresearch_log_follower(prepared.log_path, proc.pid)
 
     def _start_autoresearch_log_follower(self, log_path: Path, pid: int) -> None:
+        """Periodic digests only — full detail stays in the log file (`tail -f`)."""
+
+        def _tail_snippet(max_chars: int = 500) -> str:
+            try:
+                if not log_path.exists():
+                    return ""
+                raw = log_path.read_bytes()
+                if len(raw) > max_chars:
+                    raw = raw[-max_chars:]
+                text = raw.decode("utf-8", errors="replace")
+                lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+                if not lines:
+                    return ""
+                if len(lines) == 1:
+                    s = lines[0]
+                    return s[:280] + ("…" if len(s) > 280 else "")
+                return " │ ".join(lines[-2:])
+            except OSError:
+                return ""
+
         def _follow() -> None:
-            last_pos = 0
-            idle_polls = 0
-            last_activity = time.monotonic()
-            last_heartbeat = time.monotonic()
-            poll_s = 0.5
-            heartbeat_every = 25.0
+            from rich.markup import escape
+
+            poll_s = 6.0
+            digest_every = 30.0
+            idle_heartbeat_every = 75.0
+            last_digest_at = 0.0
+            last_idle_ping_at = 0.0
+            last_reported_size = 0
             while True:
                 try:
-                    if log_path.exists():
-                        with log_path.open("r", encoding="utf-8", errors="replace") as fh:
-                            fh.seek(last_pos)
-                            chunk = fh.read()
-                            last_pos = fh.tell()
-                        if chunk:
-                            idle_polls = 0
-                            last_activity = time.monotonic()
-                            for line in chunk.splitlines():
-                                text = line.rstrip()
-                                if text:
-                                    _cprint(f"  {text}")
-                        else:
-                            idle_polls += 1
-                    else:
-                        idle_polls += 1
-
+                    time.sleep(poll_s)
                     alive = True
                     try:
                         os.kill(pid, 0)
                     except OSError:
                         alive = False
 
+                    try:
+                        sz = log_path.stat().st_size if log_path.exists() else 0
+                    except OSError:
+                        sz = 0
+
                     now = time.monotonic()
+                    has_new_bytes = sz > last_reported_size
                     if (
                         alive
-                        and (now - last_activity) >= heartbeat_every
-                        and (now - last_heartbeat) >= heartbeat_every
+                        and has_new_bytes
+                        and (now - last_digest_at) >= digest_every
                     ):
-                        last_heartbeat = now
-                        try:
-                            sz = log_path.stat().st_size if log_path.exists() else 0
-                        except OSError:
-                            sz = 0
-                        _cprint(
-                            f"  [autoresearch] Worker still running (pid {pid}, log ~{sz} bytes). "
-                            f"Waiting for more output…"
+                        last_digest_at = now
+                        last_idle_ping_at = now
+                        last_reported_size = sz
+                        snip = _tail_snippet(800)
+                        self.console.print(
+                            f"  [dim]⌁ Autoresearch · log {sz} B · latest:[/dim] "
+                            f"[dim]{escape(snip or '…')}[/dim]"
+                        )
+                    elif (
+                        alive
+                        and not has_new_bytes
+                        and (now - last_digest_at) >= idle_heartbeat_every
+                        and (now - last_idle_ping_at) >= idle_heartbeat_every
+                    ):
+                        last_idle_ping_at = now
+                        self.console.print(
+                            f"  [dim]⌁ Autoresearch worker still running (pid {pid}, log {sz} B). "
+                            f"Use tail -f for full detail.[/dim]"
                         )
 
-                    if not alive and idle_polls >= 3:
+                    if not alive:
+                        self.console.print(
+                            f"  [dim]⌁ Autoresearch worker process ended (pid {pid}). "
+                            f"See job log for full output.[/dim]"
+                        )
                         break
-                    time.sleep(poll_s)
                 except Exception:
                     break
 
@@ -5283,13 +5332,20 @@ class HermesCLI:
         if phase == "await_instructions":
             pend["instructions"] = user_input
             pend["phase"] = "await_duration"
-            self._print_plain_notice(format_autoresearch_duration_prompt(load_cli_config()))
+            self._print_autoresearch_operator_guide(
+                format_autoresearch_duration_prompt(load_cli_config()),
+                tone="step2",
+            )
             return True
         if phase == "await_duration":
             ok, mins, err = parse_autoresearch_duration_minutes_reply(user_input)
             if not ok:
-                _cprint(f"  {err}")
-                _cprint("  Examples: `default` or `600` (minutes).")
+                from rich.markup import escape
+
+                self.console.print(f"  [yellow]{escape(err)}[/yellow]")
+                self.console.print(
+                    "  [dim]Examples: default or 600 (minutes).[/dim]"
+                )
                 return True
             instr = (pend.get("instructions") or "").strip()
             if not instr:

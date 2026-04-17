@@ -119,6 +119,15 @@ def format_autoresearch_live_log_shell_command(log_path: Path) -> str:
     return f"tail -n 200 -f {shlex.quote(str(log_path.resolve()))}"
 
 
+def format_gateway_autoresearch_step_banner(step: int, inner_text: str) -> str:
+    """Plain-text section headers for gateway/messaging (no ANSI)."""
+    if step == 1:
+        return f"📋 STEP 1/2 — What to send Hermes\n\n{inner_text}"
+    if step == 2:
+        return f"⏱ STEP 2/2 — Total wall-clock runtime\n\n{inner_text}"
+    return inner_text
+
+
 def format_autoresearch_live_log_follow_instructions(log_path: Path) -> str:
     """Copy-paste block: runnable shell command + what the log file is (CLI + gateway)."""
     cmd = format_autoresearch_live_log_shell_command(log_path)

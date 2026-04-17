@@ -16,7 +16,8 @@ def _emit(message: str) -> None:
     print(message, flush=True)
 
 
-def _compact_text(text: str, limit: int = 180) -> str:
+def _compact_text(text: str, limit: int = 520) -> str:
+    """Wide default so the job log file stays detailed; TUI/gateway use digests separately."""
     cleaned = " ".join(str(text or "").split())
     if len(cleaned) <= limit:
         return cleaned
@@ -81,7 +82,7 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
             text = str(message or "").strip()
             if text:
                 _emit(
-                    f"[autoresearch][status:{event_type}] {_compact_text(text, limit=240)}"
+                    f"[autoresearch][status:{event_type}] {_compact_text(text, limit=720)}"
                 )
 
         def _tool_progress_callback(
@@ -89,7 +90,7 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
         ) -> None:
             if tool_name == "_thinking":
                 return
-            text = _compact_text(preview, limit=200)
+            text = _compact_text(preview, limit=720)
             if text:
                 _emit(f"[autoresearch][tool:{tool_name}] {text}")
             else:

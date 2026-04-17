@@ -504,6 +504,7 @@ class GatewayRunner:
         self._running_agents: Dict[str, Any] = {}
         self._pending_messages: Dict[str, str] = {}  # Queued messages during interrupt
         self._pending_autoresearch: Dict[str, Dict[str, Any]] = {}
+        self._autoresearch_watcher_last_digest_ts: Dict[str, float] = {}
 
         # Cache AIAgent instances per session to preserve prompt caching.
         # Without this, a new AIAgent is created per message, rebuilding the
@@ -1955,6 +1956,7 @@ class GatewayRunner:
 
             from hermes_cli.autoresearch_flow import (
                 format_autoresearch_duration_prompt,
+                format_gateway_autoresearch_step_banner,
                 parse_autoresearch_duration_minutes_reply,
                 prepare_autoresearch_background_run,
             )
@@ -1976,7 +1978,9 @@ class GatewayRunner:
                 pend["instructions"] = event.text or ""
                 pend["phase"] = "await_duration"
                 self._pending_autoresearch[_quick_key] = pend
-                return format_autoresearch_duration_prompt(gw_config)
+                return format_gateway_autoresearch_step_banner(
+                    2, format_autoresearch_duration_prompt(gw_config)
+                )
 
             if phase == "await_duration":
                 ok, mins, err = parse_autoresearch_duration_minutes_reply(event.text or "")
@@ -4041,6 +4045,7 @@ class GatewayRunner:
             format_autoresearch_capture_prompt,
             format_autoresearch_duration_prompt,
             format_autoresearch_target_message,
+            format_gateway_autoresearch_step_banner,
         )
         from hermes_cli.config import load_config
 
@@ -4058,7 +4063,9 @@ class GatewayRunner:
                 "phase": "await_instructions",
                 "started": time.time(),
             }
-            return format_autoresearch_capture_prompt(gw_config)
+            return format_gateway_autoresearch_step_banner(
+                1, format_autoresearch_capture_prompt(gw_config)
+            )
 
         if lowered in {"cancel", "abort", "stop"}:
             if self._pending_autoresearch.pop(session_key, None) is not None:
@@ -4066,14 +4073,16 @@ class GatewayRunner:
             return "No pending /autoresearch capture."
 
         if lowered in {"show", "path"}:
-            return format_autoresearch_target_message(gw_config)
+            return f"ℹ️ Autoresearch paths\n\n{format_autoresearch_target_message(gw_config)}"
 
         self._pending_autoresearch[session_key] = {
             "phase": "await_duration",
             "instructions": user_arg,
             "started": time.time(),
         }
-        return format_autoresearch_duration_prompt(gw_config)
+        return format_gateway_autoresearch_step_banner(
+            2, format_autoresearch_duration_prompt(gw_config)
+        )
 
     async def _start_autoresearch_background_run(
         self,
@@ -4105,11 +4114,12 @@ class GatewayRunner:
 
         watcher = {
             "session_id": proc_session.id,
-            "check_interval": 5,
+            "check_interval": 15,
             "session_key": session_key,
             "platform": event.source.platform.value,
             "chat_id": event.source.chat_id,
             "thread_id": event.source.thread_id or "",
+            "autoresearch_digest": True,
         }
         proc_session.watcher_platform = watcher["platform"]
         proc_session.watcher_chat_id = watcher["chat_id"]
@@ -4135,9 +4145,11 @@ class GatewayRunner:
                 f"Process session: {proc_session.id}",
                 f"Program file updated: {prepared.program_path}",
                 "",
+                "🖥 FULL TRAINING LOG — paste the shell line below on the gateway host (hermesuser) for live detail:",
+                "",
                 _follow,
                 "",
-                "Progress snippets post here every ~5s when the log grows (notification mode: all).",
+                "📊 In chat you will get short digests ~every 45s while the job runs (not the full log).",
                 "You can close this chat; the worker keeps running on the host.",
             ]
         )
@@ -5930,29 +5942,79 @@ class GatewayRunner:
             return
 
         last_output_len = 0
-        while True:
-            await asyncio.sleep(interval)
+        ar_digest = bool(watcher.get("autoresearch_digest"))
+        digest_gap_s = 45.0
+        try:
+            while True:
+                await asyncio.sleep(interval)
 
-            session = process_registry.get(session_id)
-            if session is None:
-                break
+                session = process_registry.get(session_id)
+                if session is None:
+                    break
 
-            current_output_len = len(session.output_buffer)
-            has_new_output = current_output_len > last_output_len
-            last_output_len = current_output_len
+                current_output_len = len(session.output_buffer)
+                has_new_output = current_output_len > last_output_len
+                last_output_len = current_output_len
 
-            if session.exited:
-                # Decide whether to notify based on mode
-                should_notify = (
-                    notify_mode in ("all", "result")
-                    or (notify_mode == "error" and session.exit_code not in (0, None))
-                )
-                if should_notify:
-                    new_output = session.output_buffer[-1000:] if session.output_buffer else ""
-                    message_text = (
-                        f"[Background process {session_id} finished with exit code {session.exit_code}~ "
-                        f"Here's the final output:\n{new_output}]"
+                if session.exited:
+                    should_notify = (
+                        notify_mode in ("all", "result")
+                        or (notify_mode == "error" and session.exit_code not in (0, None))
                     )
+                    if should_notify:
+                        new_output = session.output_buffer[-1000:] if session.output_buffer else ""
+                        if ar_digest:
+                            lines = [ln.rstrip() for ln in new_output.splitlines() if ln.strip()]
+                            tail = lines[-5:] if lines else []
+                            snippet = "\n".join(tail) if tail else new_output[-500:]
+                            if len(snippet) > 900:
+                                snippet = snippet[:897] + "…"
+                            message_text = (
+                                f"Autoresearch finished (exit {session.exit_code}). "
+                                f"Tail of log:\n{snippet}"
+                            )
+                        else:
+                            message_text = (
+                                f"[Background process {session_id} finished with exit code {session.exit_code}~ "
+                                f"Here's the final output:\n{new_output}]"
+                            )
+                        adapter = None
+                        for p, a in self.adapters.items():
+                            if p.value == platform_name:
+                                adapter = a
+                                break
+                        if adapter and chat_id:
+                            try:
+                                send_meta = {"thread_id": thread_id} if thread_id else None
+                                await adapter.send(chat_id, message_text, metadata=send_meta)
+                            except Exception as e:
+                                logger.error("Watcher delivery error: %s", e)
+                    break
+
+                elif has_new_output and notify_mode == "all":
+                    if ar_digest:
+                        import time as _time_module
+
+                        now = _time_module.monotonic()
+                        last_ts = self._autoresearch_watcher_last_digest_ts.get(session_id, 0.0)
+                        if now - last_ts < digest_gap_s:
+                            continue
+                        self._autoresearch_watcher_last_digest_ts[session_id] = now
+                        buf = session.output_buffer or ""
+                        lines = [ln.rstrip() for ln in buf.splitlines() if ln.strip()]
+                        snippet = lines[-1] if lines else "(no lines yet)"
+                        if len(snippet) > 300:
+                            snippet = snippet[:297] + "…"
+                        message_text = (
+                            f"📊 Autoresearch · log ~{len(buf)} chars. Latest line:\n{snippet}\n\n"
+                            f"(Full training stream: `tail -f` the job log path from the start message.)"
+                        )
+                    else:
+                        new_output = session.output_buffer[-500:] if session.output_buffer else ""
+                        message_text = (
+                            f"[Background process {session_id} is still running~ "
+                            f"New output:\n{new_output}]"
+                        )
                     adapter = None
                     for p, a in self.adapters.items():
                         if p.value == platform_name:
@@ -5964,26 +6026,9 @@ class GatewayRunner:
                             await adapter.send(chat_id, message_text, metadata=send_meta)
                         except Exception as e:
                             logger.error("Watcher delivery error: %s", e)
-                break
 
-            elif has_new_output and notify_mode == "all":
-                # New output available -- deliver status update (only in "all" mode)
-                new_output = session.output_buffer[-500:] if session.output_buffer else ""
-                message_text = (
-                    f"[Background process {session_id} is still running~ "
-                    f"New output:\n{new_output}]"
-                )
-                adapter = None
-                for p, a in self.adapters.items():
-                    if p.value == platform_name:
-                        adapter = a
-                        break
-                if adapter and chat_id:
-                    try:
-                        send_meta = {"thread_id": thread_id} if thread_id else None
-                        await adapter.send(chat_id, message_text, metadata=send_meta)
-                    except Exception as e:
-                        logger.error("Watcher delivery error: %s", e)
+        finally:
+            self._autoresearch_watcher_last_digest_ts.pop(session_id, None)
 
         logger.debug("Process watcher ended: %s", session_id)
 
