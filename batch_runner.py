@@ -34,6 +34,7 @@ from rich.console import Console
 import fire
 
 from run_agent import AIAgent
+from utils import env_var_enabled
 from toolset_distributions import (
     list_distributions, 
     sample_toolsets_from_distribution,
@@ -309,6 +310,8 @@ def _process_single_prompt(
         
         # Initialize agent with sampled toolsets and log prefix for identification
         log_prefix = f"[B{batch_num}:P{prompt_index}]"
+        _batch_include_context = env_var_enabled("HERMES_BATCH_INCLUDE_CONTEXT", "0")
+        _batch_include_memory = env_var_enabled("HERMES_BATCH_INCLUDE_MEMORY", "0")
         agent = AIAgent(
             base_url=config.get("base_url"),
             api_key=config.get("api_key"),
@@ -327,8 +330,9 @@ def _process_single_prompt(
             max_tokens=config.get("max_tokens"),
             reasoning_config=config.get("reasoning_config"),
             prefill_messages=config.get("prefill_messages"),
-            skip_context_files=True,  # Don't pollute trajectories with SOUL.md/AGENTS.md
-            skip_memory=True,  # Don't use persistent memory in batch runs
+            # Default keeps batch runs hermetic; opt in to memory/context when needed.
+            skip_context_files=not _batch_include_context,
+            skip_memory=not _batch_include_memory,
         )
 
         # Run the agent with task_id to ensure each task gets its own isolated VM

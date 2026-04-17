@@ -828,6 +828,24 @@ def _read_workspace_memory_anchor_file(mem_root: Path, name: str, section_label:
         return None
 
 
+def _read_workspace_memory_nested_file(mem_root: Path, relpath: str, section_label: str) -> Optional[str]:
+    """Read a nested markdown file under workspace/memory with scanning + truncation."""
+    path = mem_root / relpath
+    if not path.is_file():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        if not content:
+            return None
+        content = _strip_yaml_frontmatter(content)
+        content = _scan_context_content(content, relpath)
+        body = f"## {section_label}\n\n{content}"
+        return _truncate_content(body, relpath)
+    except Exception as e:
+        logger.debug("Could not read workspace memory nested file %s: %s", path, e)
+        return None
+
+
 def _workspace_memory_extras_from_env() -> set[str]:
     """Parse ``HERMES_WORKSPACE_MEMORY_EXTRAS`` (comma/semicolon, case-insensitive)."""
     raw = (os.environ.get("HERMES_WORKSPACE_MEMORY_EXTRAS") or "").strip().lower()
@@ -862,12 +880,22 @@ def _load_workspace_memory_anchor_pack() -> str:
         if block:
             parts.append(block)
 
+    # Cortical Lattice Memory: pinned constitution pack (small, stable).
+    constitution = _read_workspace_memory_nested_file(
+        mem_root,
+        "constitution/CONSTITUTION.md",
+        "constitution/CONSTITUTION.md (HERMES_HOME/workspace/memory)",
+    )
+    if constitution:
+        parts.append(constitution)
+
     extras = _workspace_memory_extras_from_env()
     conditional = (
         ("state", "STATE.md"),
         ("tools", "TOOLS.md"),
         ("skills", "SKILLS.md"),
         ("bootstrap", "BOOTSTRAP.md"),
+        ("infrastructure", "INFRASTRUCTURE.md"),
     )
     for key, fname in conditional:
         if key in extras:

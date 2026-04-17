@@ -33,6 +33,7 @@ except ImportError:
 
 from hermes_constants import get_hermes_home
 from hermes_time import now as _hermes_now
+from utils import env_var_enabled
 
 from cron.delivery import (
     SILENT_MARKER,
@@ -348,7 +349,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             provider_sort=pr.get("sort"),
             disabled_toolsets=disabled_toolsets,
             quiet_mode=True,
-            skip_memory=True,
+            skip_memory=env_var_enabled("HERMES_CRON_SKIP_MEMORY", "0"),
             platform="cron",
             session_id=_cron_session_id,
             session_db=_session_db,

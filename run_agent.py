@@ -9009,6 +9009,37 @@ class AIAgent:
         
             # For Hugging Face fallback routing (``hf_router``) and diagnostics.
             self._last_user_turn_text = (user_message or "")[:12000]
+
+            # ── Cortical Lattice Memory (ephemeral working set) ──
+            # Working memory pages must be injected per-turn without rebuilding the
+            # cached system prompt (prefix-cache safety). We compile a small pack and
+            # attach it as an ephemeral system prompt addition for this turn only.
+            try:
+                from agent.cortical_lattice.retrieval_planner import plan_retrieval
+                from agent.cortical_lattice.memory_compiler import (
+                    compile_ephemeral_pack,
+                    write_context_pack_file,
+                )
+
+                _plan = plan_retrieval(user_message=user_message or "")
+                _pack = compile_ephemeral_pack(
+                    hermes_home=get_hermes_home(),
+                    user_message=user_message or "",
+                    include_infrastructure=_plan.include_infrastructure,
+                )
+                write_context_pack_file(hermes_home=get_hermes_home(), pack=_pack)
+
+                _base_ephemeral = (self.ephemeral_system_prompt or "").strip()
+                _pack_txt = (_pack.content or "").strip()
+                if _pack_txt:
+                    cortex_block = f"## Cortical Lattice — context-pack (ephemeral)\n\n{_pack_txt}"
+                    self.ephemeral_system_prompt = (
+                        cortex_block
+                        if not _base_ephemeral
+                        else (_base_ephemeral + "\n\n" + cortex_block)
+                    )
+            except Exception:
+                pass
         
             # Initialize conversation (copy to avoid mutating the caller's list)
             messages = list(conversation_history) if conversation_history else []
@@ -11482,6 +11513,28 @@ class AIAgent:
                     )
                 except Exception as exc:
                     logger.warning("post_llm_call hook failed: %s", exc)
+
+            # Cortical Lattice Memory: append a minimal trace per completed turn.
+            # This is append-only and stored under workspace/memory/episodic-ledger/.
+            if final_response and not interrupted:
+                try:
+                    from agent.cortical_lattice.writeback import (
+                        append_trace as _clm_append_trace,
+                        extract_tool_names_from_messages as _clm_extract_tools,
+                    )
+
+                    _clm_append_trace(
+                        hermes_home=get_hermes_home(),
+                        session_id=str(self.session_id or ""),
+                        user_message=str(original_user_message or ""),
+                        assistant_response=str(final_response or ""),
+                        model=getattr(self, "model", None),
+                        provider=getattr(self, "provider", None),
+                        tool_names=_clm_extract_tools(messages),
+                        completed=bool(completed),
+                    )
+                except Exception:
+                    pass
         
             # Extract reasoning from the last assistant message (if any)
             last_reasoning = None
