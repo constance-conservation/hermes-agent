@@ -2,21 +2,19 @@
 
 Conceptual view of how Hermes assembles context and tools around the LLM call path: **model routing** (for example OpenRouter) is the inference API path; **memory** is what feeds the prompt or is invoked as tools—local Cortical Lattice markdown, built-in `MEMORY.md` / `USER.md`, optional **Mem0** as the single pluggable memory provider, and **Zep / Letta / LangMem / LangSmith** as explicit tools in `tools/cloud_memory_tool.py`. Routing intent for backends is also described in workspace `constitution/memory-routing.md` (when present).
 
-**Pre-rendered images** (committed in this folder): PNG for quick viewing; SVG for lossless zoom. See [README.md](README.md) to regenerate.
+**Pre-rendered images** (PNG only, numbered in order): see [README.md](README.md) to regenerate.
 
-| Diagram | PNG | SVG |
-|---------|-----|-----|
-| A — Full turn | [hermes-memory-turn-flow.png](hermes-memory-turn-flow.png) | [hermes-memory-turn-flow.svg](hermes-memory-turn-flow.svg) |
-| B — Cortical lattice | [hermes-memory-cortical-lattice.png](hermes-memory-cortical-lattice.png) | [hermes-memory-cortical-lattice.svg](hermes-memory-cortical-lattice.svg) |
-| C — External products | [hermes-memory-external-products.png](hermes-memory-external-products.png) | [hermes-memory-external-products.svg](hermes-memory-external-products.svg) |
+| # | Diagram | PNG |
+|---|---------|-----|
+| **1** | A — Full turn | [01-hermes-memory-turn-flow.png](01-hermes-memory-turn-flow.png) |
+| **2** | B — Cortical lattice | [02-hermes-memory-cortical-lattice.png](02-hermes-memory-cortical-lattice.png) |
+| **3** | C — External products | [03-hermes-memory-external-products.png](03-hermes-memory-external-products.png) |
 
 ---
 
-## Diagram A — One full turn (from message to memory side effects)
+## 1. Diagram A — One full turn (from message to memory side effects)
 
-![Diagram A — one full turn from message to memory side effects](hermes-memory-turn-flow.png)
-
-*Vector:* [hermes-memory-turn-flow.svg](hermes-memory-turn-flow.svg)
+![1 — Full turn from message to memory side effects](01-hermes-memory-turn-flow.png)
 
 ```mermaid
 flowchart TB
@@ -89,13 +87,11 @@ Standalone Mermaid source: [hermes-memory-turn-flow.mmd](hermes-memory-turn-flow
 
 ---
 
-## Diagram B — Cortical lattice local layers and how they relate
+## 2. Diagram B — Cortical lattice local layers and how they relate
 
 Folders of markdown under workspace memory, not separate servers.
 
-![Diagram B — cortical lattice layers](hermes-memory-cortical-lattice.png)
-
-*Vector:* [hermes-memory-cortical-lattice.svg](hermes-memory-cortical-lattice.svg)
+![2 — Cortical lattice layers](02-hermes-memory-cortical-lattice.png)
 
 ```mermaid
 flowchart LR
@@ -141,13 +137,11 @@ Standalone Mermaid source: [hermes-memory-cortical-lattice.mmd](hermes-memory-co
 
 ---
 
-## Diagram C — External memory products versus local files
+## 3. Diagram C — External memory products versus local files
 
 Who is a plugin, who is tools-only, and where routing intent is written.
 
-![Diagram C — external memory products vs local files](hermes-memory-external-products.png)
-
-*Vector:* [hermes-memory-external-products.svg](hermes-memory-external-products.svg)
+![3 — External memory products vs local files](03-hermes-memory-external-products.png)
 
 ```mermaid
 flowchart TB
