@@ -6,6 +6,8 @@ from unittest.mock import patch, MagicMock
 
 import yaml
 
+from hermes_cli.default_soul import DEFAULT_SOUL_MD
+
 from hermes_cli.config import (
     DEFAULT_CONFIG,
     get_hermes_home,
@@ -54,6 +56,22 @@ class TestEnsureHermesHome:
         assert profile.is_dir()
         assert (profile / "SOUL.md").is_file()
         assert (profile / "workspace" / "memory").is_dir()
+
+    def test_chained_symlink_soul_materializes_missing_target_tree(self, tmp_path):
+        """Broken multi-hop SOUL.md symlinks (profile -> workspace -> persona/soul) must not ENOENT."""
+        home = tmp_path / "profiles" / "chief-orchestrator"
+        home.mkdir(parents=True)
+        (home / "workspace").mkdir(parents=True, exist_ok=True)
+        (home / "SOUL.md").symlink_to(home / "workspace" / "SOUL.md")
+        (home / "workspace" / "SOUL.md").symlink_to(
+            home / "workspace" / "memory" / "actors" / "persona" / "soul.md"
+        )
+        assert not (home / "workspace" / "memory").exists()
+        with patch.dict(os.environ, {"HERMES_HOME": str(home)}):
+            ensure_hermes_home()
+        deep = home / "workspace" / "memory" / "actors" / "persona" / "soul.md"
+        assert deep.is_file()
+        assert deep.read_text(encoding="utf-8") == DEFAULT_SOUL_MD
 
     def test_creates_default_soul_md_if_missing(self, tmp_path):
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):

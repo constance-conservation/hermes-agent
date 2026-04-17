@@ -197,18 +197,44 @@ def _secure_file(path):
         pass
 
 
+def _resolve_seed_soul_path(home: Path) -> Path:
+    """Return the concrete filesystem path that should receive a default SOUL body.
+
+    Profiles often use ``SOUL.md`` as a symlink (sometimes chained) into ``workspace/``.
+    ``Path.write_text`` follows symlinks; if an intermediate directory in the chain is
+    missing, Linux/macOS return ENOENT unless we materialize the final parent dirs.
+    """
+    home = Path(home).expanduser()
+    p = home / "SOUL.md"
+    seen: set[str] = set()
+    for _ in range(64):
+        key = str(p)
+        if key in seen:
+            return home / "SOUL.md"
+        seen.add(key)
+        try:
+            if not p.is_symlink():
+                return p
+            tgt = p.readlink()
+        except OSError:
+            return p
+        p = tgt if tgt.is_absolute() else (p.parent / tgt)
+    return home / "SOUL.md"
+
+
 def _ensure_default_soul_md(home: Path) -> None:
     """Seed a default SOUL.md into HERMES_HOME if the user doesn't have one yet."""
     home = Path(home).expanduser()
     # Materialize the profile root even if callers skipped ``ensure_hermes_home`` (defensive).
     home.mkdir(parents=True, exist_ok=True)
-    soul_path = home / "SOUL.md"
-    if soul_path.exists():
+    (home / "workspace").mkdir(parents=True, exist_ok=True)
+
+    seed_path = _resolve_seed_soul_path(home)
+    if seed_path.exists(follow_symlinks=True) and seed_path.is_file():
         return
-    # ``write_text`` raises ENOENT if *home* vanished, is a broken symlink target, or was never created.
-    soul_path.parent.mkdir(parents=True, exist_ok=True)
-    soul_path.write_text(DEFAULT_SOUL_MD, encoding="utf-8")
-    _secure_file(soul_path)
+    seed_path.parent.mkdir(parents=True, exist_ok=True)
+    seed_path.write_text(DEFAULT_SOUL_MD, encoding="utf-8")
+    _secure_file(seed_path)
 
 
 def ensure_hermes_home():
