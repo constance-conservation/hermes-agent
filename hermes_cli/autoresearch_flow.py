@@ -121,8 +121,15 @@ def format_autoresearch_target_message(config: Optional[Mapping[str, Any]] = Non
 
 
 def format_autoresearch_live_log_shell_command(log_path: Path) -> str:
-    """Single line safe to paste in a terminal on the host where the worker runs."""
-    return f"tail -n 200 -f {shlex.quote(str(log_path.resolve()))}"
+    """Two-line shell snippet for the host where the worker runs.
+
+    A single long ``tail -n 200 -f /very/long/path/run.log`` often **wraps** in the
+    TUI; users then paste a newline between ``-f`` and the path, so ``tail`` reads
+    **stdin** and the log file never streams. Using ``LOG_FILE=…`` on one line and
+    a short ``tail … "$LOG_FILE"`` on the next avoids that failure mode.
+    """
+    resolved = str(log_path.resolve())
+    return f"LOG_FILE={shlex.quote(resolved)}\ntail -n 200 -f \"$LOG_FILE\""
 
 
 def format_gateway_autoresearch_step_banner(step: int, inner_text: str) -> str:
@@ -143,7 +150,7 @@ def format_autoresearch_live_log_follow_instructions(log_path: Path) -> str:
             "Autoresearch — step 3 of 3: watch the background worker (subprocess).",
             "",
             "Open a new terminal on this same host (new tab, split pane, or another SSH session). "
-            "Paste the entire line below and press Enter to stream the live log. "
+            "Paste both lines below into that shell (same session, in order), then press Enter after the second line. "
             "Ctrl+C stops `tail` only; the Hermes worker subprocess keeps running.",
             "",
             cmd,
@@ -337,6 +344,7 @@ def build_autoresearch_worker_command(
     return " ".join(
         [
             shlex.quote(python_executable),
+            "-u",
             "-m",
             "hermes_cli.autoresearch_background",
             "--prompt-file",

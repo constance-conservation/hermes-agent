@@ -5168,7 +5168,9 @@ class HermesCLI:
                 continue
             stripped = line.strip()
             # Copy-paste shell (distinct from narrative)
-            if stripped.startswith("tail ") and "-f" in stripped:
+            if stripped.startswith("LOG_FILE=") or (
+                stripped.startswith("tail ") and "-f" in stripped
+            ):
                 _emit_styled("bold bright_green", line)
                 first_nonempty = False
                 continue
@@ -5206,7 +5208,10 @@ class HermesCLI:
                 wall_clock_override_minutes=wall_clock_override_minutes,
             )
             prepared.log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_handle = prepared.log_path.open("a", encoding="utf-8")
+            # Line-buffer the job log so a second-terminal `tail -f` sees output promptly.
+            log_handle = prepared.log_path.open(
+                "a", encoding="utf-8", buffering=1
+            )
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["HERMES_AUTORESEARCH_JOB_ID"] = prepared.job_id
@@ -5214,6 +5219,7 @@ class HermesCLI:
             proc = subprocess.Popen(
                 [
                     sys.executable,
+                    "-u",
                     "-m",
                     "hermes_cli.autoresearch_background",
                     "--prompt-file",

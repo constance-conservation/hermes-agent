@@ -26,7 +26,9 @@ def test_gateway_step_banner_wraps_body():
 def test_live_log_follow_instructions_includes_tail_command(tmp_path):
     log = tmp_path / "run.log"
     text = format_autoresearch_live_log_follow_instructions(log)
+    assert "LOG_FILE=" in text
     assert "tail -n 200 -f" in text
+    assert '"$LOG_FILE"' in text or "$LOG_FILE" in text
     assert str(log.resolve()) in text or "run.log" in text
     assert "plain-text" in text.lower() or "executable" in text.lower()
 
@@ -148,5 +150,6 @@ def test_build_worker_command_quotes_prompt_path(tmp_path):
     )
 
     assert "/tmp/venv/bin/python" in cmd
+    assert " -u " in cmd or cmd.startswith("/tmp/venv/bin/python -u")
     assert "hermes_cli.autoresearch_background" in cmd
     assert "prompt file.txt" in cmd
