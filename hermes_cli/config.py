@@ -663,6 +663,10 @@ DEFAULT_CONFIG = {
         "api_key": "",     # API key for delegation.base_url (falls back to OPENAI_API_KEY)
         "max_iterations": 50,  # per-subagent iteration cap (each subagent gets its own budget,
                                # independent of the parent's max_iterations)
+        # Optional continuity controls for delegated children (default stays hermetic).
+        # Set these true only when task quality needs parent context/memory carryover.
+        "inherit_context_files": False,
+        "inherit_memory": False,
         # When ``delegate_task(..., hermes_profile=…)`` runs: after loading the target profile,
         # fill missing process env vars from the *delegating* profile's ``.env`` for these keys
         # (chief-only secrets not present in the child profile).

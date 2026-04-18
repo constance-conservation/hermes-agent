@@ -254,7 +254,12 @@ class ContextCompressor:
 
         return "\n\n".join(parts)
 
-    def _generate_summary(self, turns_to_summarize: List[Dict[str, Any]]) -> Optional[str]:
+    def _generate_summary(
+        self,
+        turns_to_summarize: List[Dict[str, Any]],
+        *,
+        extra_context: str = "",
+    ) -> Optional[str]:
         """Generate a structured summary of conversation turns.
 
         Uses a structured template (Goal, Progress, Decisions, Files, Next Steps)
@@ -267,6 +272,12 @@ class ContextCompressor:
         """
         summary_budget = self._compute_summary_budget(turns_to_summarize)
         content_to_summarize = self._serialize_for_summary(turns_to_summarize)
+        provider_context = (extra_context or "").strip()
+        provider_block = (
+            f"\n\nMEMORY PROVIDER CONTEXT TO PRESERVE:\n{provider_context}\n"
+            if provider_context
+            else ""
+        )
 
         if self._previous_summary:
             # Iterative update: preserve existing info, add new progress
@@ -276,7 +287,7 @@ PREVIOUS SUMMARY:
 {self._previous_summary}
 
 NEW TURNS TO INCORPORATE:
-{content_to_summarize}
+{content_to_summarize}{provider_block}
 
 Update the summary using this exact structure. PRESERVE all existing information that is still relevant. ADD new progress. Move items from "In Progress" to "Done" when completed. Remove information only if it is clearly obsolete.
 
@@ -314,7 +325,7 @@ Write only the summary body. Do not include any preamble or prefix."""
             prompt = f"""Create a structured handoff summary for a later assistant that will continue this conversation after earlier turns are compacted.
 
 TURNS TO SUMMARIZE:
-{content_to_summarize}
+{content_to_summarize}{provider_block}
 
 Use this exact structure:
 
@@ -588,7 +599,13 @@ Write only the summary body. Do not include any preamble or prefix."""
     # Main compression entry point
     # ------------------------------------------------------------------
 
-    def compress(self, messages: List[Dict[str, Any]], current_tokens: int = None) -> List[Dict[str, Any]]:
+    def compress(
+        self,
+        messages: List[Dict[str, Any]],
+        current_tokens: int = None,
+        *,
+        extra_context: str = "",
+    ) -> List[Dict[str, Any]]:
         """Compress conversation messages by summarizing middle turns.
 
         Algorithm:
@@ -655,7 +672,10 @@ Write only the summary body. Do not include any preamble or prefix."""
             )
 
         # Phase 3: Generate structured summary
-        summary = self._generate_summary(turns_to_summarize)
+        summary = self._generate_summary(
+            turns_to_summarize,
+            extra_context=extra_context,
+        )
 
         # Phase 4: Assemble compressed message list
         compressed = []

@@ -15,6 +15,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+_PRECOMPRESS_MAX_CHARS = 2200
+
 from agent.memory_provider import MemoryProvider
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,41 @@ class BuiltinMemoryProvider(MemoryProvider):
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Built-in memory doesn't auto-sync turns — writes happen via the memory tool."""
+
+    def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
+        """Contribute compact built-in memory context before compression.
+
+        This improves continuity when old turns are summarized/discarded while
+        preserving prompt-cache behavior (snapshot remains session-frozen).
+        """
+        if not self._store:
+            return ""
+
+        blocks: List[str] = []
+        if self._memory_enabled:
+            mem_block = self._store.format_for_system_prompt("memory") or ""
+            mem_block = mem_block.strip()
+            if mem_block:
+                blocks.append(mem_block)
+        if self._user_profile_enabled:
+            user_block = self._store.format_for_system_prompt("user") or ""
+            user_block = user_block.strip()
+            if user_block:
+                blocks.append(user_block)
+
+        if not blocks:
+            return ""
+
+        merged = "\n\n".join(blocks)
+        if len(merged) > _PRECOMPRESS_MAX_CHARS:
+            head = merged[: int(_PRECOMPRESS_MAX_CHARS * 0.75)]
+            tail = merged[-int(_PRECOMPRESS_MAX_CHARS * 0.25) :]
+            merged = head + "\n\n[...truncated builtin memory context...]\n\n" + tail
+
+        return (
+            "BUILTIN MEMORY SNAPSHOT (retain only durable, user-correctness-critical facts):\n"
+            + merged
+        )
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         """Return empty list.

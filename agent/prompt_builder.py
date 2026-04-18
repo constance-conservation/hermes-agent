@@ -310,6 +310,11 @@ CONTEXT_FILE_MAX_CHARS = 20_000
 CONTEXT_TRUNCATE_HEAD_RATIO = 0.7
 CONTEXT_TRUNCATE_TAIL_RATIO = 0.2
 
+# Keep always-loaded workspace memory anchors compact to avoid prompt bloat.
+WORKSPACE_MEMORY_ANCHOR_MAX_CHARS = 6_000
+WORKSPACE_MEMORY_NESTED_MAX_CHARS = 4_000
+WORKSPACE_MEMORY_COMBINED_MAX_CHARS = 12_000
+
 
 # =========================================================================
 # Skills prompt cache
@@ -810,7 +815,13 @@ def load_soul_md() -> Optional[str]:
     return None
 
 
-def _read_workspace_memory_anchor_file(mem_root: Path, name: str, section_label: str) -> Optional[str]:
+def _read_workspace_memory_anchor_file(
+    mem_root: Path,
+    name: str,
+    section_label: str,
+    *,
+    max_chars: int = WORKSPACE_MEMORY_ANCHOR_MAX_CHARS,
+) -> Optional[str]:
     """Read one markdown file under workspace/memory with scanning + truncation."""
     path = mem_root / name
     if not path.is_file():
@@ -822,13 +833,19 @@ def _read_workspace_memory_anchor_file(mem_root: Path, name: str, section_label:
         content = _strip_yaml_frontmatter(content)
         content = _scan_context_content(content, name)
         body = f"## {section_label}\n\n{content}"
-        return _truncate_content(body, name)
+        return _truncate_content(body, name, max_chars=max_chars)
     except Exception as e:
         logger.debug("Could not read workspace memory file %s: %s", path, e)
         return None
 
 
-def _read_workspace_memory_nested_file(mem_root: Path, relpath: str, section_label: str) -> Optional[str]:
+def _read_workspace_memory_nested_file(
+    mem_root: Path,
+    relpath: str,
+    section_label: str,
+    *,
+    max_chars: int = WORKSPACE_MEMORY_NESTED_MAX_CHARS,
+) -> Optional[str]:
     """Read a nested markdown file under workspace/memory with scanning + truncation."""
     path = mem_root / relpath
     if not path.is_file():
@@ -840,7 +857,7 @@ def _read_workspace_memory_nested_file(mem_root: Path, relpath: str, section_lab
         content = _strip_yaml_frontmatter(content)
         content = _scan_context_content(content, relpath)
         body = f"## {section_label}\n\n{content}"
-        return _truncate_content(body, relpath)
+        return _truncate_content(body, relpath, max_chars=max_chars)
     except Exception as e:
         logger.debug("Could not read workspace memory nested file %s: %s", path, e)
         return None
@@ -908,7 +925,11 @@ def _load_workspace_memory_anchor_pack() -> str:
     if not parts:
         return ""
     combined = "\n\n".join(parts)
-    return _truncate_content(combined, "workspace-memory-anchors")
+    return _truncate_content(
+        combined,
+        "workspace-memory-anchors",
+        max_chars=WORKSPACE_MEMORY_COMBINED_MAX_CHARS,
+    )
 
 
 def _load_legacy_workspace_runtime_pack() -> str:

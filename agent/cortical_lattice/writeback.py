@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+_MAX_TRACE_FILE_BYTES = 5 * 1024 * 1024
+_MAX_TRACE_FILE_LINES = 10000
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -48,6 +51,30 @@ def extract_tool_names_from_messages(messages: list[dict[str, Any]]) -> list[str
     return list(dict.fromkeys(names))
 
 
+def _line_count(path: Path) -> int:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+def _rotate_if_needed(path: Path) -> None:
+    """Best-effort rotation to bound trace growth in long-running environments."""
+    try:
+        if not path.exists():
+            return
+        size_ok = path.stat().st_size <= _MAX_TRACE_FILE_BYTES
+        lines_ok = _line_count(path) <= _MAX_TRACE_FILE_LINES
+        if size_ok and lines_ok:
+            return
+        archive = path.with_name(f"{path.stem}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}{path.suffix}")
+        path.rename(archive)
+    except Exception:
+        # Non-fatal; append should still proceed.
+        return
+
+
 def append_trace(
     *,
     hermes_home: Path,
@@ -69,6 +96,7 @@ def append_trace(
         return
 
     trace_path = mem_root / "episodic-ledger" / "traces" / "turn-traces.jsonl"
+    _rotate_if_needed(trace_path)
     obj = {
         "type": "trace",
         "observed_at": _utc_now_iso(),

@@ -38,6 +38,17 @@ def compile_ephemeral_pack(
     hermes_home: Path,
     user_message: str,
     include_infrastructure: bool = False,
+    include_state: bool = False,
+    include_skills: bool = False,
+    include_bootstrap: bool = False,
+    include_routing_indexes: bool = False,
+    include_promotion: bool = False,
+    include_observability: bool = False,
+    include_semantic: bool = False,
+    include_cases: bool = False,
+    include_hazards: bool = False,
+    include_prospective: bool = False,
+    include_social_roles: bool = False,
 ) -> CorticalEphemeralPack:
     """Build the minimal per-turn context pack.
 
@@ -73,6 +84,107 @@ def compile_ephemeral_pack(
         rtxt = _read_text(routing, max_chars=2500)
         if rtxt:
             parts.append(f"## constitution/memory-routing.md\n\n{rtxt}")
+
+    # Optional deep retrieval slices, planned per-turn.
+    if include_state:
+        state_file = mem_root / "STATE.md"
+        if state_file.is_file():
+            stxt = _read_text(state_file, max_chars=1800)
+            if stxt:
+                parts.append(f"## STATE.md (on-demand)\n\n{stxt}")
+
+    if include_skills:
+        skills_idx = mem_root / "SKILLS.md"
+        if skills_idx.is_file():
+            sktxt = _read_text(skills_idx, max_chars=1800)
+            if sktxt:
+                parts.append(f"## SKILLS.md (on-demand)\n\n{sktxt}")
+
+    if include_bootstrap:
+        bootstrap = mem_root / "BOOTSTRAP.md"
+        if bootstrap.is_file():
+            btxt = _read_text(bootstrap, max_chars=1800)
+            if btxt:
+                parts.append(f"## BOOTSTRAP.md (on-demand)\n\n{btxt}")
+
+    if include_routing_indexes:
+        for rel in ("indexes/retrieval-map.md", "indexes/memory-catalog.md"):
+            p = mem_root / rel
+            if p.is_file():
+                txt = _read_text(p, max_chars=2200)
+                if txt:
+                    parts.append(f"## {rel} (on-demand)\n\n{txt}")
+
+    if include_promotion:
+        for rel in (
+            "constitution/PROMOTION.md",
+            "indexes/promotion-map.md",
+        ):
+            p = mem_root / rel
+            if p.is_file():
+                txt = _read_text(p, max_chars=2200)
+                if txt:
+                    parts.append(f"## {rel} (on-demand)\n\n{txt}")
+
+    if include_observability:
+        obs_manifest = mem_root / "observability" / "MANIFEST.md"
+        if obs_manifest.is_file():
+            otxt = _read_text(obs_manifest, max_chars=1800)
+            if otxt:
+                parts.append(f"## observability/MANIFEST.md (on-demand)\n\n{otxt}")
+
+    if include_semantic:
+        sem_refs = mem_root / "semantic-graph" / "knowledge" / "references"
+        if sem_refs.is_dir():
+            for rel in ("memory.md", "concept-index.md"):
+                p = sem_refs / rel
+                if p.is_file():
+                    txt = _read_text(p, max_chars=2200)
+                    if txt:
+                        parts.append(f"## semantic-graph/knowledge/references/{rel} (on-demand)\n\n{txt}")
+
+    if include_cases:
+        for rel in (
+            "case-memory/README.md",
+            "case-memory/operations/remediation-patterns.md",
+        ):
+            p = mem_root / rel
+            if p.is_file():
+                txt = _read_text(p, max_chars=2000)
+                if txt:
+                    parts.append(f"## {rel} (on-demand)\n\n{txt}")
+
+    if include_hazards:
+        for rel in (
+            "hazard-memory/operations/README.md",
+            "hazard-memory/operations/anti-patterns.md",
+        ):
+            p = mem_root / rel
+            if p.is_file():
+                txt = _read_text(p, max_chars=2000)
+                if txt:
+                    parts.append(f"## {rel} (on-demand)\n\n{txt}")
+
+    if include_prospective:
+        for rel in (
+            "prospective-memory/operations/README.md",
+            "prospective-memory/operations/open-loops.md",
+        ):
+            p = mem_root / rel
+            if p.is_file():
+                txt = _read_text(p, max_chars=2000)
+                if txt:
+                    parts.append(f"## {rel} (on-demand)\n\n{txt}")
+
+    if include_social_roles:
+        srm = mem_root / "social-role-memory"
+        if srm.is_dir():
+            for rel in ("README.md", "registers/operator-profile.md"):
+                p = srm / rel
+                if p.is_file():
+                    txt = _read_text(p, max_chars=2000)
+                    if txt:
+                        parts.append(f"## social-role-memory/{rel} (on-demand)\n\n{txt}")
 
     # Optional: include INFRASTRUCTURE.md only when explicitly requested.
     if include_infrastructure:

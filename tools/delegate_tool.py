@@ -40,6 +40,52 @@ from hermes_constants import OPENROUTER_FREE_SYNTHETIC
 
 def _opm_delegation_target_model(parent_agent, goal_or_prompt_text: str) -> str:
     """Default or codex GPT slug from merged OPM (same heuristic as delegation baseline)."""
+
+
+def _optimize_delegation_context(context: Dict[str, Any], goal: str) -> Dict[str, Any]:
+    """Optimize context packaging for subagent delegation.
+    
+    This reduces duplicate work by:
+    - Removing redundant context from parent history
+    - Compressing repeated information
+    - Preserving only task-relevant context
+    - Maintaining essential constraints and open loops
+    """
+    if not context:
+        return context
+    
+    optimized = {}
+    
+    # Preserve essential constraints and goals
+    if "constraints" in context:
+        optimized["constraints"] = context["constraints"]
+    
+    if "open_loops" in context:
+        optimized["open_loops"] = context["open_loops"]
+    
+    if "active_files" in context:
+        optimized["active_files"] = context["active_files"]
+    
+    # Compress task-relevant context
+    if "task_context" in context:
+        task_context = context["task_context"]
+        # Remove redundant parent history
+        if "parent_history" in task_context:
+            task_context["parent_history"] = task_context["parent_history"][-3:]  # Keep only last 3 entries
+        optimized["task_context"] = task_context
+    
+    # Add goal-specific context
+    if goal:
+        goal_lower = goal.lower()
+        # Add code-specific context if goal involves coding
+        if any(keyword in goal_lower for keyword in ["code", "implement", "debug", "refactor"]):
+            if "code_context" in context:
+                optimized["code_context"] = context["code_context"]
+    
+    return optimized
+
+def _opm_delegation_target_model(parent_agent, goal_or_prompt_text: str) -> str:
+    """Default or codex GPT slug from merged OPM (same heuristic as delegation baseline)."""
     opm, _ = resolve_openai_primary_mode_for_session_agent(parent_agent)
     txt = (goal_or_prompt_text or "").lower()
     coding = any(
@@ -411,6 +457,10 @@ def _build_child_agent(
     )
     # endregion
 
+    cfg = _load_config()
+    inherit_context_files = bool(cfg.get("inherit_context_files", False))
+    inherit_memory = bool(cfg.get("inherit_memory", False))
+
     child = AIAgent(
         base_url=effective_base_url,
         api_key=effective_api_key,
@@ -428,8 +478,8 @@ def _build_child_agent(
         ephemeral_system_prompt=child_prompt,
         log_prefix=f"[subagent-{task_index}]",
         platform=parent_agent.platform,
-        skip_context_files=True,
-        skip_memory=True,
+        skip_context_files=(not inherit_context_files),
+        skip_memory=(not inherit_memory),
         clarify_callback=None,
         session_db=getattr(parent_agent, '_session_db', None),
         providers_allowed=parent_agent.providers_allowed,
@@ -440,7 +490,7 @@ def _build_child_agent(
         iteration_budget=None,  # fresh budget per subagent
         opm_merge_parent=parent_agent,
     )
-    # Set delegation depth so children can't spawn grandchildren
+
     child._delegate_depth = getattr(parent_agent, '_delegate_depth', 0) + 1
 
     try:
