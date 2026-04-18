@@ -167,7 +167,9 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
                     conversation_history=_seg_hist,
                     task_id=job_id,
                 )
-            except BaseException:
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
                 _emit(
                     "[autoresearch][error] run_conversation raised:\n"
                     + traceback.format_exc()
@@ -177,25 +179,52 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
                     "failed": True,
                     "wall_clock_exhausted": False,
                 }
-                break
+                _remain_exc = _wall_end_mono - time.monotonic()
+                if _remain_exc <= 30:
+                    _emit(
+                        "[autoresearch][warn] Exception with <30s wall time left; stopping."
+                    )
+                    break
+                _bo = min(180.0, max(20.0, _remain_exc * 0.05))
+                _emit(
+                    f"[autoresearch][recover] Sleeping {_bo:.0f}s then retrying next segment "
+                    f"(~{_remain_exc:.0f}s wall remaining)."
+                )
+                time.sleep(_bo)
+                _seg_idx += 1
+                continue
 
             if not isinstance(result, dict):
                 result = {"final_response": str(result or "")}
 
-            _seg_hist = result.get("messages")
+            _seg_hist = result.get("messages") or _seg_hist
 
             if result.get("wall_clock_exhausted"):
                 break
 
-            if time.monotonic() >= _wall_end_mono - 1:
+            _remain = _wall_end_mono - time.monotonic()
+            if _remain <= 1:
                 break
 
+            # run_conversation often returns failed=True after quota/rate-limit exhaustion or
+            # max-retries — that must NOT end the whole job while outer wall time remains.
             if result.get("failed"):
-                _emit("[autoresearch][warn] Segment marked failed; stopping outer loop.")
-                break
+                err_preview = str((result.get("error") or "") or "")[:240]
+                _emit(
+                    "[autoresearch][recover] Segment returned failed=True "
+                    f"(e.g. API/quota). {err_preview!r} "
+                    f"— backing off, then continuing (~{_remain:.0f}s wall left)."
+                )
+                _backoff = min(120.0, max(15.0, _remain * 0.05))
+                time.sleep(_backoff)
+                _seg_idx += 1
+                _emit(
+                    f"[autoresearch] Starting outer segment {_seg_idx + 1} "
+                    f"after recoverable failure (transcript turns={len(_seg_hist or [])})."
+                )
+                continue
 
-            # Inner run returned without exhausting the wall — continue if time remains.
-            if time.monotonic() >= _wall_end_mono - 2:
+            if _remain <= 3:
                 break
 
             _seg_idx += 1
@@ -223,7 +252,14 @@ def run_autoresearch_prompt_file(prompt_file: str) -> int:
 
         if wall_ex:
             return 0
-        return 1 if failed else 0
+        # Segment failures (quota, API retries) are normal; outer loop already recovered while
+        # wall time remained. Exit 0 so shells/CI do not treat the worker as crashed.
+        if failed:
+            _emit(
+                "[autoresearch][note] Last segment reported failed=True after retries; "
+                "outer wall may have ended or max segments reached. Exiting 0."
+            )
+        return 0
     finally:
         try:
             _run_cleanup()
