@@ -1,0 +1,282 @@
+{
+  "human_overview": "This file describes how Hermes combines local files, optional cloud memory, and the chat API.\n\nHermes keeps a home directory per profile (HERMES_HOME). Personal agent notes live in memories/MEMORY.md and memories/USER.md; the built-in memory system always uses those. Separately, the workspace tree under workspace/memory holds longer-lived project anchors (AGENTS, MEMORY, USER, and related files) plus a folder structure called the Cortical Lattice: constitution, working memory, episodic ledger, semantic graph, and other layers. Those are normal markdown on disk, not separate servers.\n\nEach turn, the app builds one system prompt from governance files, workspace anchors, a small lattice snippet when relevant, persona (SOUL), and contributions from the memory manager. Then it calls the chat API with that prompt and your message. Which model and provider handle that call is chosen by routing config; that choice does not replace or duplicate the memory files.\n\nMemory has three ideas to keep straight. First, built-in file memory is always on. Second, at most one extra MemoryProvider plugin (often Mem0) can add prefetch, sync after turns, and its own tools. Third, Zep, Letta, LangMem, and LangSmith appear as optional cloud tools, not as a second plugin slot. After the model replies, providers can sync, prefetch can queue for the next turn, and the lattice can record writeback.\n\nThe PNG diagrams listed below match the three big pictures: full turn flow, folder layout, and external products versus local memory. Everything else in this file is structured detail for tools and agents: paths, pipeline steps, layer names, and pointers into the codebase.",
+
+  "schema_version": "1.0",
+  "document_type": "hermes_memory_architecture",
+  "title": "Hermes memory and model architecture (agent reference)",
+  "last_updated_note": "Align with docs/diagrams/hermes-memory-architecture.md and repository code; Cortical Lattice paths are under HERMES_HOME/workspace/memory/",
+
+  "instructions_for_coding_agents": [
+    "HERMES_HOME is profile-scoped (e.g. ~/.hermes/profiles/<profile-name>). Workspace memory lives at HERMES_HOME/workspace/memory/.",
+    "Model routing (which API and model id, e.g. openrouter/free) is orthogonal to memory: memory supplies system/user context and tool schemas; the router only selects the inference endpoint.",
+    "Exactly one optional external MemoryProvider may be active besides BuiltinMemoryProvider; Mem0 is the common choice. Zep, Letta, LangMem, LangSmith are exposed as separate tools, not as a second MemoryProvider slot.",
+    "Do not bypass workspace memory anchors (AGENTS, MEMORY, USER, etc.) when changing prompt assembly; see agent/prompt_builder.py.",
+    "Cloud memory tools and keys are host-scoped; see tools/cloud_memory_tool.py and HERMES_MEMORY_KEY_SUFFIX.",
+    "Cortical Lattice layers are on-disk markdown trees used for organization, selective loading, and writeback—not separate microservices."
+  ],
+
+  "diagram_assets_png": [
+    {
+      "order": 1,
+      "id": "full_turn",
+      "relative_path": "docs/diagrams/01-hermes-memory-turn-flow.png",
+      "summary": "End-to-end turn: system prompt assembly, chat completion, tools, post-turn sync and writeback"
+    },
+    {
+      "order": 2,
+      "id": "cortical_lattice",
+      "relative_path": "docs/diagrams/02-hermes-memory-cortical-lattice.png",
+      "summary": "Local markdown layer groupings under workspace/memory"
+    },
+    {
+      "order": 3,
+      "id": "external_vs_local",
+      "relative_path": "docs/diagrams/03-hermes-memory-external-products.png",
+      "summary": "Mem0 plugin slot vs Zep/Letta/LangMem/LangSmith tools vs routing doc"
+    }
+  ],
+
+  "canonical_paths": {
+    "hermes_home_env": "HERMES_HOME",
+    "workspace_memory": "${HERMES_HOME}/workspace/memory",
+    "builtin_memory_md": "${HERMES_HOME}/memories/MEMORY.md",
+    "builtin_user_md": "${HERMES_HOME}/memories/USER.md",
+    "workspace_root_anchors_glob": "${HERMES_HOME}/workspace/memory/{AGENTS,MEMORY,USER,ATTENTION,INDEX,COMPASS,README}.md",
+    "memory_routing_doc": "${HERMES_HOME}/workspace/memory/constitution/memory-routing.md",
+    "soul_preference_order": [
+      "${HERMES_HOME}/workspace/memory/SOUL.md",
+      "${HERMES_HOME}/SOUL.md"
+    ]
+  },
+
+  "prompt_assembly_pipeline": {
+    "description": "Order is conceptual; actual merging is implemented in prompt_builder and related loaders.",
+    "steps": [
+      {
+        "step": 1,
+        "name": "profile_governance",
+        "human_name": "Home governance markdown",
+        "typical_path": "${HERMES_HOME}/.hermes.md",
+        "code_reference": "agent/prompt_builder.py"
+      },
+      {
+        "step": 2,
+        "name": "workspace_memory_anchors",
+        "human_name": "Root anchors from workspace/memory",
+        "typical_files": ["AGENTS.md", "MEMORY.md", "USER.md", "ATTENTION.md", "INDEX.md"],
+        "optional_extras_env": "HERMES_WORKSPACE_MEMORY_EXTRAS",
+        "code_reference": "agent/prompt_builder.py"
+      },
+      {
+        "step": 3,
+        "name": "cortical_ephemeral_pack",
+        "human_name": "Small per-turn lattice pack (working-memory snippets + memory-routing hint)",
+        "code_reference": "agent/cortical_lattice/memory_compiler.py"
+      },
+      {
+        "step": 4,
+        "name": "identity_soul",
+        "human_name": "SOUL / persona",
+        "code_reference": "agent/prompt_builder.py (load_soul_md)"
+      },
+      {
+        "step": 5,
+        "name": "memory_manager_system_blocks",
+        "human_name": "Builtin + optional provider static system prompt contributions",
+        "code_reference": "agent/memory_manager.py"
+      },
+      {
+        "step": 6,
+        "name": "memory_prefetch",
+        "human_name": "Provider prefetch text merged before the API call",
+        "code_reference": "agent/memory_manager.py prefetch_all"
+      }
+    ]
+  },
+
+  "inference_and_model_routing": {
+    "description": "Selects provider, model id, and fallbacks for the chat completion HTTP request.",
+    "default_config_reference": "hermes_cli/config.py DEFAULT_CONFIG model.openrouter/free pattern",
+    "orthogonal_to_memory": true,
+    "typical_providers": ["openrouter", "openai", "anthropic", "google"],
+    "notes": [
+      "Failure escalation and budget rules live in config; they do not change which on-disk memory files exist."
+    ]
+  },
+
+  "chat_completion_io": {
+    "inputs": [
+      "assembled_system_prompt",
+      "user_message",
+      "optional_tools_schema",
+      "channel_or_session_metadata"
+    ],
+    "outputs": [
+      "assistant_text",
+      "tool_calls"
+    ]
+  },
+
+  "memory_subsystems": {
+    "builtin_provider": {
+      "id": "builtin",
+      "always_on": true,
+      "storage": "HERMES_HOME/memories/MEMORY.md and USER.md",
+      "class": "agent/builtin_memory_provider.py",
+      "manager": "agent/memory_manager.py"
+    },
+    "optional_external_provider_slot": {
+      "max_active": 1,
+      "common_implementation": "mem0",
+      "plugin_path": "plugins/memory/mem0",
+      "provider_class": "Mem0MemoryProvider",
+      "activation": "config memory.provider and credentials (e.g. mem0.json / MEM0_API_KEY)",
+      "capabilities": ["prefetch", "sync_turn", "tool_schemas", "handle_tool_call"]
+    },
+    "cloud_memory_tools": {
+      "implementation": "tools/cloud_memory_tool.py",
+      "not_memory_provider_plugins": true,
+      "services": [
+        {
+          "name": "zep",
+          "role": "temporal_graph_memory"
+        },
+        {
+          "name": "letta",
+          "role": "pinned_blocks_archival"
+        },
+        {
+          "name": "langmem",
+          "role": "lifecycle_extract_consolidate"
+        },
+        {
+          "name": "langsmith",
+          "role": "observability_traces"
+        }
+      ],
+      "env_host_scoping": "HERMES_MEMORY_KEY_SUFFIX, LANGSMITH_API_KEY_*, ZEP_API_KEY_*, LETTA_API_KEY_*"
+    }
+  },
+
+  "cortical_lattice_layers": [
+    {
+      "layer_id": "constitution",
+      "directory": "constitution/",
+      "purpose": "Pinned rules, contracts, routing excerpts; smallest always-on material for compilers"
+    },
+    {
+      "layer_id": "working_memory",
+      "directory": "working-memory/",
+      "purpose": "Live focus, blockers, next actions, active state"
+    },
+    {
+      "layer_id": "episodic_ledger",
+      "directory": "episodic-ledger/",
+      "purpose": "Chronological narrative, changelogs, imported runtime history"
+    },
+    {
+      "layer_id": "semantic_graph",
+      "directory": "semantic-graph/",
+      "purpose": "Durable facts, concepts, domains, references (knowledge subtree often under semantic-graph/knowledge/)"
+    },
+    {
+      "layer_id": "case_memory",
+      "directory": "case-memory/",
+      "purpose": "Reusable problem-solution patterns abstracted from incidents"
+    },
+    {
+      "layer_id": "skill_atlas",
+      "directory": "skill-atlas/",
+      "purpose": "Procedures, workspace skills, promoted SKILL.md bundles"
+    },
+    {
+      "layer_id": "reflective_doctrine",
+      "directory": "reflective-doctrine/",
+      "purpose": "Policies, governance mirrors, generalized lessons"
+    },
+    {
+      "layer_id": "prospective_memory",
+      "directory": "prospective-memory/",
+      "purpose": "Open loops, queues, deadlines, commitments"
+    },
+    {
+      "layer_id": "hazard_memory",
+      "directory": "hazard-memory/",
+      "purpose": "Negative lessons, do-not-repeat, remediation context"
+    },
+    {
+      "layer_id": "social_role_memory",
+      "directory": "social-role-memory/",
+      "purpose": "Persona, org registers, orchestration bridges"
+    },
+    {
+      "layer_id": "observability",
+      "directory": "observability/",
+      "purpose": "Audits, operational registers, trace feedstock"
+    },
+    {
+      "layer_id": "bootstrap",
+      "directory": "bootstrap/",
+      "purpose": "Init scripts, templates, reproducibility"
+    },
+    {
+      "layer_id": "indexes",
+      "directory": "indexes/",
+      "purpose": "Catalogs, maps, root-anchor snapshots"
+    }
+  ],
+
+  "post_turn_effects": {
+    "builtin_sync": "Persist turn into builtin store",
+    "optional_mem0_sync": "MemoryProvider.sync_turn",
+    "prefetch_queue": "queue_prefetch for next turn",
+    "cortical_writeback": "Optional promotion ladder trace to episode to fact to case/skill (agent/cortical_lattice)"
+  },
+
+  "relationship_graph": {
+    "nodes": [
+      "UserMessage",
+      "SystemPromptAssembly",
+      "WorkspaceMemoryTree",
+      "MemoryManager",
+      "BuiltinProvider",
+      "ExternalMemoryProvider",
+      "ChatCompletionApi",
+      "ToolSurface",
+      "CloudMemoryTools",
+      "AssistantOutput"
+    ],
+    "edges": [
+      {"from": "UserMessage", "to": "ChatCompletionApi", "relation": "user_content"},
+      {"from": "SystemPromptAssembly", "to": "ChatCompletionApi", "relation": "system_instruction"},
+      {"from": "WorkspaceMemoryTree", "to": "SystemPromptAssembly", "relation": "anchors_and_lattice_pack"},
+      {"from": "MemoryManager", "to": "SystemPromptAssembly", "relation": "provider_blocks_and_prefetch"},
+      {"from": "BuiltinProvider", "to": "MemoryManager", "relation": "always_member"},
+      {"from": "ExternalMemoryProvider", "to": "MemoryManager", "relation": "optional_single_slot"},
+      {"from": "ChatCompletionApi", "to": "ToolSurface", "relation": "exposes_tool_definitions"},
+      {"from": "AssistantOutput", "to": "BuiltinProvider", "relation": "sync_turn"},
+      {"from": "AssistantOutput", "to": "ExternalMemoryProvider", "relation": "sync_turn_when_configured"},
+      {"from": "ToolSurface", "to": "CloudMemoryTools", "relation": "includes_when_registered"},
+      {"from": "AssistantOutput", "to": "WorkspaceMemoryTree", "relation": "optional_writeback"}
+    ]
+  },
+
+  "code_index": {
+    "prompt_context": "agent/prompt_builder.py",
+    "cortical_lattice_compiler": "agent/cortical_lattice/memory_compiler.py",
+    "cortical_retrieval_planner": "agent/cortical_lattice/retrieval_planner.py",
+    "memory_manager": "agent/memory_manager.py",
+    "memory_provider_base": "agent/memory_provider.py",
+    "builtin_memory_provider": "agent/builtin_memory_provider.py",
+    "mem0_plugin": "plugins/memory/mem0/__init__.py",
+    "cloud_memory_tools": "tools/cloud_memory_tool.py",
+    "hermes_config_defaults": "hermes_cli/config.py",
+    "semantic_migration_script": "memory/core/scripts/core/semantic_integrate_cortical_lattice_memory.py",
+    "lattice_classify_helpers": "memory/core/scripts/core/cortical_lattice_classify.py"
+  },
+
+  "external_routing_doc": {
+    "path": "workspace/memory/constitution/memory-routing.md",
+    "purpose": "Human and agent guidance for when to use Mem0 vs Zep vs Letta vs LangMem vs LangSmith vs local lattice"
+  }
+}

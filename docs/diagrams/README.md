@@ -3,6 +3,7 @@
 | # | Asset | Purpose |
 |---|--------|--------|
 | | [hermes-memory-architecture.md](hermes-memory-architecture.md) | All three diagrams in one Markdown file; **embeds PNG** and includes Mermaid source. |
+| | [hermes-memory-architecture.agent.json](hermes-memory-architecture.agent.json) | **Machine-readable** architecture spec for tools and coding agents (paths, pipeline, layers, code index). |
 | **1** | [01-hermes-memory-turn-flow.png](01-hermes-memory-turn-flow.png) | Diagram A — full turn (raster). |
 | **2** | [02-hermes-memory-cortical-lattice.png](02-hermes-memory-cortical-lattice.png) | Diagram B — cortical lattice (raster). |
 | **3** | [03-hermes-memory-external-products.png](03-hermes-memory-external-products.png) | Diagram C — external products (raster). |

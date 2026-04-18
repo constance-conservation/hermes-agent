@@ -7,6 +7,9 @@ __pycache__/
 .venv/
 .vscode/
 .cursor/
+# Local mirrors of remote ~/.hermes (workstation-only; may contain secrets)
+.hermes_droplet/
+.hermes_operator/
 .env
 .env.local
 .env.development.local
