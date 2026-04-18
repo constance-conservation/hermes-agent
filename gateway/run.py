@@ -4139,13 +4139,13 @@ class GatewayRunner:
         _follow = format_autoresearch_live_log_follow_instructions(prepared.log_path)
         return "\n".join(
             [
-                "Autoresearch background run started.",
+                "Autoresearch step 3: background worker started (subprocess on this host).",
                 f"Hard wall-clock budget: {_ws // 3600}h {(_ws % 3600) // 60}m {_ws % 60}s ({_src}).",
                 f"Job ID: {prepared.job_id}",
                 f"Process session: {proc_session.id}",
                 f"Program file updated: {prepared.program_path}",
                 "",
-                "🖥 FULL TRAINING LOG — paste the shell line below on the gateway host (hermesuser) for live detail:",
+                "🖥 Live log — open a second terminal on the same host and paste the `tail -n … -f …` line below:",
                 "",
                 _follow,
                 "",

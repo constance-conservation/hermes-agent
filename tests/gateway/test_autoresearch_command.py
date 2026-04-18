@@ -41,7 +41,7 @@ class TestGatewayAutoresearchCommand:
 
         result = asyncio.run(runner._handle_autoresearch_command(event))
 
-        assert "step 1 of 2" in result.lower()
+        assert "step 1 of 3" in result.lower()
         assert "very next message" in result
         assert runner._pending_autoresearch["sess_autoresearch"]["phase"] == "await_instructions"
 
@@ -53,7 +53,7 @@ class TestGatewayAutoresearchCommand:
 
         assert "Autoresearch repo:" in result
         assert "Program file:" in result
-        assert "two-step" in result.lower()
+        assert "three-step" in result.lower()
 
     def test_inline_instructions_sets_await_duration(self):
         runner = _make_runner()
@@ -61,7 +61,7 @@ class TestGatewayAutoresearchCommand:
 
         result = asyncio.run(runner._handle_autoresearch_command(event))
 
-        assert "step 2 of 2" in result.lower()
+        assert "step 2 of 3" in result.lower()
         pend = runner._pending_autoresearch["sess_autoresearch"]
         assert pend["phase"] == "await_duration"
         assert pend["instructions"] == "improve safety"

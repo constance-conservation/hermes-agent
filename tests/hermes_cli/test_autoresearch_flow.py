@@ -17,10 +17,10 @@ from hermes_cli.autoresearch_flow import (
 
 def test_gateway_step_banner_wraps_body():
     wrapped = format_gateway_autoresearch_step_banner(1, "hello")
-    assert "STEP 1/2" in wrapped
+    assert "STEP 1/3" in wrapped
     assert "hello" in wrapped
     w2 = format_gateway_autoresearch_step_banner(2, "time")
-    assert "STEP 2/2" in w2
+    assert "STEP 2/3" in w2
 
 
 def test_live_log_follow_instructions_includes_tail_command(tmp_path):
@@ -66,7 +66,7 @@ def test_capture_prompt_mentions_program_path(monkeypatch, tmp_path):
     text = format_autoresearch_capture_prompt()
 
     assert "program.md" in text
-    assert "step 1 of 2" in text.lower()
+    assert "step 1 of 3" in text.lower()
     assert "very next message" in text
     assert "total outer runtime" in text
     assert "step 2" in text.lower()

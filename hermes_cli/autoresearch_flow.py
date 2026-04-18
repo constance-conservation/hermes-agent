@@ -66,7 +66,7 @@ def format_autoresearch_capture_prompt(config: Optional[Mapping[str, Any]] = Non
     repo_path = resolve_autoresearch_repo_path(config)
     return "\n".join(
         [
-            "Autoresearch — step 1 of 2: run brief.",
+            "Autoresearch — step 1 of 3: your run brief (instructions).",
             "",
             "Reply with your full instructions in your very next message.",
             "",
@@ -81,6 +81,8 @@ def format_autoresearch_capture_prompt(config: Optional[Mapping[str, Any]] = Non
             f"After step 2, Hermes will append your brief to: {_expand_path(program_path)}",
             f"Autoresearch repo: {_expand_path(repo_path)}",
             "",
+            "Step 3 (after step 2) starts the Hermes worker as a background subprocess and shows how to tail the log.",
+            "",
             "Use /autoresearch cancel to abort or /autoresearch show to print the repo/program paths again.",
         ]
     )
@@ -90,13 +92,16 @@ def format_autoresearch_duration_prompt(config: Optional[Mapping[str, Any]] = No
     program_path = resolve_autoresearch_program_path(config)
     return "\n".join(
         [
-            "Autoresearch — step 2 of 2: total wall-clock runtime for this Hermes worker.",
+            "Autoresearch — step 2 of 3: total wall-clock runtime for this Hermes worker.",
             "",
             "Reply with ONE of:",
             '- `default` — use the duration implied by your instructions (and program.md / doc default 600 min if none).',
             "- a positive integer — **minutes** only for the hard cap (e.g. `600` for 10 hours, `120` for 2 hours).",
             "",
             f"Your instructions are ready to append to: {_expand_path(program_path)}",
+            "",
+            "Step 3 launches the worker (subprocess), writes a log file, and prints the exact `tail -f` line for a second terminal.",
+            "",
             "Use /autoresearch cancel to abort.",
         ]
     )
@@ -109,7 +114,8 @@ def format_autoresearch_target_message(config: Optional[Mapping[str, Any]] = Non
         [
             f"Autoresearch repo: {_expand_path(repo_path)}",
             f"Program file: {_expand_path(program_path)}",
-            "Run /autoresearch for a two-step capture: (1) instructions, (2) total runtime in minutes or `default`.",
+            "Run /autoresearch for a three-step flow: (1) instructions, (2) total runtime in minutes or `default`, "
+            "(3) background worker + second-terminal `tail -f` command.",
         ]
     )
 
@@ -122,9 +128,9 @@ def format_autoresearch_live_log_shell_command(log_path: Path) -> str:
 def format_gateway_autoresearch_step_banner(step: int, inner_text: str) -> str:
     """Plain-text section headers for gateway/messaging (no ANSI)."""
     if step == 1:
-        return f"📋 STEP 1/2 — What to send Hermes\n\n{inner_text}"
+        return f"📋 STEP 1/3 — What to send Hermes\n\n{inner_text}"
     if step == 2:
-        return f"⏱ STEP 2/2 — Total wall-clock runtime\n\n{inner_text}"
+        return f"⏱ STEP 2/3 — Total wall-clock runtime\n\n{inner_text}"
     return inner_text
 
 
@@ -134,12 +140,15 @@ def format_autoresearch_live_log_follow_instructions(log_path: Path) -> str:
     display = _expand_path(log_path.resolve())
     return "\n".join(
         [
-            "Second terminal on this host — paste this entire line and press Enter (live stream; Ctrl+C to stop):",
+            "Autoresearch — step 3 of 3: watch the background worker (subprocess).",
+            "",
+            "Open a new terminal on this same host (new tab, split pane, or another SSH session). "
+            "Paste the entire line below and press Enter to stream the live log. "
+            "Ctrl+C stops `tail` only; the Hermes worker subprocess keeps running.",
             "",
             cmd,
             "",
-            f"The path above is a plain-text log file ({display}), not an executable. "
-            "Use `tail -f` to watch it; do not run the file as a program.",
+            f"The log is plain text at {display}. It is not an executable — use `tail -f` (or the line above); do not run the file as a program.",
         ]
     )
 

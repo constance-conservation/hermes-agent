@@ -5141,7 +5141,11 @@ class HermesCLI:
                 _cprint("")
 
     def _print_autoresearch_operator_guide(self, text: str, *, tone: str) -> None:
-        """Color-coded /autoresearch prompts: step1 cyan, step2 yellow, shell green, info blue."""
+        """Color-coded /autoresearch prompts: step1 cyan, step2 yellow, shell green, info blue.
+
+        Uses ChatConsole (not raw Rich Console) so markup renders under prompt_toolkit's
+        patch_stdout; plain Console.print would emit ANSI that StdoutProxy mangles (ESC → ``?``).
+        """
         from rich.markup import escape
 
         tones: dict[str, tuple[str, str]] = {
@@ -5151,16 +5155,36 @@ class HermesCLI:
             "info": ("bold bright_blue", "bright_blue"),
         }
         bold_style, body_style = tones.get(tone, ("bold white", "white"))
-        self.console.print()
+        cc = ChatConsole()
+        cc.print()
+
+        def _emit_styled(style: str, raw_line: str) -> None:
+            cc.print(f"  [{style}]{escape(raw_line)}[/{style}]")
+
         first_nonempty = True
         for line in str(text or "").splitlines():
             if not line.strip():
-                self.console.print()
+                cc.print()
                 continue
-            e = escape(line)
+            stripped = line.strip()
+            # Copy-paste shell (distinct from narrative)
+            if stripped.startswith("tail ") and "-f" in stripped:
+                _emit_styled("bold bright_green", line)
+                first_nonempty = False
+                continue
+            # Human-facing actions / slash hints (distinct from body copy)
+            if (
+                "Use /autoresearch" in stripped
+                or stripped.startswith("Open a new terminal")
+                or stripped.startswith("Autoresearch — step 3 of 3")
+            ):
+                _emit_styled("bold #FFBF00", line)
+                first_nonempty = False
+                continue
+
             style = bold_style if first_nonempty else body_style
             first_nonempty = False
-            self.console.print(f"  [{style}]{e}[/{style}]")
+            _emit_styled(style, line)
 
     def _launch_autoresearch_background_run(
         self,
@@ -5209,7 +5233,7 @@ class HermesCLI:
             return
 
         self._pending_autoresearch = None
-        _cprint("  🧪 Autoresearch launched in the background (steps 1–2 complete).")
+        _cprint("  🧪 Autoresearch step 3 running: background worker subprocess started (steps 1–2 complete).")
         _cprint(f"  Job ID: {prepared.job_id}")
         _cprint(f"  Program file updated: {prepared.program_path}")
         _cprint(f"  Prompt file: {prepared.prompt_path}")
@@ -5222,7 +5246,7 @@ class HermesCLI:
             format_autoresearch_live_log_follow_instructions(prepared.log_path),
             tone="shell",
         )
-        self.console.print(
+        ChatConsole().print(
             "  [dim]Full training/tool detail is written to that log file. "
             "Below: short digests every ~30s (not the full stream). "
             "You can close SSH; the worker keeps running.[/dim]"
@@ -5284,7 +5308,7 @@ class HermesCLI:
                         last_idle_ping_at = now
                         last_reported_size = sz
                         snip = _tail_snippet(800)
-                        self.console.print(
+                        ChatConsole().print(
                             f"  [dim]⌁ Autoresearch · log {sz} B · latest:[/dim] "
                             f"[dim]{escape(snip or '…')}[/dim]"
                         )
@@ -5295,13 +5319,13 @@ class HermesCLI:
                         and (now - last_idle_ping_at) >= idle_heartbeat_every
                     ):
                         last_idle_ping_at = now
-                        self.console.print(
+                        ChatConsole().print(
                             f"  [dim]⌁ Autoresearch worker still running (pid {pid}, log {sz} B). "
                             f"Use tail -f for full detail.[/dim]"
                         )
 
                     if not alive:
-                        self.console.print(
+                        ChatConsole().print(
                             f"  [dim]⌁ Autoresearch worker process ended (pid {pid}). "
                             f"See job log for full output.[/dim]"
                         )
@@ -5342,8 +5366,8 @@ class HermesCLI:
             if not ok:
                 from rich.markup import escape
 
-                self.console.print(f"  [yellow]{escape(err)}[/yellow]")
-                self.console.print(
+                ChatConsole().print(f"  [yellow]{escape(err)}[/yellow]")
+                ChatConsole().print(
                     "  [dim]Examples: default or 600 (minutes).[/dim]"
                 )
                 return True
