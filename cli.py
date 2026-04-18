@@ -5049,7 +5049,7 @@ class HermesCLI:
             self.console.print("[bold red]Plan mode unavailable: input queue not initialized[/]")
 
     def _handle_autoresearch_command(self, cmd: str):
-        """Handle /autoresearch — two-step capture (instructions, then duration), then launch."""
+        """Handle /autoresearch — steps 1–2 capture (brief, duration), then step 3 background worker."""
         from hermes_cli.autoresearch_flow import (
             format_autoresearch_target_message,
             format_autoresearch_capture_prompt,
@@ -5133,7 +5133,7 @@ class HermesCLI:
             )
 
     def _print_plain_notice(self, text: str) -> None:
-        self.console.print()
+        _cprint("")
         for line in str(text or "").splitlines():
             if line.strip():
                 _cprint(f"  {line}")
@@ -5143,35 +5143,44 @@ class HermesCLI:
     def _print_autoresearch_operator_guide(self, text: str, *, tone: str) -> None:
         """Color-coded /autoresearch prompts: step1 cyan, step2 yellow, shell green, info blue.
 
-        Uses ChatConsole (not raw Rich Console) so markup renders under prompt_toolkit's
-        patch_stdout; plain Console.print would emit ANSI that StdoutProxy mangles (ESC → ``?``).
+        Uses the same `_cprint` + short ANSI codes as the rest of the CLI (see `hermes_cli.colors`).
+        Rich/ChatConsole render a different ANSI shape; on some SSH + prompt_toolkit stacks (e.g. droplet)
+        that output is mangled (ESC → ``?``). This path avoids Rich entirely for these blocks.
         """
-        from rich.markup import escape
+        from hermes_cli.colors import Colors, should_use_color
 
-        tones: dict[str, tuple[str, str]] = {
-            "step1": ("bold cyan", "cyan"),
-            "step2": ("bold yellow", "yellow"),
-            "shell": ("bold green", "green"),
-            "info": ("bold bright_blue", "bright_blue"),
+        _rst = Colors.RESET
+        # Bold + base pairs per tone (title line vs body lines)
+        _tone_map: dict[str, tuple[str, str]] = {
+            "step1": ("\033[1;36m", Colors.CYAN),
+            "step2": ("\033[1;33m", Colors.YELLOW),
+            "shell": ("\033[1;32m", Colors.GREEN),
+            "info": ("\033[1;34m", Colors.BLUE),
         }
-        bold_style, body_style = tones.get(tone, ("bold white", "white"))
-        cc = ChatConsole()
-        cc.print()
+        _title_ansi, _body_ansi = _tone_map.get(tone, ("\033[1m", Colors.RESET))
+        _bold_green = "\033[1;32m"
+        _hint = "\033[1;33m"  # action / slash-command hints (distinct from body)
 
-        def _emit_styled(style: str, raw_line: str) -> None:
-            cc.print(f"  [{style}]{escape(raw_line)}[/{style}]")
+        use_color = should_use_color()
 
+        def _emit(line: str, prefix: str) -> None:
+            if use_color:
+                _cprint(f"  {prefix}{line}{_rst}")
+            else:
+                _cprint(f"  {line}")
+
+        _cprint("")
         first_nonempty = True
         for line in str(text or "").splitlines():
             if not line.strip():
-                cc.print()
+                _cprint("")
                 continue
             stripped = line.strip()
             # Copy-paste shell (distinct from narrative)
             if stripped.startswith("LOG_FILE=") or (
                 stripped.startswith("tail ") and "-f" in stripped
             ):
-                _emit_styled("bold bright_green", line)
+                _emit(line, _bold_green)
                 first_nonempty = False
                 continue
             # Human-facing actions / slash hints (distinct from body copy)
@@ -5180,13 +5189,15 @@ class HermesCLI:
                 or stripped.startswith("Open a new terminal")
                 or stripped.startswith("Autoresearch — step 3 of 3")
             ):
-                _emit_styled("bold #FFBF00", line)
+                _emit(line, _hint)
                 first_nonempty = False
                 continue
 
-            style = bold_style if first_nonempty else body_style
+            if first_nonempty:
+                _emit(line, _title_ansi)
+            else:
+                _emit(line, _body_ansi)
             first_nonempty = False
-            _emit_styled(style, line)
 
     def _launch_autoresearch_background_run(
         self,

@@ -4040,7 +4040,7 @@ class GatewayRunner:
                 return "Voice mode disabled."
 
     async def _handle_autoresearch_command(self, event: MessageEvent) -> str | None:
-        """Handle /autoresearch — two-step capture (instructions, duration), then worker."""
+        """Handle /autoresearch — capture instructions, then duration, then background worker."""
         from hermes_cli.autoresearch_flow import (
             format_autoresearch_capture_prompt,
             format_autoresearch_duration_prompt,
