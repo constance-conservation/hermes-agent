@@ -5086,6 +5086,12 @@ class HermesCLI:
             )
             return
 
+        if lowered in {"jobs", "list", "status"}:
+            from hermes_cli.autoresearch_flow import format_autoresearch_jobs_status
+
+            self._print_plain_notice(format_autoresearch_jobs_status(load_cli_config()))
+            return
+
         # Inline instructions: go straight to step 2 (duration).
         self._pending_autoresearch = {
             "phase": "await_duration",
@@ -5268,9 +5274,15 @@ class HermesCLI:
             "Below: short digests every ~30s (not the full stream). "
             "You can close SSH; the worker keeps running.[/dim]"
         )
-        self._start_autoresearch_log_follower(prepared.log_path, proc.pid)
+        _cprint(
+            "  Tip: `/autoresearch jobs` lists recent job folders and log paths on this host; "
+            "`pgrep -fl hermes_cli.autoresearch_background` shows if a worker is still running."
+        )
+        self._start_autoresearch_log_follower(prepared.log_path, proc)
 
-    def _start_autoresearch_log_follower(self, log_path: Path, pid: int) -> None:
+    def _start_autoresearch_log_follower(
+        self, log_path: Path, proc: subprocess.Popen
+    ) -> None:
         """Periodic digests only — full detail stays in the log file (`tail -f`)."""
 
         def _tail_snippet(max_chars: int = 500) -> str:
@@ -5294,6 +5306,7 @@ class HermesCLI:
         def _follow() -> None:
             from rich.markup import escape
 
+            pid = proc.pid
             poll_s = 6.0
             digest_every = 30.0
             # Long stalls (e.g. rate limits, long model turns) produce no log bytes; avoid
@@ -5307,11 +5320,9 @@ class HermesCLI:
             while True:
                 try:
                     time.sleep(poll_s)
-                    alive = True
-                    try:
-                        os.kill(pid, 0)
-                    except OSError:
-                        alive = False
+                    # Use Popen.poll() instead of os.kill(pid, 0): zombies can still satisfy
+                    # kill(0), so the follower never noticed exit and spammed "still running".
+                    alive = proc.poll() is None
 
                     try:
                         sz = log_path.stat().st_size if log_path.exists() else 0
@@ -5353,9 +5364,13 @@ class HermesCLI:
                         )
 
                     if not alive:
+                        try:
+                            proc.wait(timeout=5)
+                        except Exception:
+                            pass
                         ChatConsole().print(
-                            f"  [dim]⌁ Autoresearch worker process ended (pid {pid}). "
-                            f"See job log for full output.[/dim]"
+                            f"  [dim]⌁ Autoresearch worker finished (pid {pid}, exit "
+                            f"{getattr(proc, 'returncode', '?')}). See job log for full output.[/dim]"
                         )
                         break
                 except Exception:
@@ -5364,7 +5379,7 @@ class HermesCLI:
         threading.Thread(
             target=_follow,
             daemon=True,
-            name=f"autoresearch-log-{pid}",
+            name=f"autoresearch-log-{proc.pid}",
         ).start()
 
     def _consume_autoresearch_multistep_input(self, user_input: str) -> bool:

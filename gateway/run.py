@@ -4044,6 +4044,7 @@ class GatewayRunner:
         from hermes_cli.autoresearch_flow import (
             format_autoresearch_capture_prompt,
             format_autoresearch_duration_prompt,
+            format_autoresearch_jobs_status,
             format_autoresearch_target_message,
             format_gateway_autoresearch_step_banner,
         )
@@ -4074,6 +4075,9 @@ class GatewayRunner:
 
         if lowered in {"show", "path"}:
             return f"ℹ️ Autoresearch paths\n\n{format_autoresearch_target_message(gw_config)}"
+
+        if lowered in {"jobs", "list", "status"}:
+            return format_autoresearch_jobs_status(gw_config)
 
         self._pending_autoresearch[session_key] = {
             "phase": "await_duration",

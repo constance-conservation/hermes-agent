@@ -55,6 +55,15 @@ class TestGatewayAutoresearchCommand:
         assert "Program file:" in result
         assert "three-step" in result.lower()
 
+    def test_jobs_returns_status_block(self):
+        runner = _make_runner()
+        event = _make_event(text="/autoresearch jobs")
+
+        result = asyncio.run(runner._handle_autoresearch_command(event))
+
+        assert "Jobs directory:" in result
+        assert "pgrep" in result
+
     def test_inline_instructions_sets_await_duration(self):
         runner = _make_runner()
         event = _make_event(text="/autoresearch improve safety")

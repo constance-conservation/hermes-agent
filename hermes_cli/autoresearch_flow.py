@@ -57,6 +57,76 @@ def resolve_autoresearch_jobs_root() -> Path:
     return get_hermes_home() / "workspace" / "memory" / "runtime" / "autoresearch-jobs"
 
 
+def format_autoresearch_jobs_status(
+    _config: Optional[Mapping[str, Any]] = None, *, limit: int = 10
+) -> str:
+    """List recent job directories and log paths for the active ``HERMES_HOME`` profile.
+
+    Helps operators copy a **real** path in a second terminal. Placeholder text like
+    ``<JOB_ID>`` in docs must never be pasted into the shell literally.
+    """
+    root = resolve_autoresearch_jobs_root()
+    lines: list[str] = [
+        "Autoresearch — recent jobs on this host (newest first). "
+        "Copy a path below; do not paste angle-bracket placeholders (e.g. <JOB_ID>) into the shell.",
+        "",
+        f"Jobs directory: {_expand_path(root)}",
+        "",
+    ]
+    probe = (
+        "Check for a live worker on this machine:\n"
+        "  pgrep -fl hermes_cli.autoresearch_background\n"
+        "(no output means no background autoresearch worker process)"
+    )
+
+    if not root.is_dir():
+        lines.append(
+            "(No autoresearch-jobs folder yet — no /autoresearch run has created jobs here.)"
+        )
+        lines.extend(["", probe])
+        return "\n".join(lines)
+
+    subdirs = [p for p in root.iterdir() if p.is_dir()]
+    try:
+        subdirs.sort(
+            key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
+            reverse=True,
+        )
+    except OSError:
+        subdirs.sort(key=lambda p: p.name, reverse=True)
+
+    if not subdirs:
+        lines.append("(No job folders yet.)")
+        lines.extend(["", probe])
+        return "\n".join(lines)
+
+    for d in subdirs[:limit]:
+        logf = d / "run.log"
+        extra = ""
+        if logf.is_file():
+            try:
+                extra = f" — {logf.stat().st_size} bytes"
+            except OSError:
+                extra = " — (size unreadable)"
+        else:
+            extra = " — (run.log missing)"
+        lines.append(f"• {d.name}{extra}")
+        lines.append(f"  {_expand_path(logf)}")
+
+    if len(subdirs) > limit:
+        lines.append(f"… and {len(subdirs) - limit} older job(s).")
+
+    lines.extend(
+        [
+            "",
+            "In Hermes on this host, `/autoresearch jobs` reprints this list.",
+            "",
+            probe,
+        ]
+    )
+    return "\n".join(lines)
+
+
 def resolve_hermes_repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -156,6 +226,8 @@ def format_autoresearch_live_log_follow_instructions(log_path: Path) -> str:
             cmd,
             "",
             f"The log is plain text at {display}. It is not an executable — use `tail -f` (or the line above); do not run the file as a program.",
+            "",
+            "Use `/autoresearch jobs` in Hermes on this host to list recent jobs and exact log paths (avoid placeholder text like <JOB_ID> in the shell).",
         ]
     )
 

@@ -8,6 +8,7 @@ from hermes_cli.autoresearch_flow import (
     append_autoresearch_instructions,
     build_autoresearch_worker_command,
     format_autoresearch_capture_prompt,
+    format_autoresearch_jobs_status,
     format_autoresearch_live_log_follow_instructions,
     format_gateway_autoresearch_step_banner,
     prepare_autoresearch_background_run,
@@ -31,6 +32,27 @@ def test_live_log_follow_instructions_includes_tail_command(tmp_path):
     assert '"$LOG_FILE"' in text or "$LOG_FILE" in text
     assert str(log.resolve()) in text or "run.log" in text
     assert "plain-text" in text.lower() or "executable" in text.lower()
+    assert "/autoresearch jobs" in text
+
+
+def test_jobs_status_lists_job_directories(monkeypatch, tmp_path):
+    hermes_home = tmp_path / ".hermes" / "profiles" / "chief-orchestrator"
+    jobs = (
+        hermes_home
+        / "workspace"
+        / "memory"
+        / "runtime"
+        / "autoresearch-jobs"
+    )
+    (jobs / "autoresearch_testjob").mkdir(parents=True)
+    (jobs / "autoresearch_testjob" / "run.log").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    text = format_autoresearch_jobs_status()
+
+    assert "autoresearch_testjob" in text
+    assert "pgrep" in text
+    assert "Jobs directory:" in text
 
 
 def test_resolve_autoresearch_program_path_defaults_to_profile_skill_repo(monkeypatch, tmp_path):
