@@ -1,0 +1,17 @@
+{
+  "commit_sha": "$(git rev-parse HEAD)",
+  "python_version": "$(python --version 2>/dev/null || python3 --version 2>/dev/null)",
+  "os_platform": "$(uname -s)-$(uname -m)",
+  "sandbox_mode": "enabled",
+  "network_enabled": "false",
+  "local_models_available": "false",
+  "canonical_eval_command": "python batch_runner.py --dataset_file=benchmarks/benchmark_data.jsonl --batch_size=10 --run_name=baseline",
+  "benchmark_suite_counts": {
+    "dev": 20,
+    "holdout": 10,
+    "redteam": 15,
+    "long_context": 5
+  },
+  "active_model_provider": "anthropic/claude-3.5-sonnet-20241022",
+  "evaluation_framework": "pytest-based with custom scoring"
+}
