@@ -9,7 +9,7 @@
 #   optional SSH_SUDO_PASSWORD,
 #   optional HERMES_DROPLET_ALLOW_ENV_PASSPHRASE + SSH_PASSPHRASE for encrypted keys without TTY.
 # Private key: SSH_KEY_FILE or SSH_KEY_DROPLET in the env file, else $SSH_KEY_FILE, else
-#   ~/.env/.ssh_key, else ~/.env/.ssh_droplet_key
+#   ~/.env/.ssh_droplet_key (preferred if no SSH_KEY_FILE), else ~/.env/.ssh_key
 #
 # HERMES_DROPLET_WORKSTATION_CLI=1 (set by `hermes … droplet`): do not use env-file SSH_PASSPHRASE /
 # ASKPASS — type the key passphrase at the prompt.
@@ -54,7 +54,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       export "${key}=${val}"
       ;;
     SSH_KEY_FILE|SSH_KEY_DROPLET)
-      export SSH_KEY_FILE="${val}"
+      export "${key}=${val}"
       ;;
     SSH_SUDO_PASSWORD) SSH_SUDO_PASSWORD="${val}" ;;
     HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
@@ -65,7 +65,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$ENV_FILE"
 
 if ! KEY_FILE="$(droplet_resolve_ssh_key_file)"; then
-  echo "ssh_droplet.sh: no private key found. Set SSH_KEY_FILE or SSH_KEY_DROPLET in ${ENV_FILE}, export SSH_KEY_FILE, or install a key at ~/.env/.ssh_key or ~/.env/.ssh_droplet_key" >&2
+  echo "ssh_droplet.sh: no private key found. Set SSH_KEY_FILE or SSH_KEY_DROPLET in ${ENV_FILE}, export SSH_KEY_FILE, or install a key at ~/.env/.ssh_droplet_key or ~/.env/.ssh_key" >&2
   exit 1
 fi
 

@@ -1001,7 +1001,7 @@ OPTIONAL_ENV_VARS = {
         "advanced": True,
     },
     "MACMINI_SSH_KEY": {
-        "description": "Optional path to SSH private key for MACMINI; defaults to SSH_KEY_FILE / ~/.env/.ssh_key.",
+        "description": "Optional path to SSH private key for MACMINI; defaults to MACMINI_SSH_KEY, SSH_KEY_FILE, ~/.env/.ssh_operator_key, or ~/.env/.ssh_key.",
         "prompt": "Mac mini SSH private key path (optional)",
         "url": None,
         "password": False,

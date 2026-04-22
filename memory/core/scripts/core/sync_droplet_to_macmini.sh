@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stream /home/hermesuser/hermes-agent and /home/hermesuser/.hermes from the droplet to a Mac
 # (default: operator@<tailscale-or-lan-ip>) using the same credential layout as ssh_droplet /
-# droplet_pull_hermes_home: workstation ~/.env/.env (SSH_* + SSH_SUDO_PASSWORD) and ~/.env/.ssh_key.
+# droplet_pull_hermes_home: workstation ~/.env/.env (SSH_* + SSH_SUDO_PASSWORD) and SSH key (~/.env/.ssh_droplet_key or SSH_KEY_FILE).
 #
 # Runs from your workstation (e.g. main Mac). Uses ssh -T on the droplet side so tar streams stay clean.
 #
@@ -9,7 +9,7 @@
 #   MACMINI_SSH_USER=operator
 #   MACMINI_SSH_HOST=100.x.y.z          # Tailscale IP of the Mac mini (preferred)
 #   MACMINI_SSH_PORT=52822              # optional; default 22 — use 52822 after macOS hardening (see macmini_* scripts)
-#   MACMINI_SSH_KEY=...                 # optional; defaults to SSH_KEY_FILE / ~/.env/.ssh_key
+#   MACMINI_SSH_KEY=...                 # optional; defaults to operator_resolve (~/.env/.ssh_operator_key)
 #   MACMINI_REPO=                       # optional; default remote $HOME/hermes-agent
 #
 # Repo archive excludes heavy / non-portable trees (recreate venv on the mini: python3 -m venv venv && …).
@@ -29,17 +29,19 @@
 #
 set -euo pipefail
 
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=droplet_remote_venv.sh
+source "${_SCRIPTS_DIR}/droplet_remote_venv.sh"
+# shellcheck source=operator_remote_venv.sh
+source "${_SCRIPTS_DIR}/operator_remote_venv.sh"
+
 ENV_FILE="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
-KEY_FILE="${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}"
+KEY_FILE="${SSH_KEY_FILE:-}"
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "sync_droplet_to_macmini.sh: missing ${ENV_FILE}" >&2
-  exit 1
-fi
-if [[ ! -f "$KEY_FILE" ]]; then
-  echo "sync_droplet_to_macmini.sh: missing key ${KEY_FILE}" >&2
   exit 1
 fi
 
@@ -58,6 +60,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${line#*=}"
   case "$key" in
     SSH_PORT|SSH_USER|SSH_TAILSCALE_IP|SSH_IP|SSH_SUDO_PASSWORD) export "${key}=${val}" ;;
+    SSH_KEY_FILE|SSH_KEY_DROPLET) export "${key}=${val}" ;;
     HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
       case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
       ;;
@@ -70,12 +73,26 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < "$ENV_FILE"
 
+if ! KEY_FILE="$(droplet_resolve_ssh_key_file)"; then
+  echo "sync_droplet_to_macmini.sh: cannot resolve droplet SSH key (set SSH_KEY_FILE in ${ENV_FILE} or place ~/.env/.ssh_droplet_key)" >&2
+  exit 1
+fi
+
 DROPLET_HOST="${SSH_TAILSCALE_IP:-${SSH_IP:?}}"
 DROPLET_USER="${SSH_USER:?}"
 MINI_USER="${MACMINI_SSH_USER:-operator}"
 MINI_HOST="${MACMINI_SSH_HOST:?set MACMINI_SSH_HOST in ${ENV_FILE}}"
 MINI_PORT="${MACMINI_SSH_PORT:-22}"
-MINI_KEY="${MACMINI_SSH_KEY:-$KEY_FILE}"
+MINI_KEY="${MACMINI_SSH_KEY:-}"
+if [[ -z "${MINI_KEY:-}" || ! -f "$MINI_KEY" ]]; then
+  if mk="$(operator_resolve_ssh_key_file)"; then
+    MINI_KEY="$mk"
+  fi
+fi
+if [[ ! -f "$MINI_KEY" ]]; then
+  echo "sync_droplet_to_macmini.sh: cannot resolve Mac mini SSH key (set MACMINI_SSH_KEY in ${ENV_FILE} or place ~/.env/.ssh_operator_key)" >&2
+  exit 1
+fi
 
 [[ -n "${SSH_SUDO_PASSWORD:-}" ]] || {
   echo "sync_droplet_to_macmini.sh: SSH_SUDO_PASSWORD required in ${ENV_FILE} for remote sudo tar from hermesuser paths." >&2

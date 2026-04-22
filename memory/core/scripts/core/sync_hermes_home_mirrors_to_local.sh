@@ -8,7 +8,7 @@
 # production tokens unless you understand duplicate-session risks.
 #
 # Droplet pull: same SSH + sudo tar stream as droplet_pull_hermes_home.sh (slim by default).
-#   Requires HERMES_DROPLET_ENV (default ~/.env/.env), SSH_KEY_FILE, SSH_SUDO_PASSWORD.
+#   Requires HERMES_DROPLET_ENV (default ~/.env/.env), SSH key (SSH_KEY_FILE / ~/.env/.ssh_droplet_key), SSH_SUDO_PASSWORD.
 #
 # Operator pull: rsync FROM mini TO local (reverse of rsync_hermes_home_to_operator.sh).
 #   Uses rsync --delete so the local mirror matches the mini (extra local files under
@@ -23,6 +23,12 @@
 #   ./scripts/core/sync_hermes_home_mirrors_to_local.sh --dry-run
 #
 set -euo pipefail
+
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=droplet_remote_venv.sh
+source "${_SCRIPTS_DIR}/droplet_remote_venv.sh"
+# shellcheck source=operator_remote_venv.sh
+source "${_SCRIPTS_DIR}/operator_remote_venv.sh"
 
 DROP_ROOT="${HERMES_MIRROR_DROPLET:-${HOME}/.hermes-droplet}"
 OP_ROOT="${HERMES_MIRROR_OPERATOR:-${HOME}/.hermes-operator}"
@@ -54,12 +60,11 @@ fi
 
 _sync_droplet() {
   local envf="${HERMES_DROPLET_ENV:-${HOME}/.env/.env}"
-  local keyf="${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}"
-  if [[ ! -f "$envf" || ! -f "$keyf" ]]; then
-    echo "sync: skipping droplet (missing ${envf} or ${keyf})" >&2
+  if [[ ! -f "$envf" ]]; then
+    echo "sync: skipping droplet (missing ${envf})" >&2
     return 0
   fi
-  local SSH_SUDO_PASSWORD="" _ALLOW_ENV_PASS_FROM_FILE=0 _RAW_SSH_PASSPHRASE=""
+  local keyf="" SSH_SUDO_PASSWORD="" _ALLOW_ENV_PASS_FROM_FILE=0 _RAW_SSH_PASSPHRASE=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
     key="${line%%=*}"
@@ -67,6 +72,7 @@ _sync_droplet() {
     case "$key" in
       SSH_PORT|SSH_PORT_DROPLET|SSH_USER|SSH_USER_DROPLET|SSH_TAILSCALE_IP|SSH_TAILSCALE_IP_DROPLET|\
 SSH_IP|SSH_IP_DROPLET|SSH_TAILSCALE_DNS_DROPLET|SSH_SUDO_PASSWORD) export "${key}=${val}" ;;
+      SSH_KEY_FILE|SSH_KEY_DROPLET) export "${key}=${val}" ;;
       HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
         case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
         ;;
@@ -79,6 +85,11 @@ SSH_IP|SSH_IP_DROPLET|SSH_TAILSCALE_DNS_DROPLET|SSH_SUDO_PASSWORD) export "${key
   if [[ -z "${SSH_IP:-}" && -n "${SSH_IP_DROPLET:-}" ]]; then export SSH_IP="${SSH_IP_DROPLET}"; fi
   if [[ -z "${SSH_USER:-}" && -n "${SSH_USER_DROPLET:-}" ]]; then export SSH_USER="${SSH_USER_DROPLET}"; fi
   if [[ -z "${SSH_PORT:-}" && -n "${SSH_PORT_DROPLET:-}" ]]; then export SSH_PORT="${SSH_PORT_DROPLET}"; fi
+
+  if ! keyf="$(droplet_resolve_ssh_key_file)"; then
+    echo "sync: skipping droplet (cannot resolve SSH key; set SSH_KEY_FILE in ${envf} or place ~/.env/.ssh_droplet_key)" >&2
+    return 0
+  fi
 
   HOST="${SSH_TAILSCALE_IP:-${SSH_IP:-${SSH_TAILSCALE_DNS_DROPLET:-}}}"
   REMOTE_USER="${SSH_USER:-}"
@@ -182,11 +193,11 @@ SSH_IP|SSH_IP_DROPLET|SSH_TAILSCALE_DNS_DROPLET|SSH_SUDO_PASSWORD) export "${key
 
 _sync_operator() {
   local envf="${HERMES_OPERATOR_ENV:-${HERMES_DROPLET_ENV:-${HOME}/.env/.env}}"
-  local keyf="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}}"
-  if [[ ! -f "$envf" || ! -f "$keyf" ]]; then
-    echo "sync: skipping operator (missing ${envf} or ${keyf})" >&2
+  if [[ ! -f "$envf" ]]; then
+    echo "sync: skipping operator (missing ${envf})" >&2
     return 0
   fi
+  local keyf="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-}}"
   local MACMINI_USER="" MACMINI_HOST="" MACMINI_PORT="52822"
   local _ALLOW_ENV_PASS_FROM_FILE=0 _RAW_SSH_PASSPHRASE=""
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -200,7 +211,8 @@ _sync_operator() {
         [[ "$val" != *"@"* ]] && MACMINI_HOST="${val}"
         ;;
       MACMINI_SSH_PORT) MACMINI_PORT="${val}" ;;
-      MACMINI_SSH_KEY) keyf="${val}" ;;
+      MACMINI_SSH_KEY) keyf="${val}"; export MACMINI_SSH_KEY="${val}" ;;
+      SSH_KEY_FILE) export SSH_KEY_FILE="${val}" ;;
       HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE|HERMES_DROPLET_ALLOW_ENV_PASSPHRASE)
         case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
         ;;
@@ -212,6 +224,15 @@ _sync_operator() {
     echo "sync: skipping operator (set MACMINI_SSH_HOST or SSH_IP_OPERATOR in ${envf})" >&2
     return 0
   }
+  if [[ -z "${keyf:-}" || ! -f "$keyf" ]]; then
+    if kf="$(operator_resolve_ssh_key_file)"; then
+      keyf="$kf"
+    fi
+  fi
+  if [[ ! -f "$keyf" ]]; then
+    echo "sync: skipping operator (cannot resolve SSH key; set MACMINI_SSH_KEY in ${envf} or place ~/.env/.ssh_operator_key)" >&2
+    return 0
+  fi
 
   _op_cleanup() {
     [[ -n "${_S_OP_PASS:-}" && -f "$_S_OP_PASS" ]] && rm -f "$_S_OP_PASS"

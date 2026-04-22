@@ -9,8 +9,12 @@
 #
 set -euo pipefail
 
+_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=operator_remote_venv.sh
+source "${_SCRIPTS_DIR}/operator_remote_venv.sh"
+
 ENV_FILE="${HERMES_OPERATOR_ENV:-${HERMES_DROPLET_ENV:-${HOME}/.env/.env}}"
-KEY_FILE="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}}"
+KEY_FILE="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-}}"
 DRY_RUN=()
 REMOVE_REPO=0
 for arg in "$@"; do
@@ -31,10 +35,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
   echo "rsync_hermes_home_to_operator.sh: missing env file ${ENV_FILE}" >&2
   exit 1
 fi
-if [[ ! -f "$KEY_FILE" ]]; then
-  echo "rsync_hermes_home_to_operator.sh: missing key ${KEY_FILE}" >&2
-  exit 1
-fi
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -47,7 +47,8 @@ while IFS= read -r line || [[ -n "$line" ]]; do
       [[ "$val" != *"@"* ]] && MACMINI_HOST="${val}"
       ;;
     MACMINI_SSH_PORT) MACMINI_PORT="${val}" ;;
-    MACMINI_SSH_KEY) KEY_FILE="${val}" ;;
+    MACMINI_SSH_KEY) KEY_FILE="${val}"; export MACMINI_SSH_KEY="${val}" ;;
+    SSH_KEY_FILE) export SSH_KEY_FILE="${val}" ;;
     HERMES_OPERATOR_ALLOW_ENV_PASSPHRASE)
       case "$val" in 1|true|TRUE|True|yes|YES) _ALLOW_ENV_PASS_FROM_FILE=1 ;; esac
       ;;
@@ -63,6 +64,15 @@ MACMINI_USER="${MACMINI_USER:-operator}"
   echo "rsync_hermes_home_to_operator.sh: set MACMINI_SSH_HOST (or SSH_IP_OPERATOR) in ${ENV_FILE}" >&2
   exit 1
 }
+if [[ -z "${KEY_FILE:-}" || ! -f "$KEY_FILE" ]]; then
+  if kf="$(operator_resolve_ssh_key_file)"; then
+    KEY_FILE="$kf"
+  fi
+fi
+if [[ ! -f "$KEY_FILE" ]]; then
+  echo "rsync_hermes_home_to_operator.sh: missing key (set MACMINI_SSH_KEY in ${ENV_FILE}, export SSH_KEY_FILE, or place ~/.env/.ssh_operator_key)" >&2
+  exit 1
+fi
 
 _op_cleanup() {
   [[ -n "${_OP_PASSFILE:-}" && -f "$_OP_PASSFILE" ]] && rm -f "$_OP_PASSFILE"

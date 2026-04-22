@@ -48,10 +48,11 @@ _droplet_wrap_cmd_with_venv() {
   printf '%s%s' "$pre" "$user_cmd"
 }
 
-# After ~/.env/.env is parsed, SSH_KEY_FILE may be set. Order: that path, then defaults.
+# After ~/.env/.env is parsed, SSH_KEY_FILE / SSH_KEY_DROPLET may be set.
+# Order: explicit path, then ~/.env/.ssh_droplet_key (common workstation layout), then ~/.ssh_key.
 droplet_resolve_ssh_key_file() {
   local f
-  for f in "${SSH_KEY_FILE:-}" "${HOME}/.env/.ssh_key" "${HOME}/.env/.ssh_droplet_key"; do
+  for f in "${SSH_KEY_FILE:-}" "${SSH_KEY_DROPLET:-}" "${HOME}/.env/.ssh_droplet_key" "${HOME}/.env/.ssh_key"; do
     if [[ -n "$f" && -f "$f" ]]; then
       printf '%s' "$f"
       return 0

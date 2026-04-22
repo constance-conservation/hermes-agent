@@ -23,3 +23,16 @@ _operator_interactive_shell_cmd() {
   # checkout venv from PATH. Use a dedicated --rcfile (operator_interactive.bashrc) so venv wins.
   _operator_wrap_cmd_with_venv 'repon="${HERMES_OPERATOR_REPO:-$HOME/hermes-agent}"; rcfile="$repon/scripts/core/operator_interactive.bashrc"; if [[ -f "$rcfile" ]]; then exec bash --rcfile "$rcfile" -i; else exec bash -i; fi'
 }
+
+# After ~/.env/.env is parsed, MACMINI_SSH_KEY / SSH_KEY_FILE may be set.
+# Order: explicit mini key, shared SSH_KEY_FILE, then ~/.env/.ssh_operator_key, then ~/.ssh_key.
+operator_resolve_ssh_key_file() {
+  local f
+  for f in "${MACMINI_SSH_KEY:-}" "${SSH_KEY_FILE:-}" "${HOME}/.env/.ssh_operator_key" "${HOME}/.env/.ssh_key"; do
+    if [[ -n "$f" && -f "$f" ]]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}

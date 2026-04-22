@@ -3,7 +3,7 @@
 #
 # Credentials: HERMES_OPERATOR_ENV or ~/.env/.env (same file as droplet is fine):
 #   MACMINI_SSH_USER (default operator), MACMINI_SSH_HOST, MACMINI_SSH_PORT (default 52822),
-#   optional MACMINI_SSH_KEY in the env file (else SSH_KEY_FILE or ~/.env/.ssh_key)
+#   optional MACMINI_SSH_KEY in the env file (else SSH_KEY_FILE or ~/.env/.ssh_operator_key or ~/.env/.ssh_key)
 #   optional MACMINI_SSH_LAN_IP — second hop when set (and differs from MACMINI_SSH_HOST). Default order is
 #     Tailscale (**MACMINI_SSH_HOST**) first, then LAN, unless MACMINI_SSH_TRY_LAN_FIRST=1 (home LAN-only path).
 #     Non-final hop: HERMES_OPERATOR_SSH_PRIMARY_CONNECT_TIMEOUT (default 20s); final:
@@ -31,7 +31,7 @@ _SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=operator_remote_venv.sh
 source "${_SCRIPTS_DIR}/operator_remote_venv.sh"
 
-KEY_FILE="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-${HOME}/.env/.ssh_key}}"
+KEY_FILE="${MACMINI_SSH_KEY:-${SSH_KEY_FILE:-}}"
 MACMINI_USER=""
 MACMINI_HOST=""
 MACMINI_PORT="52822"
@@ -91,8 +91,13 @@ MACMINI_USER="${MACMINI_USER:-operator}"
   echo "ssh_operator.sh: set MACMINI_SSH_HOST (or SSH_IP_OPERATOR) in ${ENV_FILE}" >&2
   exit 1
 }
+if [[ -z "${KEY_FILE:-}" || ! -f "$KEY_FILE" ]]; then
+  if kf="$(operator_resolve_ssh_key_file)"; then
+    KEY_FILE="$kf"
+  fi
+fi
 if [[ ! -f "$KEY_FILE" ]]; then
-  echo "ssh_operator.sh: missing key ${KEY_FILE} (set MACMINI_SSH_KEY in ${ENV_FILE} or export MACMINI_SSH_KEY / SSH_KEY_FILE)" >&2
+  echo "ssh_operator.sh: missing key ${KEY_FILE:-<unset>} (set MACMINI_SSH_KEY in ${ENV_FILE}, export MACMINI_SSH_KEY / SSH_KEY_FILE, or install ~/.env/.ssh_operator_key)" >&2
   exit 1
 fi
 
