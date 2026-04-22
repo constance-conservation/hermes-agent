@@ -97,3 +97,9 @@ profiles:
     toolsets: [terminal, file, web]
     agent_max_turns: 60
     role_prompt: policies/core/governance/role-prompts/project-lead-template.md
+
+  # --- Project lead (moonshot-engine) ---
+  - name: project-lead-moonshot-engine
+    toolsets: [terminal, file, web]
+    agent_max_turns: 60
+    role_prompt: policies/core/governance/role-prompts/project-lead-template.md
